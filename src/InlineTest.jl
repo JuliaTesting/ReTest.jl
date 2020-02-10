@@ -26,19 +26,22 @@ macro addtest(args...)
     Expr(:call, :addtest, args, __module__)
 end
 
-function runtests(m::Module)
-    tss = tests(m)
-    tsm = :(@testset $("Tests for module $m") begin
-               $(tss...)
-           end)
-    Core.eval(m, tsm)
+function runtests(m::Module; wrap::Bool=false)
+    Core.eval(m,
+              if wrap
+                  :(@testset $("Tests for module $m") begin
+                    $(tests(m)...)
+                    end)
+              else
+                  Expr(:block, tests(m)...)
+              end)
     nothing
 end
 
-function runtests()
+function runtests(; wrap::Bool=true)
     foreach(values(Base.loaded_modules)) do m
         if isdefined(m, INLINE_TEST[]) # will automatically skip InlineTest and InlineTest.InlineTestTest
-            ts = runtests(m)
+            ts = runtests(m, wrap=wrap)
         end
     end
 end
@@ -57,6 +60,7 @@ end # module InlineTestTest
     @assert typeof(@__MODULE__) == Module
     @test 1 != 2
     runtests(InlineTestTest)
+    runtests(InlineTestTest, wrap=true)
 end
 
 end # module InlineTest
