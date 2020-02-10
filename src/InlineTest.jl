@@ -5,11 +5,16 @@ export @addtest, runtests, @testset, @test, @test_throws
 using Test: @test, @test_throws, @testset
 import Test
 
+const INLINE_TEST = Ref{Symbol}(:__INLINE_TEST__)
+
+__init__() = INLINE_TEST[] = gensym()
+
 function tests(m)
-    if !isdefined(m, :__INLINE_TESTS__)
-        @eval m __INLINE_TESTS__ = Dict{AbstractString, Expr}()
+    inline_test::Symbol = m ∈ (InlineTest, InlineTest.InlineTestTest) ? :__INLINE_TEST__ : INLINE_TEST[]
+    if !isdefined(m, inline_test)
+        @eval m $inline_test = Dict{AbstractString, Expr}()
     end
-    m.__INLINE_TESTS__
+    getfield(m, inline_test)
 end
 
 function addtest(args::Tuple, m::Module)
@@ -42,7 +47,7 @@ end
 
 function runtests()
     foreach(values(Base.loaded_modules)) do m
-        if isdefined(m, :__INLINE_TESTS__) && m != InlineTest && m != InlineTest.InlineTestTest
+        if isdefined(m, INLINE_TEST[]) # will automatically skip InlineTest and InlineTest.InlineTestTest
             ts = runtests(m)
         end
     end
