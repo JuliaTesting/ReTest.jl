@@ -14,9 +14,9 @@ end
 
 function addtest(args::Tuple, m::Module)
     n = findfirst(a -> a isa String, args)
-    desc = n == nothing ? nothing : args[n]
-    desc != nothing && haskey(tests(m), desc) && @warn("Test $desc already defined for module $(string(m)), overwriting")
-    if desc == nothing
+    desc = n === nothing ? nothing : args[n]
+    desc !== nothing && haskey(tests(m), desc) && @warn("Test $desc already defined for module $(string(m)), overwriting")
+    if desc === nothing
         i = 1
         while haskey(tests(m), "anonymous test $i")
             i += 1
