@@ -22,10 +22,31 @@ function addtest(args::Tuple, m::Module)
     nothing
 end
 
+"""
+    @addtest args...
+
+Similar to `@testset args...`, but the contained tests are not run immediately,
+and are instead stored for later execution, triggered by `runtests()`.
+Invocations of `@addtest` should appear only at the top level, and not be nested
+(`@testset` can be nested within `@addtest`).
+Internally, `@addtest` is converted to `@testset` at execution time.
+"""
 macro addtest(args...)
     Expr(:call, :addtest, args, __module__)
 end
 
+"""
+    runtests([m::Module]; [wrap::Bool])
+
+Run all the tests declared in `@addtest` blocks, within `m` if specified,
+or within all currently loaded modules otherwise.
+The `wrap` keyword specifies whether the collection of `@testset` blocks derived
+from `@addtest` declarations should be grouped within a top-level `@testset`.
+The default is `wrap=false` when `m` is specified, `true` otherwise.
+
+Note: this function executes each `@testset` block using `eval` *within* the module
+in which the corresponding `@addtest` block was written (e.g. `m`, when specified).
+"""
 function runtests(m::Module; wrap::Bool=false)
     Core.eval(m,
               if wrap
