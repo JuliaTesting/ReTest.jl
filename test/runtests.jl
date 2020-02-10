@@ -1,0 +1,3 @@
+using InlineTest
+
+runtests(InlineTest)
