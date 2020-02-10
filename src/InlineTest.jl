@@ -12,23 +12,13 @@ __init__() = INLINE_TEST[] = gensym()
 function tests(m)
     inline_test::Symbol = m ∈ (InlineTest, InlineTest.InlineTestTest) ? :__INLINE_TEST__ : INLINE_TEST[]
     if !isdefined(m, inline_test)
-        @eval m $inline_test = Dict{AbstractString, Expr}()
+        @eval m $inline_test = Expr[]
     end
     getfield(m, inline_test)
 end
 
 function addtest(args::Tuple, m::Module)
-    n = findfirst(a -> a isa String, args)
-    desc = n === nothing ? nothing : args[n]
-    desc !== nothing && haskey(tests(m), desc) && @warn("Test $desc already defined for module $(string(m)), overwriting")
-    if desc === nothing
-        i = 1
-        while haskey(tests(m), "anonymous test $i")
-            i += 1
-        end
-        desc = "anonymous test $i"
-    end
-    tests(m)[desc] = :(@testset($(args...)))
+    push!(tests(m), :(@testset($(args...))))
     nothing
 end
 
@@ -37,7 +27,7 @@ macro addtest(args...)
 end
 
 function runtests(m::Module)
-    tss = collect(values(tests(m)))
+    tss = tests(m)
     tsm = :(@testset $("Tests for module $m") begin
                $(tss...)
            end)
