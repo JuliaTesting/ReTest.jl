@@ -6,7 +6,12 @@ using Test: Test, @test, @test_throws
 
 const INLINE_TEST = Ref{Symbol}(:__INLINE_TEST__)
 
+include("testset.jl")
+
+using .Testset: Testset, @testsetr
+
 __init__() = INLINE_TEST[] = gensym()
+
 
 function tests(m)
     inline_test::Symbol = m ∈ (InlineTest, InlineTest.InlineTestTest) ? :__INLINE_TEST__ : INLINE_TEST[]
@@ -16,18 +21,31 @@ function tests(m)
     getfield(m, inline_test)
 end
 
-replacetestset(x) = x
+replacetestset(x) = x, false
 
-# replace unqualified `@testset` by Test.@testset
+# replace unqualified `@testset` by @testsetr
+# return also (as 2nd element) whether the expression contains a (possibly nested) @testset
+# (if a testset is "final", i.e. without nested testsets, then the Regex matching logic
+# is different: we then don't use "partial matching")
 function replacetestset(x::Expr)
-    x.head === :macrocall && x.args[1] === Symbol("@testset") ?
-        Expr(:macrocall, Expr(:., :Test, QuoteNode(Symbol("@testset"))), map(replacetestset, x.args[2:end])...) :
-        Expr(x.head, map(replacetestset, x.args)...)
+    if x.head === :macrocall && x.args[1] === Symbol("@testset")
+        body  = map(replacetestset, x.args[2:end])
+        final = !any(last, body)
+        (Expr(:let,
+              :($(Testset.FINAL[]) = $final),
+              Expr(:macrocall, Expr(:., :InlineTest, QuoteNode(Symbol("@testsetr"))),
+                   map(first, body)...)),
+         true)
+    else
+        body = map(replacetestset, x.args)
+        (Expr(x.head, map(first, body)...),
+         any(last, body))
+    end
 end
 
 function addtest(args::Tuple, m::Module)
-    args = map(replacetestset, args)
-    push!(tests(m), :(InlineTest.Test.@testset($(args...))))
+    ts, _ = replacetestset(:(@testset($(args...))))
+    push!(tests(m), ts)
     nothing
 end
 
@@ -56,15 +74,18 @@ The default is `wrap=false` when `m` is specified, `true` otherwise.
 Note: this function executes each (top-level) `@testset` block using `eval` *within* the module
 in which it was written (e.g. `m`, when specified).
 """
-function runtests(m::Module; wrap::Bool=false)
-    Core.eval(m,
-              if wrap
-                  :(InlineTest.Test.@testset $("Tests for module $m") begin
-                    $(tests(m)...)
-                    end)
-              else
-                  Expr(:block, tests(m)...)
-              end)
+function runtests(m::Module, regex::Regex = r""; wrap::Bool=false)
+    partial = partialize(regex)
+    ex = Expr(:let,
+              Expr(:(=), Testset.REGEX[], (partial, regex)),
+              Expr(:block, tests(m)...))
+
+    if wrap
+        ex = :(InlineTest.Test.@testset $("Tests for module $m") begin
+               $ex
+               end)
+    end
+    Core.eval(m, ex)
     nothing
 end
 
@@ -76,6 +97,13 @@ function runtests(; wrap::Bool=true)
     end
 end
 
+function partialize(r::Regex)
+    if r.match_options & (Base.PCRE.PARTIAL_HARD | Base.PCRE.PARTIAL_SOFT) == 0
+        Regex(r.pattern, r.compile_options, r.match_options | Base.PCRE.PARTIAL_SOFT)
+    else
+        r
+    end
+end
 
 module InlineTestTest
 
