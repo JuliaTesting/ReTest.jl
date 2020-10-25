@@ -104,7 +104,7 @@ function runtests(m::Module, regex::Regex = r""; wrap::Bool=false)
     else
         for (ts, desc, final) in tests(m)
             # bypass evaluation if we know statically that testset won't be run
-            if desc isa String && final && !occursin(regex, desc) # TODO: handle non-final case
+            if desc isa String && !Testset.partialoccursin((partial, regex)[1+final], desc)
                 continue
             end
             # it's faster to evel in a loop than to eval a block containing tests(m)
