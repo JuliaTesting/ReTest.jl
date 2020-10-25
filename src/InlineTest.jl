@@ -1,8 +1,22 @@
 module InlineTest
 
-export runtests, @testset, @test, @test_throws, Test
+export runtests, @testset
 
-using Test: Test, @test, @test_throws
+# from Test:
+export Test,
+    @test, @test_throws, @test_broken, @test_skip,
+    @test_warn, @test_nowarn,
+    @test_logs, @test_deprecated,
+    @inferred,
+    detect_ambiguities, detect_unbound_args
+
+using Test: Test,
+    @test, @test_throws, @test_broken, @test_skip,
+    @test_warn, @test_nowarn,
+    @test_logs, @test_deprecated,
+    @inferred,
+    detect_ambiguities, detect_unbound_args
+
 
 const INLINE_TEST = Ref{Symbol}(:__INLINE_TEST__)
 
