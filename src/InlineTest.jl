@@ -76,16 +76,20 @@ in which it was written (e.g. `m`, when specified).
 """
 function runtests(m::Module, regex::Regex = r""; wrap::Bool=false)
     partial = partialize(regex)
-    ex = Expr(:let,
-              Expr(:(=), Testset.REGEX[], (partial, regex)),
-              Expr(:block, tests(m)...))
-
     if wrap
-        ex = :(InlineTest.Test.@testset $("Tests for module $m") begin
-               $ex
-               end)
+        Core.eval(m, :(InlineTest.Test.@testset $("Tests for module $m") begin
+                           let $(Testset.REGEX[]) = ($partial, $regex)
+                               $(tests(m)...)
+                           end
+                       end))
+    else
+        for ts in tests(m)
+            # it's faster to evel in a loop than to eval a block containing tests(m)
+            Core.eval(m, :(let $(Testset.REGEX[]) = ($partial, $regex)
+                               $ts
+                           end))
+        end
     end
-    Core.eval(m, ex)
     nothing
 end
 
