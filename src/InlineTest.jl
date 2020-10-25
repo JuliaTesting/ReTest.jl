@@ -16,7 +16,7 @@ __init__() = INLINE_TEST[] = gensym()
 function tests(m)
     inline_test::Symbol = m ∈ (InlineTest, InlineTest.InlineTestTest) ? :__INLINE_TEST__ : INLINE_TEST[]
     if !isdefined(m, inline_test)
-        @eval m $inline_test = Expr[]
+        @eval m $inline_test = Tuple{Expr,Union{String,Missing},Bool}[]
     end
     getfield(m, inline_test)
 end
@@ -24,9 +24,10 @@ end
 replacetestset(x) = x, false
 
 # replace unqualified `@testset` by @testsetr
-# return also (as 2nd element) whether the expression contains a (possibly nested) @testset
+# return also (as 3nd element) whether the expression contains a (possibly nested) @testset
 # (if a testset is "final", i.e. without nested testsets, then the Regex matching logic
 # is different: we then don't use "partial matching")
+# the 2nd returned element is whether the testset is final (used only in `addtest`)
 function replacetestset(x::Expr)
     if x.head === :macrocall && x.args[1] === Symbol("@testset")
         body  = map(replacetestset, x.args[2:end])
@@ -35,17 +36,21 @@ function replacetestset(x::Expr)
               :($(Testset.FINAL[]) = $final),
               Expr(:macrocall, Expr(:., :InlineTest, QuoteNode(Symbol("@testsetr"))),
                    map(first, body)...)),
-         true)
+         final, true)
     else
         body = map(replacetestset, x.args)
         (Expr(x.head, map(first, body)...),
-         any(last, body))
+         missing, any(last, body)) # missing: a non-testset doesn't have a "final" attribute...
     end
 end
 
 function addtest(args::Tuple, m::Module)
-    ts, _ = replacetestset(:(@testset($(args...))))
-    push!(tests(m), ts)
+    desc = args[1] isa String ? args[1] : missing
+    # args[1] might not be a string if none was passed, or for a testset-for with
+    # interpolated loop variable (in which case it's difficult to statically know the
+    # final description)
+    ts, final, _ = replacetestset(:(@testset($(args...))))
+    push!(tests(m), (ts, desc, final))
     nothing
 end
 
@@ -79,11 +84,15 @@ function runtests(m::Module, regex::Regex = r""; wrap::Bool=false)
     if wrap
         Core.eval(m, :(InlineTest.Test.@testset $("Tests for module $m") begin
                            let $(Testset.REGEX[]) = ($partial, $regex)
-                               $(tests(m)...)
+                               $(map(first, tests(m))...)
                            end
                        end))
     else
-        for ts in tests(m)
+        for (ts, desc, final) in tests(m)
+            # bypass evaluation if we know statically that testset won't be run
+            if desc isa String && final && !occursin(regex, desc) # TODO: handle non-final case
+                continue
+            end
             # it's faster to evel in a loop than to eval a block containing tests(m)
             Core.eval(m, :(let $(Testset.REGEX[]) = ($partial, $regex)
                                $ts
