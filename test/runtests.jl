@@ -72,3 +72,4 @@ check(".*h1", ["c", "f1", "h1"])
 check(".*h\$", ["c", "f1"])
 
 runtests(M, wrap=true) # TODO: more precise tests
+runtests(M, wrap=false)

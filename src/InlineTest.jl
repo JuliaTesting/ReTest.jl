@@ -27,15 +27,22 @@ using .Testset: Testset, @testsetr
 __init__() = INLINE_TEST[] = gensym()
 
 
+struct TestsetExpr
+    desc::Union{String,Expr}
+    loops::Union{Expr,Nothing}
+    body::Expr
+    final::Bool
+end
+
 function tests(m)
     inline_test::Symbol = m ∈ (InlineTest, InlineTest.InlineTestTest) ? :__INLINE_TEST__ : INLINE_TEST[]
     if !isdefined(m, inline_test)
-        @eval m $inline_test = Tuple{Expr,Union{String,Missing},Bool}[]
+        @eval m $inline_test = []
     end
     getfield(m, inline_test)
 end
 
-replacetestset(x) = x, false
+replacetestset(x) = (x, missing, false)
 
 # replace unqualified `@testset` by @testsetr
 # return also (as 3nd element) whether the expression contains a (possibly nested) @testset
@@ -50,21 +57,41 @@ function replacetestset(x::Expr)
               :($(Testset.FINAL[]) = $final),
               Expr(:macrocall, Expr(:., :InlineTest, QuoteNode(Symbol("@testsetr"))),
                    map(first, body)...)),
-         final, true)
+         final,
+         true)
     else
         body = map(replacetestset, x.args)
         (Expr(x.head, map(first, body)...),
-         missing, any(last, body)) # missing: a non-testset doesn't have a "final" attribute...
+         missing, # missing: a non-testset doesn't have a "final" attribute...
+         any(last, body))
     end
 end
 
 function addtest(args::Tuple, m::Module)
-    desc = args[1] isa String ? args[1] : missing
-    # args[1] might not be a string if none was passed, or for a testset-for with
-    # interpolated loop variable (in which case it's difficult to statically know the
-    # final description)
-    ts, final, _ = replacetestset(:(@testset($(args...))))
-    push!(tests(m), (ts, desc, final))
+    length(args) == 2 || error("unsupported @testset")
+
+    desc = args[1]
+    desc isa String || Meta.isexpr(desc, :string) || error("unsupported @testset")
+
+    body = args[2]
+    isa(body, Expr) || error("Expected begin/end block or for loop as argument to @testset")
+    if body.head === :for
+        isloop = true
+    elseif body.head === :block
+        isloop = false
+    else
+        error("Expected begin/end block or for loop as argument to @testset")
+    end
+
+    if isloop
+        loops = body.args[1]
+        expr, _, has_testset = replacetestset(body.args[2])
+        final = !has_testset
+        push!(tests(m), TestsetExpr(desc, loops, expr, final))
+    else
+        ts, final, _ = replacetestset(:(@testset $desc $body))
+        push!(tests(m), TestsetExpr(desc, nothing, ts, final))
+    end
     nothing
 end
 
@@ -95,25 +122,64 @@ in which it was written (e.g. `m`, when specified).
 """
 function runtests(m::Module, regex::Regex = r""; wrap::Bool=false)
     partial = partialize(regex)
+    matches(desc, final) = Testset.partialoccursin((partial, regex)[1+final], desc)
+
     if wrap
         Core.eval(m, :(InlineTest.Test.@testset $("Tests for module $m") begin
-                           let $(Testset.REGEX[]) = ($partial, $regex)
-                               $(map(first, tests(m))...)
-                           end
+                           $(map(ts -> wrap_ts(partial, regex, ts), tests(m))...)
                        end))
     else
-        for (ts, desc, final) in tests(m)
-            # bypass evaluation if we know statically that testset won't be run
-            if desc isa String && !Testset.partialoccursin((partial, regex)[1+final], desc)
-                continue
-            end
+        for ts in tests(m)
             # it's faster to evel in a loop than to eval a block containing tests(m)
-            Core.eval(m, :(let $(Testset.REGEX[]) = ($partial, $regex)
-                               $ts
-                           end))
+            desc = ts.desc
+            if ts.loops === nothing # begin/end testset
+                @assert desc isa String
+                # bypass evaluation if we know statically that testset won't be run
+                matches(desc, ts.final) ||
+                    continue
+                Core.eval(m, wrap_ts(partial, regex, ts))
+            else # for-loop testset
+                loops = ts.loops
+                xs = Core.eval(m, loops.args[2]) # loop values
+                # we eval the description to a string for each values, and if at least one matches
+                # the filtering-regex, then we must instantiate the testset (otherwise, it's skipped)
+                skip = true
+                for x in xs
+                    # TODO: do not assign loop.args[1] in m ?
+                    Core.eval(m, Expr(:(=), loops.args[1], x))
+                    descx = Core.eval(m, desc)
+                    if matches(descx, ts.final)
+                        skip = false
+                        break
+                    end
+                end
+                skip && continue
+                Core.eval(m, wrap_ts(partial, regex, ts, xs))
+            end
         end
     end
     nothing
+end
+
+function wrap_ts(partial, regex, ts::TestsetExpr, loopvals=nothing)
+    if ts.loops === nothing
+        quote
+            let $(Testset.REGEX[]) = ($partial, $regex)
+                $(ts.body)
+            end
+        end
+    else
+        loopvals = something(loopvals, ts.loops.args[2])
+        quote
+            let $(Testset.REGEX[]) = ($partial, $regex),
+                $(Testset.FINAL[]) = $(ts.final)
+
+                InlineTest.@testsetr $(ts.desc) for $(ts.loops.args[1]) in $loopvals
+                    $(ts.body)
+                end
+            end
+        end
+    end
 end
 
 function runtests(; wrap::Bool=true)
