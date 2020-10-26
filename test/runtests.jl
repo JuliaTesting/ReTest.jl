@@ -120,3 +120,35 @@ N.check(".*j1", ["i", "j", "l1"])
 N.check(".*j/1", ["i", "j", "l1"])
 N.check("^/i/j0", ["i"])
 N.check("^/i/l10", ["i"])
+
+module P
+using InlineTest
+
+RUN = []
+
+# testing non-final non-toplevel testsets
+@testset "a" begin
+    push!(RUN, "a")
+    @test true
+
+    @testset "b" begin
+        push!(RUN, "b")
+        @test true
+    end
+
+    @testset "b|c" begin
+        push!(RUN, "b|c")
+        @test true
+    end
+end
+
+function check(rx, list)
+    empty!(RUN)
+    runtests(P, rx)
+    @test sort(RUN) == sort(list)
+end
+end
+
+import .P # test InlineTest's wrapping of non-regex patterns
+P.check("b", ["a", "b", "b|c"]) # an implicit prefix r".*" is added
+P.check("b|c", ["a", "b|c"]) # "b" is not matched

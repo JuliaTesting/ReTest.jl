@@ -109,18 +109,47 @@ macro testset(args...)
 end
 
 """
-    runtests([m::Module]; [wrap::Bool])
+    runtests([m::Module], pattern = r""; [wrap::Bool])
 
 Run all the tests declared in `@testset` blocks, within `m` if specified,
 or within all currently loaded modules otherwise.
-The `wrap` keyword specifies whether the collection of `@testset` blocks derived
-from `@testset` declarations should be grouped within a top-level `@testset`.
+The `wrap` keyword specifies whether the collection of `@testset` expressions
+should be grouped according to the parent modules within a top-level `@testset`.
 The default is `wrap=false` when `m` is specified, `true` otherwise.
 
-Note: this function executes each (top-level) `@testset` block using `eval` *within* the module
-in which it was written (e.g. `m`, when specified).
+It's possible to filter run testsets by specifying `pattern`: the "subject" of a
+testset is the concatenation of the subject of its parent `@testset`, if any,
+with `"/\$description"` where `description` is the testset's description.
+For example:
+```julia
+@testset "a" begin # subject == "/a"
+    @testset "b" begin # subject is "/a/b"
+    end
+    @testset "c\$i" for i=1:2 # subjects are "/a/c1" & "/a/c2"
+    end
+end
+```
+A testset is guaranteed to run only when its parent's subject "partially matches"
+`pattern::Regex` (in PCRE2 parlance, i.e. `subject` might be the prefix of a string
+matched by `pattern`) and its subject matches `pattern`.
+
+If the passed `pattern` is a string, then it is wrapped in a `Regex` prefixed with
+`".*"`, and must match literally the subjects.
+This means for example that `"a|b"` will match a subject like `"a|b"` but not like `"a"`.
+The `".*"` prefix is intended to allow matching subjects of nested testsets,
+e.g. in the example above, `r".*b"` partially matches the subject `"/a"` and
+matches the subject `"/a/b"` (so the corresponding nested testset is run),
+whereas `r"b"` does not partially match `"/a"`, even if it matches `"/a/b"`,
+so the testset is not run.
+
+Note: this function executes each (top-level) `@testset` block using `eval` *within* the
+module in which it was written (e.g. `m`, when specified).
 """
-function runtests(m::Module, regex::Regex = r""; wrap::Bool=false)
+function runtests(m::Module, pattern::Union{AbstractString,Regex} = r""; wrap::Bool=false)
+    regex = pattern isa Regex ?
+        pattern :
+        r".*" * pattern
+
     partial = partialize(regex)
     matches(desc, final) = Testset.partialoccursin((partial, regex)[1+final],
                                                    string('/', desc, final ? "" : "/"))
