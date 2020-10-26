@@ -58,10 +58,12 @@ using .M: check
 check("a", ["a"])
 check("a1", []) # testset is "final", so we do a full match
 check("b", ["b1", "b2"])
+check("/b", ["b1", "b2"])
 check("b1", ["b1"])
 check("c1", ["c"]) # "c" is partially matched, but nothing fully matches afterwards
 check("c/d1", ["c"])
 check("c/d", ["c", "d"])
+check("/c", ["c", "d", "e1", "e2"])
 check(".*d", ["c", "d", "f1"])
 check(".*(e1|e2)", ["c", "e1", "e2", "f1"])
 check("f1", ["f1", "g", "h1", "h2"])
