@@ -56,8 +56,10 @@ function testset_beginend(args, tests, source)
     # finally removing the testset and giving it a chance to take
     # action (such as reporting the results)
     ex = quote
-        local current_str = get_testset_string() * '/' * $desc
-        local rx = $(esc(REGEX[]))[1 + $(esc(FINAL[]))]
+        local final = $(esc(FINAL[]))
+        local current_str = string(get_testset_string(), '/', $desc,
+                                   final ? "" : "/")
+        local rx = $(esc(REGEX[]))[1 + final]
         if partialoccursin(rx, current_str)
             _check_testset($testsettype, $(QuoteNode(testsettype.args[1])))
             local ret
@@ -133,8 +135,11 @@ function testset_forloop(args, testloop, source)
     # wrapped in the outer loop provided by the user
     tests = testloop.args[2]
     blk = quote
-        local current_str = get_testset_string(!first_iteration) * '/' * $desc
-        local rx = $(esc(REGEX[]))[1 + $(esc(FINAL[]))]
+        local final = $(esc(FINAL[]))
+        local current_str = string(get_testset_string(!first_iteration), '/', $desc,
+                                   final ? "" : "/")
+
+        local rx = $(esc(REGEX[]))[1 + final]
         if partialoccursin(rx, current_str)
             _check_testset($testsettype, $(QuoteNode(testsettype.args[1])))
             # Trick to handle `break` and `continue` in the test code before

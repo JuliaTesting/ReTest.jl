@@ -58,13 +58,13 @@ using .M: check
 check("a", ["a"])
 check("a1", []) # testset is "final", so we do a full match
 check("b", ["b1", "b2"])
-check("/b", ["b1", "b2"])
+check("/b", ["b1", "b2", "c", "f1"])
 check("b1", ["b1"])
 check("c1", []) # "c1" is *not* partially matched against "/c/"
 check("c/1", ["c"]) # "c" is partially matched, but nothing fully matches afterwards
 check("c/d1", ["c"])
 check("c/d", ["c", "d"])
-check("/c", ["c", "d", "e1", "e2"])
+check("/c", ["c", "d", "e1", "e2", "f1"])
 check(".*d", ["c", "d", "f1"])
 check(".*(e1|e2)", ["c", "e1", "e2", "f1"])
 check("f1", ["f1", "g", "h1", "h2"])
@@ -76,3 +76,47 @@ check(".*h\$", ["c", "f1"])
 
 runtests(M, wrap=true) # TODO: more precise tests
 runtests(M, wrap=false)
+
+module N
+using InlineTest
+
+RUN = []
+
+# testing non-final non-toplevel testsets
+@testset "i" begin
+    push!(RUN, "i")
+    @test true
+
+    @testset "j" begin
+        push!(RUN, "j")
+        @test true
+
+        @testset "k" begin
+            push!(RUN, "k")
+            @test true
+        end
+    end
+
+    @testset "l$i" for i=1:1
+        push!(RUN, "l$i")
+        @test true
+
+        @testset "m" begin
+            push!(RUN, "m")
+            @test true
+        end
+    end
+end
+
+function check(rx, list)
+    empty!(RUN)
+    runtests(N, Regex(rx))
+    @test sort(RUN) == sort(list)
+end
+end
+
+import .N
+N.check(".*j1", ["i", "j", "l1"])
+N.check(".*j/1", ["i", "j", "l1"])
+N.check("^/i/j0", ["i"])
+N.check("^/i/l10", ["i"])
