@@ -122,7 +122,8 @@ in which it was written (e.g. `m`, when specified).
 """
 function runtests(m::Module, regex::Regex = r""; wrap::Bool=false)
     partial = partialize(regex)
-    matches(desc, final) = Testset.partialoccursin((partial, regex)[1+final], '/'*desc)
+    matches(desc, final) = Testset.partialoccursin((partial, regex)[1+final],
+                                                   string('/', desc, final ? "" : "/"))
 
     if wrap
         Core.eval(m, :(InlineTest.Test.@testset $("Tests for module $m") begin

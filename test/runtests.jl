@@ -60,7 +60,8 @@ check("a1", []) # testset is "final", so we do a full match
 check("b", ["b1", "b2"])
 check("/b", ["b1", "b2"])
 check("b1", ["b1"])
-check("c1", ["c"]) # "c" is partially matched, but nothing fully matches afterwards
+check("c1", []) # "c1" is *not* partially matched against "/c/"
+check("c/1", ["c"]) # "c" is partially matched, but nothing fully matches afterwards
 check("c/d1", ["c"])
 check("c/d", ["c", "d"])
 check("/c", ["c", "d", "e1", "e2"])
