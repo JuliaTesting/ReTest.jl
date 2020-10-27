@@ -152,3 +152,6 @@ end
 import .P # test InlineTest's wrapping of non-regex patterns
 P.check("b", ["a", "b", "b|c"]) # an implicit prefix r".*" is added
 P.check("b|c", ["a", "b|c"]) # "b" is not matched
+
+runtests()
+runtests(r"/a") # just test that a regex can be passed

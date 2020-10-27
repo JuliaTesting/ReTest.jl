@@ -212,10 +212,11 @@ function wrap_ts(partial, regex, ts::TestsetExpr, loopvals=nothing)
     end
 end
 
-function runtests(; wrap::Bool=true)
+function runtests(pattern::Union{AbstractString,Regex} = r""; wrap::Bool=true)
     foreach(values(Base.loaded_modules)) do m
-        if isdefined(m, INLINE_TEST[]) # will automatically skip InlineTest and InlineTest.InlineTestTest
-            ts = runtests(m, wrap=wrap)
+        if isdefined(m, INLINE_TEST[])
+            # will automatically skip InlineTest and InlineTest.InlineTestTest
+            runtests(m, pattern, wrap=wrap)
         end
     end
 end
