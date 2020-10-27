@@ -154,4 +154,4 @@ P.check("b", ["a", "b", "b|c"]) # an implicit prefix r".*" is added
 P.check("b|c", ["a", "b|c"]) # "b" is not matched
 
 runtests()
-runtests(r"/a") # just test that a regex can be passed
+runtests(r"^/f1") # just test that a regex can be passed

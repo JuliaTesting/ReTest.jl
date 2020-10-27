@@ -19,6 +19,7 @@ using Test: Test,
 
 
 const INLINE_TEST = Ref{Symbol}(:__INLINE_TEST__)
+const TESTED_MODULES = Module[]
 
 include("testset.jl")
 
@@ -34,10 +35,11 @@ struct TestsetExpr
     final::Bool
 end
 
-function tests(m)
+function tests(m::Module)
     inline_test::Symbol = m ∈ (InlineTest, InlineTest.InlineTestTest) ? :__INLINE_TEST__ : INLINE_TEST[]
     if !isdefined(m, inline_test)
         @eval m $inline_test = []
+        push!(TESTED_MODULES, m)
     end
     getfield(m, inline_test)
 end
@@ -213,7 +215,7 @@ function wrap_ts(partial, regex, ts::TestsetExpr, loopvals=nothing)
 end
 
 function runtests(pattern::Union{AbstractString,Regex} = r""; wrap::Bool=true)
-    foreach(values(Base.loaded_modules)) do m
+    foreach(TESTED_MODULES) do m
         if isdefined(m, INLINE_TEST[])
             # will automatically skip InlineTest and InlineTest.InlineTestTest
             runtests(m, pattern, wrap=wrap)
