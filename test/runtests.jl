@@ -156,5 +156,16 @@ if VERSION >= v"1.3"
     P.check("b|c", ["a", "b|c"]) # "b" is not matched
 end
 
+RUN = []
+@testset "toplevel" begin
+    # this tests that the testset is run exactly once
+    # Main is special here, as it's both in Base.loaded_modules
+    # and it gets registered automatically in ReTest.TESTED_MODULES
+    push!(RUN, "toplevel")
+    @test true
+end
+
 runtests()
+@test RUN == ["toplevel"]
+
 runtests(r"^/f1") # just test that a regex can be passed

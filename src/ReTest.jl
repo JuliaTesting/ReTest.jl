@@ -221,15 +221,13 @@ function wrap_ts(partial, regex, ts::TestsetExpr, loopvals=nothing)
 end
 
 function runtests(pattern::Union{AbstractString,Regex} = r""; wrap::Bool=true)
-    for mods in (values(Base.loaded_modules), TESTED_MODULES)
-        # TESTED_MODULES is not up-to-date w.r.t. package modules which have
-        # precompilation, so we have to also look in Base.loaded_modules
-        # TODO: look recursively in "loaded modules" which use ReTest for sub-modules
-        foreach(mods) do m
-            if isdefined(m, INLINE_TEST[])
-                # will automatically skip ReTest and ReTest.ReTestTest
-                runtests(m, pattern, wrap=wrap)
-            end
+    # TESTED_MODULES is not up-to-date w.r.t. package modules which have
+    # precompilation, so we have to also look in Base.loaded_modules
+    # TODO: look recursively in "loaded modules" which use ReTest for sub-modules
+    for m in unique(Iterators.flatten((values(Base.loaded_modules), TESTED_MODULES)))
+        if isdefined(m, INLINE_TEST[])
+            # will automatically skip ReTest and ReTest.ReTestTest
+            runtests(m, pattern, wrap=wrap)
         end
     end
 end
