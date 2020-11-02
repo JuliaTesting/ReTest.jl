@@ -4,19 +4,19 @@
 
 This package allows:
 
-1. defining tests in source files, whose execution is deferred and triggered on demand.
+1. Defining tests in source files, whose execution is deferred and triggered on demand.
 
    This is useful when one likes to have definitions of methods and
    corresponding tests close to each other. This is also useful for code which
    is not (yet) organized as a package, and where one doesn't want to maintain a
    separate set of files for tests.
 
-2. filtering run testsets with a `Regex`, which is matched against the
+2. Filtering run testsets with a `Regex`, which is matched against the
    descriptions of testsets.
 
    This is useful for running only part of the test suite of a package. For
    example, if you made a change related to addition, and included "addition" in
-   the description of the corresponding tetstsets, you can easily run only these
+   the description of the corresponding testsets, you can easily run only these
    tests.
 
    Note that a [pull request](https://github.com/JuliaLang/julia/pull/33672)
@@ -24,10 +24,10 @@ This package allows:
    `Test.@testset`.
 
 The exported `ReTest.@testset` macro can be used as a direct replacement for
-`Test.@testset`, and `runtests()` has to be called for the tests to be executed.
-See the docstrings (reproduced below) for more details. Moreover, `ReTest`
-re-exports (almost) all exported symbols from `Test`, so there should not be any
-need to import `Test` together with `ReTest`.
+`Test.@testset` (with limitations, see below), and `runtests()` has to be called
+for the tests to be executed. See the docstrings (reproduced below) for more
+details. Moreover, `ReTest` re-exports (almost) all exported symbols from
+`Test`, so there should not be any need to import `Test` together with `ReTest`.
 
 ### `runtests` docstring
 
@@ -58,7 +58,9 @@ matched by `pattern`) and its subject matches `pattern`.
 
 If the passed `pattern` is a string, then it is wrapped in a `Regex` prefixed with
 `".*"`, and must match literally the subjects.
-This means for example that `"a|b"` will match a subject like `"a|b"` but not like `"a"`.
+This means for example that `"a|b"` will match a subject like `"a|b"` but not like `"a"`
+(only in Julia versions >= 1.3; in older versions, the regex is simply created as
+`Regex(".*" * pattern)`).
 The `".*"` prefix is intended to allow matching subjects of nested testsets,
 e.g. in the example above, `r".*b"` partially matches the subject `"/a"` and
 matches the subject `"/a/b"` (so the corresponding nested testset is run),
@@ -83,8 +85,8 @@ module in which it was written (e.g. `m`, when specified).
   j=J` is not supported). Both problems should be fixable.
 
   Related to the previous point: in future versions, nested testsets-for might
-  have their "iterator" (giving the values their loop variables) `eval`ed at the
-  module's toplevel (for efficiency).
+  have their "iterator" (giving the values to their loop variables) `eval`ed at
+  the module's toplevel (for efficiency).
 
 * Testsets can not be "custom testsets" (cf. `Test` documentation; this should
   be easy to support).
@@ -122,7 +124,7 @@ filter them out (if a filtering pattern is given to `runtests`) "statically",
 i.e. by introspection, we can figure out whether they should be run before
 having to `eval` the corresponding code. This is a big win, in particular for
 `testsets-for`, which are expensive to compile. This allows `ReTest` to
-compete with the good-old manual way of copy-pasting the wanted `@testset` into
+compete with the good ol' manual way of copy-pasting the wanted `@testset` into
 the REPL (without this trick, all the testsets would have to be `eval`ed, even
 when they don't run any code, and this can take some time for large test
 codebases.
@@ -176,5 +178,5 @@ Note also that partial matching often gives a false positive, e.g. running
 `runtests(M, "d")` will currently instantiate `@testset "a"` because it might
 contain a sub-testset `"d"`, so `@test true` above will be run, even if
 eventually no testset matches `"d"`. So it's recommended to put expensive tests
-withing "final" testsets (those which don't have nested testsets), such that
+within "final" testsets (those which don't have nested testsets), such that
 "full matching" is used instead of partial matching.
