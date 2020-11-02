@@ -8,7 +8,7 @@ using Test: DefaultTestSet, Error, Test, _check_testset, finish, get_testset,
 using Random: Random, default_rng
 
 const REGEX = Ref{Symbol}()
-const FINAL = Ref{Symbol}(:__FINAL__) # must have a value at compile time for InlineTestTest
+const FINAL = Ref{Symbol}(:__FINAL__) # must have a value at compile time for ReTestTest
 
 function __init__()
     REGEX[] = gensym()

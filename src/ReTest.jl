@@ -1,4 +1,4 @@
-module InlineTest
+module ReTest
 
 export runtests, @testset
 
@@ -36,7 +36,7 @@ struct TestsetExpr
 end
 
 function tests(m::Module)
-    inline_test::Symbol = m ∈ (InlineTest, InlineTest.InlineTestTest) ? :__INLINE_TEST__ : INLINE_TEST[]
+    inline_test::Symbol = m ∈ (ReTest, ReTest.ReTestTest) ? :__INLINE_TEST__ : INLINE_TEST[]
     if !isdefined(m, inline_test)
         @eval m $inline_test = []
         push!(TESTED_MODULES, m)
@@ -57,7 +57,7 @@ function replacetestset(x::Expr)
         final = !any(last, body)
         (Expr(:let,
               :($(Testset.FINAL[]) = $final),
-              Expr(:macrocall, Expr(:., :InlineTest, QuoteNode(Symbol("@testsetr"))),
+              Expr(:macrocall, Expr(:., :ReTest, QuoteNode(Symbol("@testsetr"))),
                    map(first, body)...)),
          final,
          true)
@@ -103,7 +103,7 @@ end
 Similar to `Test.@testset args...`, but the contained tests are not run immediately,
 and are instead stored for later execution, triggered by `runtests()`.
 Invocations of `@testset` can be nested, but qualified invocations of
-`InlineTest.@testset` can't.
+`ReTest.@testset` can't.
 Internally, `@testset` invocations are converted to `Test.@testset` at execution time.
 """
 macro testset(args...)
@@ -157,7 +157,7 @@ function runtests(m::Module, pattern::Union{AbstractString,Regex} = r""; wrap::B
                                                    string('/', desc, final ? "" : "/"))
 
     if wrap
-        Core.eval(m, :(InlineTest.Test.@testset $("Tests for module $m") begin
+        Core.eval(m, :(ReTest.Test.@testset $("Tests for module $m") begin
                            $(map(ts -> wrap_ts(partial, regex, ts), tests(m))...)
                        end))
     else
@@ -206,7 +206,7 @@ function wrap_ts(partial, regex, ts::TestsetExpr, loopvals=nothing)
             let $(Testset.REGEX[]) = ($partial, $regex),
                 $(Testset.FINAL[]) = $(ts.final)
 
-                InlineTest.@testsetr $(ts.desc) for $(ts.loops.args[1]) in $loopvals
+                ReTest.@testsetr $(ts.desc) for $(ts.loops.args[1]) in $loopvals
                     $(ts.body)
                 end
             end
@@ -218,10 +218,10 @@ function runtests(pattern::Union{AbstractString,Regex} = r""; wrap::Bool=true)
     for mods in (values(Base.loaded_modules), TESTED_MODULES)
         # TESTED_MODULES is not up-to-date w.r.t. package modules which have
         # precompilation, so we have to also look in Base.loaded_modules
-        # TODO: look recursively in "loaded modules" which use InlineTest for sub-modules
+        # TODO: look recursively in "loaded modules" which use ReTest for sub-modules
         foreach(mods) do m
             if isdefined(m, INLINE_TEST[])
-                # will automatically skip InlineTest and InlineTest.InlineTestTest
+                # will automatically skip ReTest and ReTest.ReTestTest
                 runtests(m, pattern, wrap=wrap)
             end
         end
@@ -236,20 +236,20 @@ function partialize(r::Regex)
     end
 end
 
-module InlineTestTest
+module ReTestTest
 
-using ..InlineTest
+using ..ReTest
 @testset "test Test in sub-module" begin
     @test 1 == 1
 end
 
-end # module InlineTestTest
+end # module ReTestTest
 
 @testset "self test" begin
     @assert typeof(@__MODULE__) == Module
     @test 1 != 2
-    runtests(InlineTestTest)
-    runtests(InlineTestTest, wrap=true)
+    runtests(ReTestTest)
+    runtests(ReTestTest, wrap=true)
 end
 
-end # module InlineTest
+end # module ReTest

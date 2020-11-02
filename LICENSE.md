@@ -1,4 +1,4 @@
-The InlineTest.jl package is licensed under the MIT "Expat" License:
+The ReTest.jl package is licensed under the MIT "Expat" License:
 
 > Copyright (c) 2020: Rafael Fourquet.
 >

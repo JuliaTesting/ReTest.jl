@@ -1,4 +1,4 @@
-# InlineTest
+# ReTest
 
 This package allows:
 
@@ -21,11 +21,11 @@ This package allows:
    exists in the Julia repository to implement regex-filtering for
    `Test.@testset`.
 
-The exported `InlineTest.@testset` macro can be used as a direct replacement for
+The exported `ReTest.@testset` macro can be used as a direct replacement for
 `Test.@testset`, and `runtests()` has to be called for the tests to be executed.
-See the docstrings (reproduced below) for more details. Moreover, `InlineTest`
+See the docstrings (reproduced below) for more details. Moreover, `ReTest`
 re-exports (almost) all exported symbols from `Test`, so there should not be any
-need to import `Test` together with `InlineTest`.
+need to import `Test` together with `ReTest`.
 
 ### `runtests` docstring
 
@@ -68,7 +68,7 @@ module in which it was written (e.g. `m`, when specified).
 
 ### Caveats
 
-`InlineTest.@testset` comes with a couple of caveats/limitations:
+`ReTest.@testset` comes with a couple of caveats/limitations:
 
 * Toplevel testsets (which are not nested within other testsets), when run, are
   `eval`ed at the toplevel of their parent module, which means that they can't
@@ -87,16 +87,16 @@ module in which it was written (e.g. `m`, when specified).
 * Testsets can not be "custom testsets" (cf. `Test` documentation; this should
   be easy to support).
 
-* Nested testsets can't be "qualified" (i.e. written as `InlineTest.@testset`).
+* Nested testsets can't be "qualified" (i.e. written as `ReTest.@testset`).
 
 * Regex filtering logic might improve in future versions, which means that with
   the same regex, less tests might be run (or more!). See `runtests`'s docstring
   to know what testsets are guaranteed to run.
 
-### Switching from `Test` to `InlineTest`
+### Switching from `Test` to `ReTest`
 
 When used in a package `MyPackage`, the test code can be organized as follows:
-1. replace `using Test` by `using InlineTest` in the "runtests.jl" file
+1. replace `using Test` by `using ReTest` in the "runtests.jl" file
 2. wrap the whole content of "runtests.jl" within a module named `MyPackageTests`
 3. rename "runtests.jl" to "tests.jl"
 4. create "runtests.jl" with the following content:
@@ -105,7 +105,7 @@ When used in a package `MyPackage`, the test code can be organized as follows:
 This means that running "runtests.jl" will have the same net effect as before.
 The "tests.jl" file can now be `include`d in your REPL session (`include("tests.jl")`),
 and you can run all or some of its tests
-(e.g. `using InlineTest; runtests(MyPackageTests, "addition")`).
+(e.g. `using ReTest; runtests(MyPackageTests, "addition")`).
 Wrapping the tests in `MyPackageTests` allows to not pollute `Main`, it keeps the tests
 of different packages separated, but more importantly, you can modify "tests.jl" and
 re-include it to have the corresponding tests updated (otherwise, without
@@ -114,12 +114,12 @@ without removing the old ones).
 
 ### Toplevel testsets
 
-In `InlineTest`, toplevel testsets are special, as already mentioned. The fact
+In `ReTest`, toplevel testsets are special, as already mentioned. The fact
 that they are `eval`ed at the module's toplevel also means that we can actually
 filter them out (if a filtering pattern is given to `runtests`) "statically",
 i.e. by introspection, we can figure out whether they should be run before
 having to `eval` the corresponding code. This is a big win, in particular for
-`testsets-for`, which are expensive to compile. This allows `InlineTest` to
+`testsets-for`, which are expensive to compile. This allows `ReTest` to
 compete with the good-old manual way of copy-pasting the wanted `@testset` into
 the REPL (without this trick, all the testsets would have to be `eval`ed, even
 when they don't run any code, and this can take some time for large test

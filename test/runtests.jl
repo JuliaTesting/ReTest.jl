@@ -1,7 +1,7 @@
-using InlineTest
+using ReTest
 
 module M
-using InlineTest
+using ReTest
 
 RUN = []
 
@@ -78,7 +78,7 @@ runtests(M, wrap=true) # TODO: more precise tests
 runtests(M, wrap=false)
 
 module N
-using InlineTest
+using ReTest
 
 RUN = []
 
@@ -122,7 +122,7 @@ N.check("^/i/j0", ["i"])
 N.check("^/i/l10", ["i"])
 
 module P
-using InlineTest
+using ReTest
 
 RUN = []
 
@@ -149,7 +149,7 @@ function check(rx, list)
 end
 end
 
-import .P # test InlineTest's wrapping of non-regex patterns
+import .P # test ReTest's wrapping of non-regex patterns
 P.check("b", ["a", "b", "b|c"]) # an implicit prefix r".*" is added
 P.check("b|c", ["a", "b|c"]) # "b" is not matched
 
