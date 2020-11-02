@@ -1,5 +1,7 @@
 # ReTest
 
+[![Build Status](https://travis-ci.com/JuliaTesting/ReTest.jl.svg?branch=master)](https://travis-ci.com/JuliaTesting/ReTest.jl)
+
 This package allows:
 
 1. defining tests in source files, whose execution is deferred and triggered on demand.
