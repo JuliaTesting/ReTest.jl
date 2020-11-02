@@ -137,7 +137,9 @@ matched by `pattern`) and its subject matches `pattern`.
 
 If the passed `pattern` is a string, then it is wrapped in a `Regex` prefixed with
 `".*"`, and must match literally the subjects.
-This means for example that `"a|b"` will match a subject like `"a|b"` but not like `"a"`.
+This means for example that `"a|b"` will match a subject like `"a|b"` but not like `"a"`
+(only in Julia versions >= 1.3; in older versions, the regex is simply created as
+`Regex(".*" * pattern)`).
 The `".*"` prefix is intended to allow matching subjects of nested testsets,
 e.g. in the example above, `r".*b"` partially matches the subject `"/a"` and
 matches the subject `"/a/b"` (so the corresponding nested testset is run),
@@ -150,7 +152,11 @@ module in which it was written (e.g. `m`, when specified).
 function runtests(m::Module, pattern::Union{AbstractString,Regex} = r""; wrap::Bool=false)
     regex = pattern isa Regex ?
         pattern :
-        r".*" * pattern
+        if VERSION >= v"1.3"
+            r".*" * pattern
+        else
+            Regex(".*" * pattern)
+        end
 
     partial = partialize(regex)
     matches(desc, final) = Testset.partialoccursin((partial, regex)[1+final],

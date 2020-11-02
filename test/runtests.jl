@@ -151,7 +151,10 @@ end
 
 import .P # test ReTest's wrapping of non-regex patterns
 P.check("b", ["a", "b", "b|c"]) # an implicit prefix r".*" is added
-P.check("b|c", ["a", "b|c"]) # "b" is not matched
+
+if VERSION >= v"1.3"
+    P.check("b|c", ["a", "b|c"]) # "b" is not matched
+end
 
 runtests()
 runtests(r"^/f1") # just test that a regex can be passed

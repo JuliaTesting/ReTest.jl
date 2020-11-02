@@ -5,7 +5,7 @@ include("regex.jl")
 using Test: DefaultTestSet, Error, Test, _check_testset, finish, get_testset,
             get_testset_depth, parse_testset_args, pop_testset, push_testset, record
 
-using Random: Random, default_rng
+import Random
 
 const REGEX = Ref{Symbol}()
 const FINAL = Ref{Symbol}(:__FINAL__) # must have a value at compile time for ReTestTest
@@ -14,6 +14,10 @@ function __init__()
     REGEX[] = gensym()
     FINAL[] = gensym()
 end
+
+default_rng() = isdefined(Random, :default_rng) ?
+    Random.default_rng() :
+    Random.GLOBAL_RNG
 
 function get_testset_string(remove_last=false)
     testsets = get(task_local_storage(), :__BASETESTNEXT__, Test.AbstractTestSet[])
