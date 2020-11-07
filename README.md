@@ -52,20 +52,16 @@ For example:
     end
 end
 ```
-A testset is guaranteed to run only when its parent's subject "partially matches"
-`pattern::Regex` (in PCRE2 parlance, i.e. `subject` might be the prefix of a string
-matched by `pattern`) and its subject matches `pattern`.
+A testset is guaranteed to run only when its subject matches `pattern`.
+Moreover if a testset is run, its enclosing testset, if any, also has to run
+(although not necessarily exhaustively, i.e. other nested testsets
+might be filtered out).
 
-If the passed `pattern` is a string, then it is wrapped in a `Regex` prefixed with
-`".*"`, and must match literally the subjects.
+If the passed `pattern` is a string, then it is wrapped in a `Regex` and must
+match literally the subjects.
 This means for example that `"a|b"` will match a subject like `"a|b"` but not like `"a"`
 (only in Julia versions >= 1.3; in older versions, the regex is simply created as
-`Regex(".*" * pattern)`).
-The `".*"` prefix is intended to allow matching subjects of nested testsets,
-e.g. in the example above, `r".*b"` partially matches the subject `"/a"` and
-matches the subject `"/a/b"` (so the corresponding nested testset is run),
-whereas `r"b"` does not partially match `"/a"`, even if it matches `"/a/b"`,
-so the testset is not run.
+`Regex(pattern)`).
 
 Note: this function executes each (top-level) `@testset` block using `eval` *within* the
 module in which it was written (e.g. `m`, when specified).
@@ -79,14 +75,10 @@ module in which it was written (e.g. `m`, when specified).
   depend on local variables for example. This is probably the only fundamental
   limitation compared to `Test.@testset`, and might not be fixable.
 
-* Toplevel "testsets-for" (`@testset "description" for ...`), when run, imply
+* "testsets-for" (`@testset "description" for ...`), when run, imply
   `eval`ing their loop variables at the toplevel of their parent module;
   moreover, "testsets-for" accept only "non-cartesian" looping (e.g. `for i=I,
   j=J` is not supported). Both problems should be fixable.
-
-  Related to the previous point: in future versions, nested testsets-for might
-  have their "iterator" (giving the values to their loop variables) `eval`ed at
-  the module's toplevel (for efficiency).
 
 * Testsets can not be "custom testsets" (cf. `Test` documentation; this should
   be easy to support).
@@ -116,44 +108,6 @@ re-include it to have the corresponding tests updated (otherwise, without
 a `MyPackageTests` module, including the file a second time would add the new tests
 without removing the old ones).
 
-### Toplevel testsets
-
-In `ReTest`, toplevel testsets are special, as already mentioned. The fact
-that they are `eval`ed at the module's toplevel also means that we can actually
-filter them out (if a filtering pattern is given to `runtests`) "statically",
-i.e. by introspection, we can figure out whether they should be run before
-having to `eval` the corresponding code. This is a big win, in particular for
-`testsets-for`, which are expensive to compile. This allows `ReTest` to
-compete with the good ol' manual way of copy-pasting the wanted `@testset` into
-the REPL (without this trick, all the testsets would have to be `eval`ed, even
-when they don't run any code, and this can take some time for large test
-codebases.
-
-So the recommendation for efficient filtering of the tests is to favor toplevel
-testsets, e.g.
-
-```julia
-@testset "a" begin
-# ...
-end
-@testset "b" begin
-# ...
-end
-# etc.
-```
-instead of
-```julia
-@testset "everything" begin
-    @testset "a" begin
-    # ...
-    end
-    @testset "b" begin
-    # ...
-    end
-    # etc.
-end
-```
-
 ### Filtering
 
 Most of the time, filtering with a simple string is likely to be enough. For example, in
@@ -168,15 +122,8 @@ end
 ```
 
 running `runtests(M, "a")` will run everything, `runtests(M, "b")` will run
-`@test true` and `@testset "b"` but not `@testset "c"`. Using `Regex` is
-slightly more subtle. For example, `runtests(M, r"a")` is equivalent to
-`runtests(M, "a")` in this case, but `runtests(M, r"b")` will run nothing,
-because `r"b"` doesn't "partially match" the toplevel `@testset "a"`; you would
-have to use `r".*b"` instead for example, or `r"a/b"` (or even `r"/b"`).
-
-Note also that partial matching often gives a false positive, e.g. running
-`runtests(M, "d")` will currently instantiate `@testset "a"` because it might
-contain a sub-testset `"d"`, so `@test true` above will be run, even if
-eventually no testset matches `"d"`. So it's recommended to put expensive tests
-within "final" testsets (those which don't have nested testsets), such that
-"full matching" is used instead of partial matching.
+`@test true` and `@testset "b"` but not `@testset "c"`.
+Note that if you want to run `@testset "b"`, there is no way to not run
+`@test true` in `@testset "a"`; so if it was an expensive test to run,
+instead of `@test true`, it could be useful to wrap it in its own testset, so that
+it can be filtered out.

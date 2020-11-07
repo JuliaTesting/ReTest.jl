@@ -28,13 +28,6 @@ using .Testset: Testset, @testsetr
 __init__() = INLINE_TEST[] = gensym()
 
 
-struct TestsetExpr
-    desc::Union{String,Expr}
-    loops::Union{Expr,Nothing}
-    body::Expr
-    final::Bool
-end
-
 function tests(m::Module)
     inline_test::Symbol = m ∈ (ReTest, ReTest.ReTestTest) ? :__INLINE_TEST__ : INLINE_TEST[]
     if !isdefined(m, inline_test)
@@ -44,32 +37,39 @@ function tests(m::Module)
     getfield(m, inline_test)
 end
 
-replacetestset(x) = (x, missing, false)
+mutable struct TestsetExpr
+    desc::Union{String,Expr}
+    loops::Union{Expr,Nothing}
+    parent::Union{TestsetExpr,Nothing}
+    children::Vector{TestsetExpr}
+    strings::Vector{String}
+    loopvalues::Any
+    run::Bool
+    body::Expr
 
-# replace unqualified `@testset` by @testsetr
-# return also (as 3nd element) whether the expression contains a (possibly nested) @testset
-# (if a testset is "final", i.e. without nested testsets, then the Regex matching logic
-# is different: we then don't use "partial matching")
-# the 2nd returned element is whether the testset is final (used only in `addtest`)
-function replacetestset(x::Expr)
+    TestsetExpr(desc, loops, parent) = new(desc, loops, parent, TestsetExpr[], String[])
+end
+
+isfor(ts::TestsetExpr) = ts.loops !== nothing
+isfinal(ts::TestsetExpr) = isempty(ts.children)
+
+# replace unqualified `@testset` by TestsetExpr
+function replace_ts(x::Expr, parent)
     if x.head === :macrocall && x.args[1] === Symbol("@testset")
-        body  = map(replacetestset, x.args[2:end])
-        final = !any(last, body)
-        (Expr(:let,
-              :($(Testset.FINAL[]) = $final),
-              Expr(:macrocall, Expr(:., :ReTest, QuoteNode(Symbol("@testsetr"))),
-                   map(first, body)...)),
-         final,
-         true)
+        @assert x.args[2] isa LineNumberNode
+        ts = parse_ts(Tuple(x.args[3:end]), parent)
+        parent !== nothing && push!(parent.children, ts)
+        ts
     else
-        body = map(replacetestset, x.args)
-        (Expr(x.head, map(first, body)...),
-         missing, # missing: a non-testset doesn't have a "final" attribute...
-         any(last, body))
+        body = map(z -> replace_ts(z, parent), x.args)
+        Expr(x.head, body...)
     end
 end
 
-function addtest(args::Tuple, m::Module)
+replace_ts(x, _) = x
+
+# create a TestsetExpr from @testset's args
+function parse_ts(args::Tuple, parent=nothing)
     length(args) == 2 || error("unsupported @testset")
 
     desc = args[1]
@@ -78,23 +78,18 @@ function addtest(args::Tuple, m::Module)
     body = args[2]
     isa(body, Expr) || error("Expected begin/end block or for loop as argument to @testset")
     if body.head === :for
-        isloop = true
+        loops = body.args[1]
+        tsbody = body.args[2]
     elseif body.head === :block
-        isloop = false
+        loops = nothing
+        tsbody = body
     else
         error("Expected begin/end block or for loop as argument to @testset")
     end
 
-    if isloop
-        loops = body.args[1]
-        expr, _, has_testset = replacetestset(body.args[2])
-        final = !has_testset
-        push!(tests(m), TestsetExpr(desc, loops, expr, final))
-    else
-        ts, final, _ = replacetestset(:(@testset $desc $body))
-        push!(tests(m), TestsetExpr(desc, nothing, ts, final))
-    end
-    nothing
+    ts = TestsetExpr(desc, loops, parent)
+    ts.body = replace_ts(tsbody, ts)
+    ts
 end
 
 """
@@ -107,8 +102,96 @@ Invocations of `@testset` can be nested, but qualified invocations of
 Internally, `@testset` invocations are converted to `Test.@testset` at execution time.
 """
 macro testset(args...)
-    Expr(:call, :addtest, args, __module__)
+    # this must take effect at compile/run time rather than parse time, e.g.
+    # if the @testset if in a `if false` branch
+    # TODO: test that
+    quote
+        ts = parse_ts($args)
+        push!(tests($__module__), ts)
+        nothing
+    end
 end
+
+function resolve!(mod::Module, ts::TestsetExpr, rx::Regex, force::Bool=false)
+    strings = empty!(ts.strings)
+    desc = ts.desc
+    ts.run = force
+    ts.loopvalues = nothing # unnecessary ?
+
+    parentstrs = ts.parent === nothing ? [""] : ts.parent.strings
+
+    if desc isa String
+        for str in parentstrs
+            ts.run && break
+            new = str * '/' * desc
+            if occursin(rx, new)
+                ts.run = true
+            else
+                push!(strings, new)
+            end
+        end
+    else
+        loops = ts.loops
+        @assert loops !== nothing
+        xs = Core.eval(mod, loops.args[2])
+        ts.loopvalues = xs
+        for x in xs
+            ts.run && break
+            Core.eval(mod, Expr(:(=), loops.args[1], x))
+            descx = Core.eval(mod, desc)::String
+            for str in parentstrs
+                new = str * '/' * descx
+                if occursin(rx, new)
+                    ts.run = true
+                    break
+                else
+                    push!(strings, new)
+                end
+            end
+        end
+    end
+    run = ts.run
+    for tsc in ts.children
+        run |= resolve!(mod, tsc, rx, ts.run)
+    end
+    ts.run = run
+end
+
+# convert a TestsetExpr into an actually runnable testset
+function make_ts(ts::TestsetExpr, rx::Regex)
+    ts.run || return nothing
+
+    if isfinal(ts)
+        body = ts.body
+    else
+        body = make_ts(ts.body, rx)
+    end
+    if ts.loops === nothing
+        quote
+            let $(Testset.REGEX[]) = $rx,
+                $(Testset.FINAL[]) = $(isfinal(ts))
+
+                ReTest.@testsetr $(ts.desc) begin
+                    $(body)
+                end
+            end
+        end
+    else
+        loopvals = something(ts.loopvalues, ts.loops.args[2])
+        quote
+            let $(Testset.REGEX[]) = $rx,
+                $(Testset.FINAL[]) = $(isfinal(ts))
+
+                ReTest.@testsetr $(ts.desc) for $(ts.loops.args[1]) in $loopvals
+                    $(body)
+                end
+            end
+        end
+    end
+end
+
+make_ts(x, rx) = x
+make_ts(ex::Expr, rx) = Expr(ex.head, map(x -> make_ts(x, rx), ex.args)...)
 
 """
     runtests([m::Module], pattern = r""; [wrap::Bool])
@@ -131,93 +214,48 @@ For example:
     end
 end
 ```
-A testset is guaranteed to run only when its parent's subject "partially matches"
-`pattern::Regex` (in PCRE2 parlance, i.e. `subject` might be the prefix of a string
-matched by `pattern`) and its subject matches `pattern`.
+A testset is guaranteed to run only when its subject matches `pattern`.
+Moreover if a testset is run, its enclosing testset, if any, also has to run
+(although not necessarily exhaustively, i.e. other nested testsets
+might be filtered out).
 
-If the passed `pattern` is a string, then it is wrapped in a `Regex` prefixed with
-`".*"`, and must match literally the subjects.
+If the passed `pattern` is a string, then it is wrapped in a `Regex` and must
+match literally the subjects.
 This means for example that `"a|b"` will match a subject like `"a|b"` but not like `"a"`
 (only in Julia versions >= 1.3; in older versions, the regex is simply created as
-`Regex(".*" * pattern)`).
-The `".*"` prefix is intended to allow matching subjects of nested testsets,
-e.g. in the example above, `r".*b"` partially matches the subject `"/a"` and
-matches the subject `"/a/b"` (so the corresponding nested testset is run),
-whereas `r"b"` does not partially match `"/a"`, even if it matches `"/a/b"`,
-so the testset is not run.
+`Regex(pattern)`).
 
 Note: this function executes each (top-level) `@testset` block using `eval` *within* the
 module in which it was written (e.g. `m`, when specified).
 """
-function runtests(m::Module, pattern::Union{AbstractString,Regex} = r""; wrap::Bool=false)
-    regex = pattern isa Regex ?
-        pattern :
+function runtests(mod::Module, pattern::Union{AbstractString,Regex} = r""; wrap::Bool=false)
+    regex = pattern isa Regex ? pattern :
         if VERSION >= v"1.3"
-            r".*" * pattern
+            r"" * pattern
         else
-            Regex(".*" * pattern)
+            Regex(pattern)
         end
 
-    partial = partialize(regex)
-    matches(desc, final) = Testset.partialoccursin((partial, regex)[1+final],
-                                                   string('/', desc, final ? "" : "/"))
-
+    testsets = []
+    for ts in tests(mod)
+        run = resolve!(mod, ts, regex)
+        run || continue
+        mts = make_ts(ts, regex)
+        if wrap
+            push!(testsets, mts)
+        else
+            Core.eval(mod, mts)
+        end
+    end
     if wrap
-        Core.eval(m, :(ReTest.Test.@testset $("Tests for module $m") begin
-                           $(map(ts -> wrap_ts(partial, regex, ts), tests(m))...)
-                       end))
-    else
-        for ts in tests(m)
-            # it's faster to evel in a loop than to eval a block containing tests(m)
-            desc = ts.desc
-            if ts.loops === nothing # begin/end testset
-                @assert desc isa String
-                # bypass evaluation if we know statically that testset won't be run
-                matches(desc, ts.final) ||
-                    continue
-                Core.eval(m, wrap_ts(partial, regex, ts))
-            else # for-loop testset
-                loops = ts.loops
-                xs = Core.eval(m, loops.args[2]) # loop values
-                # we eval the description to a string for each values, and if at least one matches
-                # the filtering-regex, then we must instantiate the testset (otherwise, it's skipped)
-                skip = true
-                for x in xs
-                    # TODO: do not assign loop.args[1] in m ?
-                    Core.eval(m, Expr(:(=), loops.args[1], x))
-                    descx = Core.eval(m, desc)
-                    if matches(descx, ts.final)
-                        skip = false
-                        break
-                    end
-                end
-                skip && continue
-                Core.eval(m, wrap_ts(partial, regex, ts, xs))
-            end
-        end
+        Core.eval(mod,
+                  quote
+                      ReTest.Test.@testset $("Tests for module $mod") begin
+                          $(testsets...)
+                      end
+                  end)
     end
     nothing
-end
-
-function wrap_ts(partial, regex, ts::TestsetExpr, loopvals=nothing)
-    if ts.loops === nothing
-        quote
-            let $(Testset.REGEX[]) = ($partial, $regex)
-                $(ts.body)
-            end
-        end
-    else
-        loopvals = something(loopvals, ts.loops.args[2])
-        quote
-            let $(Testset.REGEX[]) = ($partial, $regex),
-                $(Testset.FINAL[]) = $(ts.final)
-
-                ReTest.@testsetr $(ts.desc) for $(ts.loops.args[1]) in $loopvals
-                    $(ts.body)
-                end
-            end
-        end
-    end
 end
 
 function runtests(pattern::Union{AbstractString,Regex} = r""; wrap::Bool=true)

@@ -1,7 +1,5 @@
 module Testset
 
-include("regex.jl")
-
 using Test: DefaultTestSet, Error, Test, _check_testset, finish, get_testset,
             get_testset_depth, parse_testset_args, pop_testset, push_testset, record
 
@@ -61,10 +59,12 @@ function testset_beginend(args, tests, source)
     # action (such as reporting the results)
     ex = quote
         local final = $(esc(FINAL[]))
-        local current_str = string(get_testset_string(), '/', $desc,
-                                   final ? "" : "/")
-        local rx = $(esc(REGEX[]))[1 + final]
-        if partialoccursin(rx, current_str)
+        local current_str
+        if final
+            current_str = string(get_testset_string(), '/', $desc)
+        end
+        local rx = $(esc(REGEX[]))
+        if !final || occursin(rx, current_str)
             _check_testset($testsettype, $(QuoteNode(testsettype.args[1])))
             local ret
             local ts = $(testsettype)($desc; $options...)
@@ -140,11 +140,12 @@ function testset_forloop(args, testloop, source)
     tests = testloop.args[2]
     blk = quote
         local final = $(esc(FINAL[]))
-        local current_str = string(get_testset_string(!first_iteration), '/', $desc,
-                                   final ? "" : "/")
-
-        local rx = $(esc(REGEX[]))[1 + final]
-        if partialoccursin(rx, current_str)
+        local current_str
+        if final
+            current_str = string(get_testset_string(!first_iteration), '/', $desc)
+        end
+        local rx = $(esc(REGEX[]))
+        if !final || occursin(rx, current_str)
             _check_testset($testsettype, $(QuoteNode(testsettype.args[1])))
             # Trick to handle `break` and `continue` in the test code before
             # they can be handled properly by `finally` lowering.
