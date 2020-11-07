@@ -58,21 +58,21 @@ using .M: check
 check("a", ["a"])
 check("a1", []) # testset is "final", so we do a full match
 check("b", ["b1", "b2"])
-check("/b", ["b1", "b2", "c", "f1"])
+check("/b", ["b1", "b2"])
 check("b1", ["b1"])
 check("c1", []) # "c1" is *not* partially matched against "/c/"
-check("c/1", ["c"]) # "c" is partially matched, but nothing fully matches afterwards
-check("c/d1", ["c"])
+check("c/1", []) # "c" is partially matched, but nothing fully matches afterwards
+check("c/d1", [])
 check("c/d", ["c", "d"])
-check("/c", ["c", "d", "e1", "e2", "f1"])
-check(".*d", ["c", "d", "f1"])
-check(".*(e1|e2)", ["c", "e1", "e2", "f1"])
+check("/c", ["c", "d", "e1", "e2"])
+check(".*d", ["c", "d"])
+check(".*(e1|e2)", ["c", "e1", "e2"])
 check("f1", ["f1", "g", "h1", "h2"])
 check("f",  ["f1", "g", "h1", "h2"])
-check(".*g", ["c", "f1", "g"])
-check(".*h", ["c", "f1", "h1", "h2"])
-check(".*h1", ["c", "f1", "h1"])
-check(".*h\$", ["c", "f1"])
+check(".*g", ["f1", "g"])
+check(".*h", ["f1", "h1", "h2"])
+check(".*h1", ["f1", "h1"])
+check(".*h\$", [])
 
 runtests(M, wrap=true) # TODO: more precise tests
 runtests(M, wrap=false)
@@ -116,10 +116,10 @@ end
 end
 
 import .N
-N.check(".*j1", ["i", "j", "l1"])
-N.check(".*j/1", ["i", "j", "l1"])
-N.check("^/i/j0", ["i"])
-N.check("^/i/l10", ["i"])
+N.check(".*j1", [])
+N.check(".*j/1", [])
+N.check("^/i/j0", [])
+N.check("^/i/l10", [])
 
 module P
 using ReTest
