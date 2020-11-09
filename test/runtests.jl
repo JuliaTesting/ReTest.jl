@@ -169,3 +169,34 @@ runtests()
 @test RUN == ["toplevel"]
 
 runtests(r"^/f1") # just test that a regex can be passed
+
+module Loops
+using ReTest
+
+RUN = []
+
+@testset "parent" begin
+    a = 1
+    b = 2
+
+    @testset "local$i" for i in (a, b)
+        push!(RUN, i)
+        @test true
+        @testset "sub" begin
+            push!(RUN, 0)
+            @test true
+
+            @testset "final" begin
+                @test true
+                push!(RUN, -1)
+            end
+        end
+    end
+end
+end
+
+@test_logs (:warn, r"could not evaluate testset-for iterator.*") runtests(Loops, r"asd")
+@test Loops.RUN == [1, 0, 2, 0]
+empty!(Loops.RUN)
+@test_logs (:warn, r"could not evaluate testset-for iterator.*") runtests(Loops)
+@test Loops.RUN == [1, 0, -1, 2, 0, -1]
