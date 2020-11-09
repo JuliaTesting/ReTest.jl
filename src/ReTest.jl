@@ -115,7 +115,7 @@ end
 function resolve!(mod::Module, ts::TestsetExpr, rx::Regex, force::Bool=false)
     strings = empty!(ts.strings)
     desc = ts.desc
-    ts.run = force
+    ts.run = force || isempty(rx.pattern)
     ts.loopvalues = nothing # unnecessary ?
 
     parentstrs = ts.parent === nothing ? [""] : ts.parent.strings
@@ -144,8 +144,10 @@ function resolve!(mod::Module, ts::TestsetExpr, rx::Regex, force::Bool=false)
             ts.loopvalues = xs
         catch
             xs = () # xs might have been assigned before the collect call
+            if !ts.run
+                @warn "could not evaluate testset-for iterator, default to inclusion"
+            end
             ts.run = true
-            @warn "could not evaluate testset-for iterator, default to inclusion"
         end
         for x in xs # empty loop if eval above threw
             ts.run && break

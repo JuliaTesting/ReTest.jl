@@ -198,7 +198,7 @@ end
 @test_logs (:warn, r"could not evaluate testset-for iterator.*") runtests(Loops1, r"asd")
 @test Loops1.RUN == [1, 0, 2, 0]
 empty!(Loops1.RUN)
-@test_logs (:warn, r"could not evaluate testset-for iterator.*") runtests(Loops1)
+runtests(Loops1) # should not log
 @test Loops1.RUN == [1, 0, -1, 2, 0, -1]
 
 module Loops2
@@ -226,7 +226,7 @@ end
 @test_logs (:warn, r"could not evaluate testset-for iterator.*") runtests(Loops2, r"asd")
 @test Loops2.RUN == [1, 0, 2, 0]
 empty!(Loops2.RUN)
-@test_logs (:warn, r"could not evaluate testset-for iterator.*") runtests(Loops2)
+runtests(Loops2)
 @test Loops2.RUN == [1, 0, -1, 2, 0, -1]
 
 module Loops3
