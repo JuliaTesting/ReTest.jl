@@ -136,8 +136,14 @@ function resolve!(mod::Module, ts::TestsetExpr, rx::Regex, force::Bool=false)
         xs = ()
         try
             xs = Core.eval(mod, loops.args[2])
+            if !(xs isa Union{Array,Tuple}) # being conservative on target type
+                # this catches e.g. the case where xs is a generator, then collect
+                # fails because of a world-age problem (the function in xs is too "new")
+                xs = collect(xs)
+            end
             ts.loopvalues = xs
         catch
+            xs = () # xs might have been assigned before the collect call
             ts.run = true
             @warn "could not evaluate testset-for iterator, default to inclusion"
         end

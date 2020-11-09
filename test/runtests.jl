@@ -170,12 +170,12 @@ runtests()
 
 runtests(r"^/f1") # just test that a regex can be passed
 
-module Loops
+module Loops1
 using ReTest
 
 RUN = []
 
-@testset "parent" begin
+@testset "loops 1" begin
     a = 1
     b = 2
 
@@ -195,8 +195,64 @@ RUN = []
 end
 end
 
-@test_logs (:warn, r"could not evaluate testset-for iterator.*") runtests(Loops, r"asd")
-@test Loops.RUN == [1, 0, 2, 0]
-empty!(Loops.RUN)
-@test_logs (:warn, r"could not evaluate testset-for iterator.*") runtests(Loops)
-@test Loops.RUN == [1, 0, -1, 2, 0, -1]
+@test_logs (:warn, r"could not evaluate testset-for iterator.*") runtests(Loops1, r"asd")
+@test Loops1.RUN == [1, 0, 2, 0]
+empty!(Loops1.RUN)
+@test_logs (:warn, r"could not evaluate testset-for iterator.*") runtests(Loops1)
+@test Loops1.RUN == [1, 0, -1, 2, 0, -1]
+
+module Loops2
+using ReTest
+
+RUN = []
+
+@testset "loops 2" begin
+    @testset "generator $i $I" for (i, I) in (i => typeof(i) for i in (1, 2))
+        push!(RUN, i)
+        @test true
+        @testset "sub" begin
+            push!(RUN, 0)
+            @test true
+
+            @testset "final" begin
+                @test true
+                push!(RUN, -1)
+            end
+        end
+    end
+end
+end
+
+@test_logs (:warn, r"could not evaluate testset-for iterator.*") runtests(Loops2, r"asd")
+@test Loops2.RUN == [1, 0, 2, 0]
+empty!(Loops2.RUN)
+@test_logs (:warn, r"could not evaluate testset-for iterator.*") runtests(Loops2)
+@test Loops2.RUN == [1, 0, -1, 2, 0, -1]
+
+module Loops3
+using ReTest
+
+RUN = []
+
+@testset "loops 3" begin
+    @testset "generator $i $I" for (i, I) in [i => typeof(i) for i in (1, 2)]
+        push!(RUN, i)
+        @test true
+        @testset "sub" begin
+            push!(RUN, 0)
+            @test true
+
+            @testset "final" begin
+                @test true
+                push!(RUN, -1)
+            end
+        end
+    end
+end
+end
+
+runtests(Loops3, r"asd")
+@test Loops3.RUN == []
+empty!(Loops3.RUN)
+runtests(Loops3)
+@test Loops3.RUN == [1, 0, -1, 2, 0, -1]
