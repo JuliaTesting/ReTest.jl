@@ -133,9 +133,15 @@ function resolve!(mod::Module, ts::TestsetExpr, rx::Regex, force::Bool=false)
     else
         loops = ts.loops
         @assert loops !== nothing
-        xs = Core.eval(mod, loops.args[2])
-        ts.loopvalues = xs
-        for x in xs
+        xs = ()
+        try
+            xs = Core.eval(mod, loops.args[2])
+            ts.loopvalues = xs
+        catch
+            ts.run = true
+            @warn "could not evaluate testset-for iterator, default to inclusion"
+        end
+        for x in xs # empty loop if eval above threw
             ts.run && break
             Core.eval(mod, Expr(:(=), loops.args[1], x))
             descx = Core.eval(mod, desc)::String
