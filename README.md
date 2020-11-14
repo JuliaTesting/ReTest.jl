@@ -29,6 +29,13 @@ for the tests to be executed. See the docstrings (reproduced below) for more
 details. Moreover, `ReTest` re-exports (almost) all exported symbols from
 `Test`, so there should not be any need to import `Test` together with `ReTest`.
 
+When using `@testset` "inline", i.e. within the source-code of a package, one
+can use the `InlineTest` package instead of `ReTest`, which only defines the
+strict minimum and also exports `@testset`, and therefore loads faster (even if
+`ReTest` itself loads fast, it can be desirable to have an even lighter
+dependency). But `ReTest` still has to be loaded (as a "test" dependency) in
+order to call `runtests`.
+
 ### `runtests` docstring
 
 ```
