@@ -1,6 +1,6 @@
 module ReTest
 
-export runtests, @testset
+export runtests, @testset, InlineTest
 
 # from Test:
 export Test,
@@ -17,25 +17,12 @@ using Test: Test,
     @inferred,
     detect_ambiguities, detect_unbound_args
 
-
-const INLINE_TEST = Ref{Symbol}(:__INLINE_TEST__)
-const TESTED_MODULES = Module[]
+using InlineTest: InlineTest, get_tests, TESTED_MODULES, INLINE_TEST
 
 include("testset.jl")
 
 using .Testset: Testset, @testsetr
 
-__init__() = INLINE_TEST[] = gensym()
-
-
-function tests(m::Module)
-    inline_test::Symbol = m ∈ (ReTest, ReTest.ReTestTest) ? :__INLINE_TEST__ : INLINE_TEST[]
-    if !isdefined(m, inline_test)
-        @eval m $inline_test = []
-        push!(TESTED_MODULES, m)
-    end
-    getfield(m, inline_test)
-end
 
 mutable struct TestsetExpr
     desc::Union{String,Expr}
@@ -107,7 +94,7 @@ macro testset(args...)
     # TODO: test that
     quote
         ts = parse_ts($args)
-        push!(tests($__module__), ts)
+        push!(get_tests($__module__), ts)
         nothing
     end
 end
@@ -185,7 +172,7 @@ function make_ts(ts::TestsetExpr, rx::Regex)
             let $(Testset.REGEX[]) = $rx,
                 $(Testset.FINAL[]) = $(isfinal(ts))
 
-                ReTest.@testsetr $(ts.desc) begin
+                InlineTest.@testsetr $(ts.desc) begin
                     $(body)
                 end
             end
@@ -196,7 +183,7 @@ function make_ts(ts::TestsetExpr, rx::Regex)
             let $(Testset.REGEX[]) = $rx,
                 $(Testset.FINAL[]) = $(isfinal(ts))
 
-                ReTest.@testsetr $(ts.desc) for $(ts.loops.args[1]) in $loopvals
+                InlineTest.@testsetr $(ts.desc) for $(ts.loops.args[1]) in $loopvals
                     $(body)
                 end
             end
@@ -251,7 +238,14 @@ function runtests(mod::Module, pattern::Union{AbstractString,Regex} = r""; wrap:
         end
 
     testsets = []
-    for ts in tests(mod)
+
+    tests = get_tests(mod)
+
+    for idx in eachindex(tests)
+        ts = tests[idx]
+        if !(ts isa TestsetExpr)
+            ts = tests[idx] = parse_ts(ts)
+        end
         run = resolve!(mod, ts, regex)
         run || continue
         mts = make_ts(ts, regex)

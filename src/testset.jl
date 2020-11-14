@@ -5,6 +5,8 @@ using Test: DefaultTestSet, Error, Test, _check_testset, finish, get_testset,
 
 import Random
 
+import InlineTest: @testsetr
+
 const REGEX = Ref{Symbol}()
 const FINAL = Ref{Symbol}(:__FINAL__) # must have a value at compile time for ReTestTest
 
