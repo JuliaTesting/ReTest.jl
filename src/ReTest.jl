@@ -1,6 +1,6 @@
 module ReTest
 
-export runtests, @testset, InlineTest
+export runtests, @testset
 
 # from Test:
 export Test,
@@ -17,11 +17,11 @@ using Test: Test,
     @inferred,
     detect_ambiguities, detect_unbound_args
 
-using InlineTest: InlineTest, get_tests, TESTED_MODULES, INLINE_TEST
+using InlineTest: @testset, InlineTest, get_tests, TESTED_MODULES, INLINE_TEST
 
 include("testset.jl")
 
-using .Testset: Testset, @testsetr
+using .Testset: Testset
 
 
 mutable struct TestsetExpr
@@ -77,26 +77,6 @@ function parse_ts(args::Tuple, parent=nothing)
     ts = TestsetExpr(desc, loops, parent)
     ts.body = replace_ts(tsbody, ts)
     ts
-end
-
-"""
-    @testset args...
-
-Similar to `Test.@testset args...`, but the contained tests are not run immediately,
-and are instead stored for later execution, triggered by `runtests()`.
-Invocations of `@testset` can be nested, but qualified invocations of
-`ReTest.@testset` can't.
-Internally, `@testset` invocations are converted to `Test.@testset` at execution time.
-"""
-macro testset(args...)
-    # this must take effect at compile/run time rather than parse time, e.g.
-    # if the @testset if in a `if false` branch
-    # TODO: test that
-    quote
-        ts = parse_ts($args)
-        push!(get_tests($__module__), ts)
-        nothing
-    end
 end
 
 function resolve!(mod::Module, ts::TestsetExpr, rx::Regex, force::Bool=false)
@@ -169,24 +149,12 @@ function make_ts(ts::TestsetExpr, rx::Regex)
     end
     if ts.loops === nothing
         quote
-            let $(Testset.REGEX[]) = $rx,
-                $(Testset.FINAL[]) = $(isfinal(ts))
-
-                InlineTest.@testsetr $(ts.desc) begin
-                    $(body)
-                end
-            end
+            @testset $(isfinal(ts)) $rx $(ts.desc) $body
         end
     else
         loopvals = something(ts.loopvalues, ts.loops.args[2])
         quote
-            let $(Testset.REGEX[]) = $rx,
-                $(Testset.FINAL[]) = $(isfinal(ts))
-
-                InlineTest.@testsetr $(ts.desc) for $(ts.loops.args[1]) in $loopvals
-                    $(body)
-                end
-            end
+            @testset $(isfinal(ts)) $rx $(ts.desc) $(ts.loops.args[1]) $loopvals $body
         end
     end
 end

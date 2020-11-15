@@ -48,12 +48,13 @@ Invocations of `@testset` can be nested, but qualified invocations of
 Internally, `@testset` invocations are converted to `Test.@testset` at execution time.
 """
 macro testset(args...)
+    # this must take effect at compile/run time rather than parse time, e.g.
+    # if the @testset if in a `if false` branch
+    # TODO: test that
     quote
         push!(get_tests($__module__), $args)
         nothing
     end
 end
-
-macro testsetr end
 
 end # InlineTest

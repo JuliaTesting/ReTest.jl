@@ -5,15 +5,7 @@ using Test: DefaultTestSet, Error, Test, _check_testset, finish, get_testset,
 
 import Random
 
-import InlineTest: @testsetr
-
-const REGEX = Ref{Symbol}()
-const FINAL = Ref{Symbol}(:__FINAL__) # must have a value at compile time for ReTestTest
-
-function __init__()
-    REGEX[] = gensym()
-    FINAL[] = gensym()
-end
+import InlineTest: @testset
 
 default_rng() = isdefined(Random, :default_rng) ?
     Random.default_rng() :
@@ -24,52 +16,35 @@ function get_testset_string(remove_last=false)
     join('/' * ts.description for ts in (remove_last ? testsets[1:end-1] : testsets))
 end
 
-macro testsetr(args...) # testset wirh [r]egex filtering support
-    isempty(args) && error("No arguments to @testset")
+# non-inline testset with regex filtering support
+macro testset(isfinal::Bool, rx::Regex, desc::String, body)
+    Testset.testset_beginend(isfinal, rx, desc, body, __source__)
+end
 
-    tests = args[end]
-
-    # Determine if a single block or for-loop style
-    if !isa(tests,Expr) || (tests.head !== :for && tests.head !== :block)
-        error("Expected begin/end block or for loop as argument to @testset")
-    end
-
-    if tests.head === :for
-        return testset_forloop(args, tests, __source__)
-    else
-        return testset_beginend(args, tests, __source__)
-    end
+macro testset(isfinal::Bool, rx::Regex, desc::Union{String,Expr},
+              loopiter, loopvals,
+              body)
+    Testset.testset_forloop(isfinal, rx, desc, loopiter, loopvals, body, __source__)
 end
 
 """
 Generate the code for a `@testset` with a `begin`/`end` argument
 """
-function testset_beginend(args, tests, source)
-    desc, testsettype, options = parse_testset_args(args[1:end-1])
-    if desc === nothing
-        desc = "test set"
-    end
-    # If we're at the top level we'll default to DefaultTestSet. Otherwise
-    # default to the type of the parent testset
-    if testsettype === nothing
-        testsettype = :(get_testset_depth() == 0 ? DefaultTestSet : typeof(get_testset()))
-    end
-
+function testset_beginend(isfinal::Bool, rx::Regex, desc::String, tests, source)
+    testsettype = :(get_testset_depth() == 0 ? DefaultTestSet : typeof(get_testset()))
     # Generate a block of code that initializes a new testset, adds
     # it to the task local storage, evaluates the test(s), before
     # finally removing the testset and giving it a chance to take
     # action (such as reporting the results)
     ex = quote
-        local final = $(esc(FINAL[]))
         local current_str
-        if final
+        if $isfinal
             current_str = string(get_testset_string(), '/', $desc)
         end
-        local rx = $(esc(REGEX[]))
-        if !final || occursin(rx, current_str)
+        if !$isfinal || occursin($rx, current_str)
             _check_testset($testsettype, $(QuoteNode(testsettype.args[1])))
             local ret
-            local ts = $(testsettype)($desc; $options...)
+            local ts = $(testsettype)($desc)
             push_testset(ts)
             # we reproduce the logic of guardseed, but this function
             # cannot be used as it changes slightly the semantic of @testset,
@@ -105,49 +80,23 @@ end
 """
 Generate the code for a `@testset` with a `for` loop argument
 """
-function testset_forloop(args, testloop, source)
+function testset_forloop(isfinal::Bool, rx::Regex, desc::Union{String,Expr},
+                         loopiter, loopvals,
+                         tests, source)
+
     # Pull out the loop variables. We might need them for generating the
     # description and we'll definitely need them for generating the
     # comprehension expression at the end
-    loopvars = Expr[]
-    if testloop.args[1].head === :(=)
-        push!(loopvars, testloop.args[1])
-    elseif testloop.args[1].head === :block
-        for loopvar in testloop.args[1].args
-            push!(loopvars, loopvar)
-        end
-    else
-        error("Unexpected argument to @testset")
-    end
+    loopvars = Expr[Expr(:(=), loopiter, loopvals)]
 
-    desc, testsettype, options = parse_testset_args(args[1:end-1])
+    testsettype = :(get_testset_depth() == 0 ? DefaultTestSet : typeof(get_testset()))
 
-    if desc === nothing
-        # No description provided. Generate from the loop variable names
-        v = loopvars[1].args[1]
-        desc = Expr(:string, "$v = ", esc(v)) # first variable
-        for l = loopvars[2:end]
-            v = l.args[1]
-            push!(desc.args, ", $v = ")
-            push!(desc.args, esc(v))
-        end
-    end
-
-    if testsettype === nothing
-        testsettype = :(get_testset_depth() == 0 ? DefaultTestSet : typeof(get_testset()))
-    end
-
-    # Uses a similar block as for `@testset`, except that it is
-    # wrapped in the outer loop provided by the user
-    tests = testloop.args[2]
     blk = quote
-        local final = $(esc(FINAL[]))
         local current_str
-        if final
-            current_str = string(get_testset_string(!first_iteration), '/', $desc)
+        if $isfinal
+            current_str = string(get_testset_string(!first_iteration), '/', $(esc(desc)))
         end
-        local rx = $(esc(REGEX[]))
-        if !final || occursin(rx, current_str)
+        if !$isfinal || occursin($rx, current_str)
             _check_testset($testsettype, $(QuoteNode(testsettype.args[1])))
             # Trick to handle `break` and `continue` in the test code before
             # they can be handled properly by `finally` lowering.
@@ -157,7 +106,7 @@ function testset_forloop(args, testloop, source)
                 # it's 1000 times faster to copy from tmprng rather than calling Random.seed!
                 copy!(RNG, tmprng)
             end
-            ts = $(testsettype)($desc; $options...)
+            ts = $(testsettype)($(esc(desc)))
             push_testset(ts)
             first_iteration = false
             try
