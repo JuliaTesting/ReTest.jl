@@ -49,10 +49,26 @@ end
     end
 end
 
+innertestsets = ["d", "e1", "e2", "g", "h1", "h2"]
+
 function check(rx, list)
     empty!(RUN)
     runtests(M, Regex(rx))
     @test sort(RUN) == sort(list)
+    mktemp() do path, io
+        redirect_stdout(io) do
+            runtests(M, Regex(rx), dry=true)
+        end
+        seekstart(io)
+        expected = map(list) do t
+            if t in innertestsets
+                "  " * t
+            else
+                t
+            end
+        end
+        @test readchomp(io) == join(expected, '\n')
+    end
 end
 end
 

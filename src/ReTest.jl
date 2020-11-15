@@ -34,7 +34,8 @@ mutable struct TestsetExpr
     run::Bool
     body::Expr
 
-    TestsetExpr(desc, loops, parent) = new(desc, loops, parent, TestsetExpr[], String[])
+    TestsetExpr(desc, loops, parent, children=TestsetExpr[]) =
+        new(desc, loops, parent, children, String[])
 end
 
 isfor(ts::TestsetExpr) = ts.loops !== nothing
@@ -163,13 +164,15 @@ make_ts(x, rx) = x
 make_ts(ex::Expr, rx) = Expr(ex.head, map(x -> make_ts(x, rx), ex.args)...)
 
 """
-    runtests([m::Module], pattern = r""; [wrap::Bool])
+    runtests([m::Module], pattern = r""; [wrap::Bool], dry::Bool=false)
 
 Run all the tests declared in `@testset` blocks, within `m` if specified,
 or within all currently loaded modules otherwise.
 The `wrap` keyword specifies whether the collection of `@testset` expressions
 should be grouped according to the parent modules within a top-level `@testset`.
 The default is `wrap=false` when `m` is specified, `true` otherwise.
+If `dry` is `true`, don't actually run the tests, just print the descriptions
+of the testsets which would (presumably) run.
 
 It's possible to filter run testsets by specifying `pattern`: the "subject" of a
 testset is the concatenation of the subject of its parent `@testset`, if any,
@@ -197,7 +200,9 @@ This means for example that `"a|b"` will match a subject like `"a|b"` but not li
 Note: this function executes each (top-level) `@testset` block using `eval` *within* the
 module in which it was written (e.g. `m`, when specified).
 """
-function runtests(mod::Module, pattern::Union{AbstractString,Regex} = r""; wrap::Bool=false)
+function runtests(mod::Module, pattern::Union{AbstractString,Regex} = r"";
+                  wrap::Bool=false,
+                  dry::Bool=false)
     regex = pattern isa Regex ? pattern :
         if VERSION >= v"1.3"
             r"" * pattern
@@ -216,6 +221,10 @@ function runtests(mod::Module, pattern::Union{AbstractString,Regex} = r""; wrap:
         end
         run = resolve!(mod, ts, regex)
         run || continue
+        if dry
+            dryrun(mod, ts, regex)
+            continue
+        end
         mts = make_ts(ts, regex)
         if wrap
             push!(testsets, mts)
@@ -246,6 +255,36 @@ function runtests(pattern::Union{AbstractString,Regex} = r""; wrap::Bool=true)
     end
 end
 
+function dryrun(mod::Module, ts::TestsetExpr, rx::Regex, parentsubj="", align::Int=0)
+    ts.run || return
+    desc = ts.desc
+
+    if desc isa String
+        subject = parentsubj * '/' * desc
+        if isfinal(ts)
+            occursin(rx, subject) || return
+        end
+        println(' '^align, desc)
+        for tsc in ts.children
+            dryrun(mod, tsc, rx, subject, align + 2)
+        end
+    else
+        loopvals = ts.loopvalues
+        if loopvals === nothing
+            println(' '^align, desc)
+            @warn "could not evaluate testset-for iterator, default to inclusion"
+            return
+        end
+        for x in loopvals
+            Core.eval(mod, Expr(:(=), ts.loops.args[1], x))
+            descx = Core.eval(mod, desc)::String
+            # avoid repeating ourselves, transform this iteration into a "begin/end" testset
+            beginend = TestsetExpr(descx, nothing, ts.parent, ts.children)
+            beginend.run = true
+            dryrun(mod, beginend, rx, parentsubj, align)
+        end
+    end
+end
 
 module ReTestTest
 
