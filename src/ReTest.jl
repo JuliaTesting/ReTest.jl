@@ -21,7 +21,7 @@ using InlineTest: @testset, InlineTest, get_tests, TESTED_MODULES, INLINE_TEST
 
 include("testset.jl")
 
-using .Testset: Testset
+using .Testset: Testset, Format
 
 
 mutable struct TestsetExpr
@@ -140,28 +140,28 @@ function resolve!(mod::Module, ts::TestsetExpr, rx::Regex, force::Bool=false)
 end
 
 # convert a TestsetExpr into an actually runnable testset
-function make_ts(ts::TestsetExpr, rx::Regex)
+function make_ts(ts::TestsetExpr, rx::Regex, format::Format)
     ts.run || return nothing
 
     if isfinal(ts)
         body = ts.body
     else
-        body = make_ts(ts.body, rx)
+        body = make_ts(ts.body, rx, format)
     end
     if ts.loops === nothing
         quote
-            @testset $(isfinal(ts)) $rx $(ts.desc) $body
+            @testset $(isfinal(ts)) $rx $(ts.desc) $format $body
         end
     else
         loopvals = something(ts.loopvalues, ts.loops.args[2])
         quote
-            @testset $(isfinal(ts)) $rx $(ts.desc) $(ts.loops.args[1]) $loopvals $body
+            @testset $(isfinal(ts)) $rx $(ts.desc) $format $(ts.loops.args[1]) $loopvals $body
         end
     end
 end
 
-make_ts(x, rx) = x
-make_ts(ex::Expr, rx) = Expr(ex.head, map(x -> make_ts(x, rx), ex.args)...)
+make_ts(x, rx, _) = x
+make_ts(ex::Expr, rx, format) = Expr(ex.head, map(x -> make_ts(x, rx, format), ex.args)...)
 
 """
     runtests([m::Module], pattern = r""; [wrap::Bool], dry::Bool=false)
@@ -214,6 +214,7 @@ function runtests(mod::Module, pattern::Union{AbstractString,Regex} = r"";
 
     tests = get_tests(mod)
 
+    desc_align = 0
     for idx in eachindex(tests)
         ts = tests[idx]
         if !(ts isa TestsetExpr)
@@ -221,11 +222,19 @@ function runtests(mod::Module, pattern::Union{AbstractString,Regex} = r"";
         end
         run = resolve!(mod, ts, regex)
         run || continue
+        desc_len = length(ts.desc isa String ? ts.desc : ts.desc.args[1])
+        desc_align = max(desc_align, desc_len)
+    end
+
+    format = Format(desc_align)
+
+    for ts in tests
+        ts.run || continue
         if dry
             dryrun(mod, ts, regex)
             continue
         end
-        mts = make_ts(ts, regex)
+        mts = make_ts(ts, regex, format)
         if wrap
             push!(testsets, mts)
         else

@@ -40,14 +40,26 @@ function scrub_exc_stack(stack)
     return Any[ (x[1], scrub_backtrace(x[2])) for x in stack ]
 end
 
+mutable struct Format
+    desc_align::Int
+    pass_width::Int
+    fail_width::Int
+    error_width::Int
+    broken_width::Int
+    total_width::Int
+end
+
+Format(desc_align) = Format(desc_align, 0, 0, 0,0 ,0)
+
 mutable struct ReTestSet <: AbstractTestSet
     description::AbstractString
+    format::Format
     results::Vector
     n_passed::Int
     anynonpass::Bool
     verbose::Bool
 end
-ReTestSet(desc; verbose = false) = ReTestSet(desc, [], 0, false, verbose)
+ReTestSet(desc, format; verbose = false) = ReTestSet(desc, format, [], 0, false, verbose)
 
 # For a broken result, simply store the result
 record(ts::ReTestSet, t::Broken) = (push!(ts.results, t); t)
@@ -91,6 +103,9 @@ end
 function print_test_results(ts::ReTestSet, depth_pad=0)
     # Calculate the overall number for each type so each of
     # the test result types are aligned
+    fmt = ts.format
+    upd = false
+
     passes, fails, errors, broken, c_passes, c_fails, c_errors, c_broken = get_test_counts(ts)
     total_pass   = passes + c_passes
     total_fail   = fails  + c_fails
@@ -104,33 +119,75 @@ function print_test_results(ts::ReTestSet, depth_pad=0)
     dig_total = total > 0 ? ndigits(total) : 0
     # For each category, take max of digits and header width if there are
     # tests of that type
-    pass_width   = dig_pass   > 0 ? max(length("Pass"),   dig_pass)   : 0
-    fail_width   = dig_fail   > 0 ? max(length("Fail"),   dig_fail)   : 0
-    error_width  = dig_error  > 0 ? max(length("Error"),  dig_error)  : 0
-    broken_width = dig_broken > 0 ? max(length("Broken"), dig_broken) : 0
-    total_width  = dig_total  > 0 ? max(length("Total"),  dig_total)  : 0
+    pass_width   = dig_pass   > 0 ? max(6,   dig_pass) : 0
+    fail_width   = dig_fail   > 0 ? max(6,   dig_fail) : 0
+    error_width  = dig_error  > 0 ? max(6,  dig_error) : 0
+    broken_width = dig_broken > 0 ? max(6, dig_broken) : 0
+    total_width  = dig_total  > 0 ? max(6,  dig_total) : 0
+
+    if pass_width > fmt.pass_width
+        upd = true
+        fmt.pass_width = pass_width
+    else
+        pass_width = fmt.pass_width
+    end
+    if fail_width > fmt.fail_width
+        upd = true
+        fmt.fail_width = fail_width
+    else
+        fail_width = fmt.fail_width
+    end
+    if error_width > fmt.error_width
+        upd = true
+        fmt.error_width = error_width
+    else
+        error_width = fmt.error_width
+    end
+    if broken_width > fmt.broken_width
+        upd = true
+        fmt.broken_width = broken_width
+    else
+        broken_width = fmt.broken_width
+    end
+    if total_width > fmt.total_width
+        upd = true
+        fmt.total_width = total_width
+    else
+        total_width = fmt.total_width
+    end
+
     # Calculate the alignment of the test result counts by
     # recursively walking the tree of test sets
     align = max(get_alignment(ts, 0), length("Test Summary:"))
+
+    if align > fmt.desc_align
+        upd = true
+        fmt.desc_align = align
+    else
+        align = fmt.desc_align
+    end
+
     # Print the outer test set header once
-    pad = total == 0 ? "" : " "
-    printstyled(rpad("Test Summary:", align, " "), " |", pad; bold=true, color=:white)
-    if pass_width > 0
-        printstyled(lpad("Pass", pass_width, " "), "  "; bold=true, color=:green)
+    if upd
+        pad = total == 0 ? "" : " "
+        printstyled(rpad("Test Summary:", align, " "), " |", pad; bold=true, color=:white)
+        if pass_width > 0
+            printstyled(lpad("Pass", pass_width, " "), "  "; bold=true, color=:green)
+        end
+        if fail_width > 0
+            printstyled(lpad("Fail", fail_width, " "), "  "; bold=true, color=Base.error_color())
+        end
+        if error_width > 0
+            printstyled(lpad("Error", error_width, " "), "  "; bold=true, color=Base.error_color())
+        end
+        if broken_width > 0
+            printstyled(lpad("Broken", broken_width, " "), "  "; bold=true, color=Base.warn_color())
+        end
+        if total_width > 0
+            printstyled(lpad("Total", total_width, " "); bold=true, color=Base.info_color())
+        end
+        println()
     end
-    if fail_width > 0
-        printstyled(lpad("Fail", fail_width, " "), "  "; bold=true, color=Base.error_color())
-    end
-    if error_width > 0
-        printstyled(lpad("Error", error_width, " "), "  "; bold=true, color=Base.error_color())
-    end
-    if broken_width > 0
-        printstyled(lpad("Broken", broken_width, " "), "  "; bold=true, color=Base.warn_color())
-    end
-    if total_width > 0
-        printstyled(lpad("Total", total_width, " "); bold=true, color=Base.info_color())
-    end
-    println()
     # Recursively print a summary at every level
     print_counts(ts, depth_pad, align, pass_width, fail_width, error_width, broken_width, total_width)
 end
@@ -294,20 +351,19 @@ function get_testset_string(remove_last=false)
 end
 
 # non-inline testset with regex filtering support
-macro testset(isfinal::Bool, rx::Regex, desc::String, body)
-    Testset.testset_beginend(isfinal, rx, desc, body, __source__)
+macro testset(isfinal::Bool, rx::Regex, desc::String, format, body)
+    Testset.testset_beginend(isfinal, rx, desc, format, body, __source__)
 end
 
-macro testset(isfinal::Bool, rx::Regex, desc::Union{String,Expr},
-              loopiter, loopvals,
-              body)
-    Testset.testset_forloop(isfinal, rx, desc, loopiter, loopvals, body, __source__)
+macro testset(isfinal::Bool, rx::Regex, desc::Union{String,Expr}, format,
+              loopiter, loopvals, body)
+    Testset.testset_forloop(isfinal, rx, desc, format, loopiter, loopvals, body, __source__)
 end
 
 """
 Generate the code for a `@testset` with a `begin`/`end` argument
 """
-function testset_beginend(isfinal::Bool, rx::Regex, desc::String, tests, source)
+function testset_beginend(isfinal::Bool, rx::Regex, desc::String, format, tests, source)
     # Generate a block of code that initializes a new testset, adds
     # it to the task local storage, evaluates the test(s), before
     # finally removing the testset and giving it a chance to take
@@ -319,7 +375,7 @@ function testset_beginend(isfinal::Bool, rx::Regex, desc::String, tests, source)
         end
         if !$isfinal || occursin($rx, current_str)
             local ret
-            local ts = ReTestSet($desc)
+            local ts = ReTestSet($desc, $format)
             push_testset(ts)
             # we reproduce the logic of guardseed, but this function
             # cannot be used as it changes slightly the semantic of @testset,
@@ -355,7 +411,7 @@ end
 """
 Generate the code for a `@testset` with a `for` loop argument
 """
-function testset_forloop(isfinal::Bool, rx::Regex, desc::Union{String,Expr},
+function testset_forloop(isfinal::Bool, rx::Regex, desc::Union{String,Expr}, format,
                          loopiter, loopvals,
                          tests, source)
 
@@ -377,7 +433,7 @@ function testset_forloop(isfinal::Bool, rx::Regex, desc::Union{String,Expr},
                 # it's 1000 times faster to copy from tmprng rather than calling Random.seed!
                 copy!(RNG, tmprng)
             end
-            ts = ReTestSet($(esc(desc)))
+            ts = ReTestSet($(esc(desc)), $format)
             push_testset(ts)
             first_iteration = false
             try
