@@ -116,6 +116,10 @@ function print_test_results(ts::ReTestSet, depth_pad=0)
     dig_error  = total_error  > 0 ? ndigits(total_error)  : 0
     dig_broken = total_broken > 0 ? ndigits(total_broken) : 0
     total = total_pass + total_fail + total_error + total_broken
+    nprinted = (total_pass > 0) + (total_fail > 0) + (total_error > 0) + (total_broken > 0)
+    if nprinted <= 1
+       total = 0
+    end
     dig_total = total > 0 ? ndigits(total) : 0
     # For each category, take max of digits and header width if there are
     # tests of that type
@@ -169,7 +173,7 @@ function print_test_results(ts::ReTestSet, depth_pad=0)
 
     # Print the outer test set header once
     if upd
-        pad = total == 0 ? "" : " "
+        pad = nprinted == 0 ? "" : " "
         printstyled(rpad("Test Summary:", align, " "), " |", pad; bold=true, color=:white)
         if pass_width > 0
             printstyled(lpad("Pass", pass_width, " "), "  "; bold=true, color=:green)
@@ -322,7 +326,7 @@ function print_counts(ts::ReTestSet, depth, align,
 
     if np == 0 && nf == 0 && ne == 0 && nb == 0
         printstyled("No tests", color=Base.info_color())
-    else
+    elseif ((np > 0) + (nf > 0) + (ne > 0) + (nb > 0)) > 1
         printstyled(lpad(string(subtotal), total_width, " "), color=Base.info_color())
     end
     println()
