@@ -246,13 +246,6 @@ function runtests(pattern::Union{AbstractString,Regex} = r""; wrap::Bool=true)
     end
 end
 
-function partialize(r::Regex)
-    if r.match_options & (Base.PCRE.PARTIAL_HARD | Base.PCRE.PARTIAL_SOFT) == 0
-        Regex(r.pattern, r.compile_options, r.match_options | Base.PCRE.PARTIAL_SOFT)
-    else
-        r
-    end
-end
 
 module ReTestTest
 
