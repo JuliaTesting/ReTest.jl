@@ -164,7 +164,7 @@ make_ts(x, rx, _) = x
 make_ts(ex::Expr, rx, format) = Expr(ex.head, map(x -> make_ts(x, rx, format), ex.args)...)
 
 """
-    runtests([m::Module], pattern = r""; [wrap::Bool], dry::Bool=false)
+    runtests([m::Module], pattern = r""; [wrap::Bool], dry::Bool=false, stats::Bool=false)
 
 Run all the tests declared in `@testset` blocks, within `m` if specified,
 or within all currently loaded modules otherwise.
@@ -173,6 +173,7 @@ should be grouped according to the parent modules within a top-level `@testset`.
 The default is `wrap=false` when `m` is specified, `true` otherwise.
 If `dry` is `true`, don't actually run the tests, just print the descriptions
 of the testsets which would (presumably) run.
+If `stats` is `true`, print some time/memory statistics for each testset.
 
 It's possible to filter run testsets by specifying `pattern`: the "subject" of a
 testset is the concatenation of the subject of its parent `@testset`, if any,
@@ -202,7 +203,8 @@ module in which it was written (e.g. `m`, when specified).
 """
 function runtests(mod::Module, pattern::Union{AbstractString,Regex} = r"";
                   wrap::Bool=false,
-                  dry::Bool=false)
+                  dry::Bool=false,
+                  stats::Bool=false)
     regex = pattern isa Regex ? pattern :
         if VERSION >= v"1.3"
             r"" * pattern
@@ -226,7 +228,7 @@ function runtests(mod::Module, pattern::Union{AbstractString,Regex} = r"";
         desc_align = max(desc_align, desc_len)
     end
 
-    format = Format(desc_align)
+    format = Format(stats, desc_align)
 
     for ts in tests
         ts.run || continue

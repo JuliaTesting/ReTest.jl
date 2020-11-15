@@ -8,6 +8,8 @@ import Test: finish, record
 
 import Random
 
+using Printf: @sprintf
+
 import InlineTest: @testset
 
 # mostly copied from Test stdlib
@@ -41,6 +43,7 @@ function scrub_exc_stack(stack)
 end
 
 mutable struct Format
+    stats::Bool
     desc_align::Int
     pass_width::Int
     fail_width::Int
@@ -49,7 +52,7 @@ mutable struct Format
     total_width::Int
 end
 
-Format(desc_align) = Format(desc_align, 0, 0, 0,0 ,0)
+Format(stats, desc_align) = Format(stats, desc_align, 0, 0, 0,0 ,0)
 
 mutable struct ReTestSet <: AbstractTestSet
     description::AbstractString
@@ -58,8 +61,10 @@ mutable struct ReTestSet <: AbstractTestSet
     n_passed::Int
     anynonpass::Bool
     verbose::Bool
+    timed::NamedTuple
 end
-ReTestSet(desc, format; verbose = false) = ReTestSet(desc, format, [], 0, false, verbose)
+ReTestSet(desc, format; verbose = false) = ReTestSet(desc, format, [], 0, false, verbose,
+                                                     NamedTuple())
 
 # For a broken result, simply store the result
 record(ts::ReTestSet, t::Broken) = (push!(ts.results, t); t)
@@ -189,6 +194,10 @@ function print_test_results(ts::ReTestSet, depth_pad=0)
         end
         if total_width > 0
             printstyled(lpad("Total", total_width, " "); bold=true, color=Base.info_color())
+        end
+        if fmt.stats
+            # copied from Julia/test/runtests.jl
+            printstyled("| Time (s) | GC (s) | GC % | Alloc (MB) | ΔRSS (MB)", color=:white)
         end
         println()
     end
@@ -329,6 +338,30 @@ function print_counts(ts::ReTestSet, depth, align,
     elseif ((np > 0) + (nf > 0) + (ne > 0) + (nb > 0)) > 1
         printstyled(lpad(string(subtotal), total_width, " "), color=Base.info_color())
     end
+
+    if ts.format.stats # copied from Julia/test/runtests.jl
+        timed = ts.timed
+        elapsed_align = textwidth("Time (s)")
+        gc_align      = textwidth("GC (s)")
+        percent_align = textwidth("GC %")
+        alloc_align   = textwidth("Alloc (MB)")
+        rss_align     = textwidth("ΔRSS (MB)")
+
+        time_str = @sprintf("%7.2f", timed.time)
+        printstyled("| ", lpad(time_str, elapsed_align, " "), " | ", color=:white)
+        gc_str = @sprintf("%5.2f", timed.gcstats.total_time / 10^9)
+        printstyled(lpad(gc_str, gc_align, " "), " | ", color=:white)
+
+        # since there may be quite a few digits in the percentage,
+        # the left-padding here is less to make sure everything fits
+        percent_str = @sprintf("%4.1f",
+                               100 * timed.gcstats.total_time / (10^9 * timed.time))
+        printstyled(lpad(percent_str, percent_align, " "), " | ", color=:white)
+        alloc_str = @sprintf("%5.2f", timed.bytes / 2^20)
+        printstyled(lpad(alloc_str, alloc_align, " "), " | ", color=:white)
+        rss_str = @sprintf("%5.2f", timed.rss / 2^20)
+        printstyled(lpad(rss_str, rss_align, " "), color=:white)
+    end
     println()
 
     # Only print results at lower levels if we had failures or if the user
@@ -386,12 +419,16 @@ function testset_beginend(isfinal::Bool, rx::Regex, desc::String, format, tests,
             # by wrapping the body in a function
             local RNG = default_rng()
             local oldrng = copy(RNG)
+            local timed
+            local rss
             try
                 # RNG is re-seeded with its own seed to ease reproduce a failed test
                 Random.seed!(RNG.seed)
+                rss = Sys.maxrss()
                 let
-                    $(esc(tests))
+                    timed = @timed $(esc(tests))
                 end
+                rss = Sys.maxrss() - rss
             catch err
                 err isa InterruptException && rethrow()
                 # something in the test block threw an error. Count that as an
@@ -400,7 +437,7 @@ function testset_beginend(isfinal::Bool, rx::Regex, desc::String, format, tests,
             finally
                 copy!(RNG, oldrng)
                 pop_testset()
-                ret = finish(ts)
+                ret = finish(set_timed!(ts, timed, rss))
             end
             ret
         end
@@ -433,7 +470,7 @@ function testset_forloop(isfinal::Bool, rx::Regex, desc::Union{String,Expr}, for
             # they can be handled properly by `finally` lowering.
             if !first_iteration
                 pop_testset()
-                push!(arr, finish(ts))
+                push!(arr, finish(set_timed!(ts, timed, rss)))
                 # it's 1000 times faster to copy from tmprng rather than calling Random.seed!
                 copy!(RNG, tmprng)
             end
@@ -441,7 +478,11 @@ function testset_forloop(isfinal::Bool, rx::Regex, desc::Union{String,Expr}, for
             push_testset(ts)
             first_iteration = false
             try
-                $(esc(tests))
+                rss = Sys.maxrss()
+                let
+                    timed = @timed $(esc(tests))
+                end
+                rss = Sys.maxrss() - rss
             catch err
                 err isa InterruptException && rethrow()
                 # Something in the test block threw an error. Count that as an
@@ -458,6 +499,8 @@ function testset_forloop(isfinal::Bool, rx::Regex, desc::Union{String,Expr}, for
         local oldrng = copy(RNG)
         Random.seed!(RNG.seed)
         local tmprng = copy(RNG)
+        local timed
+        local rss
         try
             let
                 $(Expr(:for, Expr(:block, [esc(v) for v in loopvars]...), blk))
@@ -466,12 +509,21 @@ function testset_forloop(isfinal::Bool, rx::Regex, desc::Union{String,Expr}, for
             # Handle `return` in test body
             if !first_iteration
                 pop_testset()
-                push!(arr, finish(ts))
+                push!(arr, finish(set_timed!(ts, timed, rss)))
             end
             copy!(RNG, oldrng)
         end
         arr
     end
+end
+
+function set_timed!(ts, timed, rss)
+    # on Julia < 1.5, @timed returns a Tuple; here we give the names as in
+    # Julia 1.5+, but we filter out the `val` field, unused here
+    ts.timed = (time = timed[2], bytes = timed[3],
+                gctime = timed[4], gcstats = timed[5],
+                rss = rss)
+    ts
 end
 
 end # module

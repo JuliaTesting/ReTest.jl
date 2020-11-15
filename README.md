@@ -48,6 +48,7 @@ should be grouped according to the parent modules within a top-level `@testset`.
 The default is `wrap=false` when `m` is specified, `true` otherwise.
 If `dry` is `true`, don't actually run the tests, just print the descriptions
 of the testsets which would (presumably) run.
+If `stats` is `true`, print some time/memory statistics for each testset.
 
 It's possible to filter run testsets by specifying `pattern`: the "subject" of a
 testset is the concatenation of the subject of its parent `@testset`, if any,
