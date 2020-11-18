@@ -94,8 +94,7 @@ check(".*h", ["f1", "h1", "h2"])
 check(".*h1", ["f1", "h1"])
 check(".*h\$", [])
 
-runtests(M, wrap=true) # TODO: more precise tests
-runtests(M, wrap=false)
+runtests(M)
 
 module N
 using ReTest

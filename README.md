@@ -39,13 +39,10 @@ order to call `runtests`.
 ### `runtests` docstring
 
 ```
-    runtests([m::Module], pattern = r""; [wrap::Bool], dry::Bool=false)
+    runtests([m::Module], pattern = r""; dry::Bool=false)
 ```
 Run all the tests declared in `@testset` blocks, within `m` if specified,
 or within all currently loaded modules otherwise.
-The `wrap` keyword specifies whether the collection of `@testset` expressions
-should be grouped according to the parent modules within a top-level `@testset`.
-The default is `wrap=false` when `m` is specified, `true` otherwise.
 If `dry` is `true`, don't actually run the tests, just print the descriptions
 of the testsets which would (presumably) run.
 If `stats` is `true`, print some time/memory statistics for each testset.

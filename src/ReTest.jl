@@ -164,13 +164,10 @@ make_ts(x, rx, _) = x
 make_ts(ex::Expr, rx, format) = Expr(ex.head, map(x -> make_ts(x, rx, format), ex.args)...)
 
 """
-    runtests([m::Module], pattern = r""; [wrap::Bool], dry::Bool=false, stats::Bool=false)
+    runtests([m::Module], pattern = r""; dry::Bool=false, stats::Bool=false)
 
 Run all the tests declared in `@testset` blocks, within `m` if specified,
 or within all currently loaded modules otherwise.
-The `wrap` keyword specifies whether the collection of `@testset` expressions
-should be grouped according to the parent modules within a top-level `@testset`.
-The default is `wrap=false` when `m` is specified, `true` otherwise.
 If `dry` is `true`, don't actually run the tests, just print the descriptions
 of the testsets which would (presumably) run.
 If `stats` is `true`, print some time/memory statistics for each testset.
@@ -202,7 +199,6 @@ Note: this function executes each (top-level) `@testset` block using `eval` *wit
 module in which it was written (e.g. `m`, when specified).
 """
 function runtests(mod::Module, pattern::Union{AbstractString,Regex} = r"";
-                  wrap::Bool=false,
                   dry::Bool=false,
                   stats::Bool=false)
     regex = pattern isa Regex ? pattern :
@@ -211,8 +207,6 @@ function runtests(mod::Module, pattern::Union{AbstractString,Regex} = r"";
         else
             Regex(pattern)
         end
-
-    testsets = []
 
     tests = get_tests(mod)
 
@@ -237,31 +231,19 @@ function runtests(mod::Module, pattern::Union{AbstractString,Regex} = r"";
             continue
         end
         mts = make_ts(ts, regex, format)
-        if wrap
-            push!(testsets, mts)
-        else
-            Core.eval(mod, mts)
-        end
-    end
-    if wrap
-        Core.eval(mod,
-                  quote
-                      ReTest.Test.@testset $("Tests for module $mod") begin
-                          $(testsets...)
-                      end
-                  end)
+        Core.eval(mod, mts)
     end
     nothing
 end
 
-function runtests(pattern::Union{AbstractString,Regex} = r""; wrap::Bool=true)
+function runtests(pattern::Union{AbstractString,Regex} = r"")
     # TESTED_MODULES is not up-to-date w.r.t. package modules which have
     # precompilation, so we have to also look in Base.loaded_modules
     # TODO: look recursively in "loaded modules" which use ReTest for sub-modules
     for m in unique(Iterators.flatten((values(Base.loaded_modules), TESTED_MODULES)))
         if isdefined(m, INLINE_TEST[])
             # will automatically skip ReTest and ReTest.ReTestTest
-            runtests(m, pattern, wrap=wrap)
+            runtests(m, pattern)
         end
     end
 end
@@ -310,7 +292,6 @@ end # module ReTestTest
     @assert typeof(@__MODULE__) == Module
     @test 1 != 2
     runtests(ReTestTest)
-    runtests(ReTestTest, wrap=true)
 end
 
 end # module ReTest
