@@ -278,6 +278,20 @@ empty!(Loops3.RUN)
 runtests(Loops3)
 @test Loops3.RUN == [1, 0, -1, 2, 0, -1]
 
+### Failing ##################################################################
+
+module Failing
+using ReTest
+
+@testset "has fails" begin
+    @test false
+end
+end
+
+@test_throws Test.TestSetException runtests(Failing)
+
+### InlineTest ###############################################################
+
 using Pkg
 Pkg.activate("./FakePackage")
 Pkg.develop(PackageSpec(path="../InlineTest"))
