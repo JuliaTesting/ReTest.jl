@@ -67,27 +67,10 @@ end
 ReTestSet(desc; verbose = false) = ReTestSet(desc, [], 0, false, verbose,
                                              NamedTuple(), nothing)
 
-# For a broken result, simply store the result
-record(ts::ReTestSet, t::Broken) = (push!(ts.results, t); t)
+# For a non-passed result, simply store the result
+record(ts::ReTestSet, t::Union{Broken,Fail,Error}) = (push!(ts.results, t); t)
 # For a passed result, do not store the result since it uses a lot of memory
 record(ts::ReTestSet, t::Pass) = (ts.n_passed += 1; t)
-
-# For the other result types, immediately print the error message
-# but do not terminate. Print a backtrace.
-function record(ts::ReTestSet, t::Union{Fail, Error})
-    printstyled(ts.description, ": ", color=:white)
-    # don't print for interrupted tests
-    if !(t isa Error) || t.test_type !== :test_interrupted
-        print(t)
-        if !isa(t, Error) # if not gets printed in the show method
-            Base.show_backtrace(stdout, scrub_backtrace(backtrace()))
-        end
-        println()
-    end
-
-    push!(ts.results, t)
-    return t
-end
 
 # When a ReTestSet finishes, it records itself to its parent
 # testset, if there is one. This allows for recursive printing of
@@ -97,8 +80,15 @@ record(ts::ReTestSet, t::AbstractTestSet) = push!(ts.results, t)
 function print_test_errors(ts::ReTestSet)
     for t in ts.results
         if isa(t, Error) || isa(t, Fail)
-            println("Error in testset $(ts.description):")
-            show(t)
+            printstyled(ts.description, ": ", color=:white)
+
+            # don't print for interrupted tests
+            if t isa Fail || t.test_type !== :test_interrupted
+                show(t)
+            end
+            if t isa Fail # if not gets printed in the show method
+                # Base.show_backtrace(stdout, scrub_backtrace(backtrace()))
+            end
             println()
         elseif isa(t, ReTestSet)
             print_test_errors(t)
@@ -433,7 +423,8 @@ function testset_beginend(isfinal::Bool, rx::Regex, desc::String, outchan, tests
                 err isa InterruptException && rethrow()
                 # something in the test block threw an error. Count that as an
                 # error in this test set
-                record(ts, Error(:nontest_error, Expr(:tuple), err, Base.catch_stack(), $(QuoteNode(source))))
+                record(ts, Error(:nontest_error, Expr(:tuple), err,
+                                 Base.catch_stack(), $(QuoteNode(source))))
             finally
                 copy!(RNG, oldrng)
                 pop_testset()
@@ -443,7 +434,9 @@ function testset_beginend(isfinal::Bool, rx::Regex, desc::String, outchan, tests
         end
     end
     # preserve outer location if possible
-    if tests isa Expr && tests.head === :block && !isempty(tests.args) && tests.args[1] isa LineNumberNode
+    if tests isa Expr && tests.head === :block &&
+        !isempty(tests.args) && tests.args[1] isa LineNumberNode
+
         ex = Expr(:block, tests.args[1], ex)
     end
     return ex

@@ -2,6 +2,8 @@ module ReTest
 
 export runtests, @testset
 
+using Distributed
+
 # from Test:
 export Test,
     @test, @test_throws, @test_broken, @test_skip,
@@ -223,22 +225,66 @@ function runtests(mod::Module, pattern::Union{AbstractString,Regex} = r"";
     end
 
     tests = filter(ts -> ts.run, tests)
-    dry && return foreach(ts -> dryrun(mod, ts, regex), tests)
 
-    format = Format(stats, desc_align)
+    dry &&
+        return foreach(ts -> dryrun(mod, ts, regex), tests)
 
-    outchan = Channel{Testset.ReTestSet}() do outch
-        for ts in tests
-            mts = make_ts(ts, regex, outch)
-            Core.eval(mod, mts)
+    outchan = RemoteChannel(() -> Channel{Union{Nothing,Testset.ReTestSet}}(0))
+
+    nprinted = 0
+    allpass = true
+    exception = Ref{Exception}()
+
+    printer = @async begin
+        errored = false
+        format = Format(stats, desc_align)
+
+        while true
+            rts = take!(outchan)
+            rts === nothing && break
+            errored && continue
+
+            Testset.print_test_results(rts, format)
+            if rts.anynonpass
+                println()
+                Testset.print_test_errors(rts)
+                errored = true
+                allpass = false
+                empty!(tests)
+            end
+            nprinted += 1
+            if rts.exception !== nothing
+                exception[] = rts.exception
+            end
         end
     end
 
-    for rts in outchan
-        Testset.print_test_results(rts, format)
-        if rts.exception !== nothing
-            throw(rts.exception)
+    ntests = 0
+    @sync for wrkr in workers()
+        @async begin
+            while !isempty(tests)
+                ts = popfirst!(tests)
+                resp = try
+                    remotecall_fetch(wrkr, mod, ts, regex, outchan) do mod, ts, regex, outchan
+                        mts = make_ts(ts, regex, outchan)
+                        res = Core.eval(mod, mts)
+                        res isa Vector ? length(res) : 1
+                    end
+                catch e
+                    allpass = false
+                    empty!(tests)
+                    isa(e, InterruptException) || rethrow()
+                    return
+                end
+                ntests += resp
+            end
         end
+    end
+    put!(outchan, nothing)
+    wait(printer)
+    @assert !allpass || nprinted == ntests
+    if isassigned(exception)
+        throw(exception[])
     end
 end
 
