@@ -56,15 +56,16 @@ Format(stats, desc_align) = Format(stats, desc_align, 0, 0, 0,0 ,0)
 
 mutable struct ReTestSet <: AbstractTestSet
     description::AbstractString
-    format::Format
     results::Vector
     n_passed::Int
     anynonpass::Bool
     verbose::Bool
     timed::NamedTuple
+    exception::Union{TestSetException,Nothing}
 end
-ReTestSet(desc, format; verbose = false) = ReTestSet(desc, format, [], 0, false, verbose,
-                                                     NamedTuple())
+
+ReTestSet(desc; verbose = false) = ReTestSet(desc, [], 0, false, verbose,
+                                             NamedTuple(), nothing)
 
 # For a broken result, simply store the result
 record(ts::ReTestSet, t::Broken) = (push!(ts.results, t); t)
@@ -105,10 +106,9 @@ function print_test_errors(ts::ReTestSet)
     end
 end
 
-function print_test_results(ts::ReTestSet, depth_pad=0)
+function print_test_results(ts::ReTestSet, fmt::Format, depth_pad=0)
     # Calculate the overall number for each type so each of
     # the test result types are aligned
-    fmt = ts.format
     upd = false
 
     passes, fails, errors, broken, c_passes, c_fails, c_errors, c_broken = get_test_counts(ts)
@@ -202,12 +202,12 @@ function print_test_results(ts::ReTestSet, depth_pad=0)
         println()
     end
     # Recursively print a summary at every level
-    print_counts(ts, depth_pad, align, pass_width, fail_width, error_width, broken_width, total_width)
+    print_counts(ts, fmt, depth_pad, align, pass_width, fail_width, error_width, broken_width, total_width)
 end
 
 # Called at the end of a @testset, behaviour depends on whether
 # this is a child of another testset, or the "root" testset
-function finish(ts::ReTestSet)
+function finish(ts::ReTestSet, outchan)
     # If we are a nested test set, do not print a full summary
     # now - let the parent test set do the printing
     if get_testset_depth() != 0
@@ -223,15 +223,15 @@ function finish(ts::ReTestSet)
     total_broken = broken + c_broken
     total = total_pass + total_fail + total_error + total_broken
 
-    print_test_results(ts)
-
     # Finally throw an error as we are the outermost test set
     if total != total_pass + total_broken
         # Get all the error/failures and bring them along for the ride
         efs = filter_errors(ts)
-        throw(TestSetException(total_pass, total_fail, total_error, total_broken, efs))
+        ts.exception = TestSetException(total_pass, total_fail, total_error,
+                                        total_broken, efs)
     end
 
+    put!(outchan, ts)
     # return the testset so it is returned from the @testset macro
     ts
 end
@@ -291,7 +291,7 @@ end
 
 # Recursive function that prints out the results at each level of
 # the tree of test sets
-function print_counts(ts::ReTestSet, depth, align,
+function print_counts(ts::ReTestSet, fmt::Format, depth, align,
                       pass_width, fail_width, error_width, broken_width, total_width)
     # Count results by each type at this level, and recursively
     # through any child test sets
@@ -339,7 +339,7 @@ function print_counts(ts::ReTestSet, depth, align,
         printstyled(lpad(string(subtotal), total_width, " "), color=Base.info_color())
     end
 
-    if ts.format.stats # copied from Julia/test/runtests.jl
+    if fmt.stats # copied from Julia/test/runtests.jl
         timed = ts.timed
         elapsed_align = textwidth("Time (s)")
         gc_align      = textwidth("GC (s)")
@@ -369,7 +369,7 @@ function print_counts(ts::ReTestSet, depth, align,
     if (np + nb != subtotal) || (ts.verbose)
         for t in ts.results
             if isa(t, ReTestSet)
-                print_counts(t, depth + 1, align,
+                print_counts(t, fmt, depth + 1, align,
                     pass_width, fail_width, error_width, broken_width, total_width)
             end
         end
@@ -388,19 +388,19 @@ function get_testset_string(remove_last=false)
 end
 
 # non-inline testset with regex filtering support
-macro testset(isfinal::Bool, rx::Regex, desc::String, format, body)
-    Testset.testset_beginend(isfinal, rx, desc, format, body, __source__)
+macro testset(isfinal::Bool, rx::Regex, desc::String, outchan, body)
+    Testset.testset_beginend(isfinal, rx, desc, outchan,  body, __source__)
 end
 
-macro testset(isfinal::Bool, rx::Regex, desc::Union{String,Expr}, format,
+macro testset(isfinal::Bool, rx::Regex, desc::Union{String,Expr}, outchan,
               loopiter, loopvals, body)
-    Testset.testset_forloop(isfinal, rx, desc, format, loopiter, loopvals, body, __source__)
+    Testset.testset_forloop(isfinal, rx, desc, outchan, loopiter, loopvals, body, __source__)
 end
 
 """
 Generate the code for a `@testset` with a `begin`/`end` argument
 """
-function testset_beginend(isfinal::Bool, rx::Regex, desc::String, format, tests, source)
+function testset_beginend(isfinal::Bool, rx::Regex, desc::String, outchan, tests, source)
     # Generate a block of code that initializes a new testset, adds
     # it to the task local storage, evaluates the test(s), before
     # finally removing the testset and giving it a chance to take
@@ -412,7 +412,7 @@ function testset_beginend(isfinal::Bool, rx::Regex, desc::String, format, tests,
         end
         if !$isfinal || occursin($rx, current_str)
             local ret
-            local ts = ReTestSet($desc, $format)
+            local ts = ReTestSet($desc)
             push_testset(ts)
             # we reproduce the logic of guardseed, but this function
             # cannot be used as it changes slightly the semantic of @testset,
@@ -437,7 +437,7 @@ function testset_beginend(isfinal::Bool, rx::Regex, desc::String, format, tests,
             finally
                 copy!(RNG, oldrng)
                 pop_testset()
-                ret = finish(set_timed!(ts, timed, rss))
+                ret = finish(set_timed!(ts, timed, rss), $outchan)
             end
             ret
         end
@@ -452,7 +452,7 @@ end
 """
 Generate the code for a `@testset` with a `for` loop argument
 """
-function testset_forloop(isfinal::Bool, rx::Regex, desc::Union{String,Expr}, format,
+function testset_forloop(isfinal::Bool, rx::Regex, desc::Union{String,Expr}, outchan,
                          loopiter, loopvals,
                          tests, source)
 
@@ -470,11 +470,11 @@ function testset_forloop(isfinal::Bool, rx::Regex, desc::Union{String,Expr}, for
             # they can be handled properly by `finally` lowering.
             if !first_iteration
                 pop_testset()
-                push!(arr, finish(set_timed!(ts, timed, rss)))
+                push!(arr, finish(set_timed!(ts, timed, rss), $outchan))
                 # it's 1000 times faster to copy from tmprng rather than calling Random.seed!
                 copy!(RNG, tmprng)
             end
-            ts = ReTestSet($(esc(desc)), $format)
+            ts = ReTestSet($(esc(desc)))
             push_testset(ts)
             first_iteration = false
             try
@@ -509,7 +509,7 @@ function testset_forloop(isfinal::Bool, rx::Regex, desc::Union{String,Expr}, for
             # Handle `return` in test body
             if !first_iteration
                 pop_testset()
-                push!(arr, finish(set_timed!(ts, timed, rss)))
+                push!(arr, finish(set_timed!(ts, timed, rss), $outchan))
             end
             copy!(RNG, oldrng)
         end

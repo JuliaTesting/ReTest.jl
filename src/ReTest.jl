@@ -140,28 +140,28 @@ function resolve!(mod::Module, ts::TestsetExpr, rx::Regex, force::Bool=false)
 end
 
 # convert a TestsetExpr into an actually runnable testset
-function make_ts(ts::TestsetExpr, rx::Regex, format::Format)
+function make_ts(ts::TestsetExpr, rx::Regex, outchan)
     ts.run || return nothing
 
     if isfinal(ts)
         body = ts.body
     else
-        body = make_ts(ts.body, rx, format)
+        body = make_ts(ts.body, rx, outchan)
     end
     if ts.loops === nothing
         quote
-            @testset $(isfinal(ts)) $rx $(ts.desc) $format $body
+            @testset $(isfinal(ts)) $rx $(ts.desc) $outchan $body
         end
     else
         loopvals = something(ts.loopvalues, ts.loops.args[2])
         quote
-            @testset $(isfinal(ts)) $rx $(ts.desc) $format $(ts.loops.args[1]) $loopvals $body
+            @testset $(isfinal(ts)) $rx $(ts.desc) $outchan $(ts.loops.args[1]) $loopvals $body
         end
     end
 end
 
 make_ts(x, rx, _) = x
-make_ts(ex::Expr, rx, format) = Expr(ex.head, map(x -> make_ts(x, rx, format), ex.args)...)
+make_ts(ex::Expr, rx, outchan) = Expr(ex.head, map(x -> make_ts(x, rx, outchan), ex.args)...)
 
 """
     runtests([m::Module], pattern = r""; dry::Bool=false, stats::Bool=false)
@@ -222,18 +222,24 @@ function runtests(mod::Module, pattern::Union{AbstractString,Regex} = r"";
         desc_align = max(desc_align, desc_len)
     end
 
+    tests = filter(ts -> ts.run, tests)
+    dry && return foreach(ts -> dryrun(mod, ts, regex), tests)
+
     format = Format(stats, desc_align)
 
-    for ts in tests
-        ts.run || continue
-        if dry
-            dryrun(mod, ts, regex)
-            continue
+    outchan = Channel{Testset.ReTestSet}() do outch
+        for ts in tests
+            mts = make_ts(ts, regex, outch)
+            Core.eval(mod, mts)
         end
-        mts = make_ts(ts, regex, format)
-        Core.eval(mod, mts)
     end
-    nothing
+
+    for rts in outchan
+        Testset.print_test_results(rts, format)
+        if rts.exception !== nothing
+            throw(rts.exception)
+        end
+    end
 end
 
 function runtests(pattern::Union{AbstractString,Regex} = r"")
