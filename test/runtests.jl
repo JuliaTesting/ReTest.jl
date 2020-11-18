@@ -54,7 +54,7 @@ innertestsets = ["d", "e1", "e2", "g", "h1", "h2"]
 function check(rx, list)
     empty!(RUN)
     runtests(M, Regex(rx))
-    @test sort(RUN) == sort(list)
+    @test RUN == list
     mktemp() do path, io
         redirect_stdout(io) do
             runtests(M, Regex(rx), dry=true)
@@ -94,6 +94,8 @@ check(".*h", ["f1", "h1", "h2"])
 check(".*h1", ["f1", "h1"])
 check(".*h\$", [])
 
+# by default, respect order of tests:
+check("", ["a", "b1", "b2", "c", "d", "e1", "e2", "f1", "g", "h1", "h2"])
 runtests(M)
 
 module N
