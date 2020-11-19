@@ -52,7 +52,7 @@ macro testset(args...)
     # if the @testset if in a `if false` branch
     # TODO: test that
     quote
-        push!(get_tests($__module__), $args)
+        push!(get_tests($__module__), (ts=$args, source=$(QuoteNode(__source__))))
         nothing
     end
 end
