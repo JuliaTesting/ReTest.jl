@@ -3,6 +3,7 @@ module ReTest
 export runtests, @testset
 
 using Distributed
+using Random: shuffle!
 
 # from Test:
 export Test,
@@ -167,13 +168,15 @@ make_ts(x, rx, _) = x
 make_ts(ex::Expr, rx, outchan) = Expr(ex.head, map(x -> make_ts(x, rx, outchan), ex.args)...)
 
 """
-    runtests([m::Module], pattern = r""; dry::Bool=false, stats::Bool=false)
+    runtests([m::Module], pattern = r""; dry::Bool=false, stats::Bool=false,
+                                         shuffle::Bool=false)
 
 Run all the tests declared in `@testset` blocks, within `m` if specified,
 or within all currently loaded modules otherwise.
 If `dry` is `true`, don't actually run the tests, just print the descriptions
 of the testsets which would (presumably) run.
 If `stats` is `true`, print some time/memory statistics for each testset.
+If `shuffle` is `true`, shuffle the order in which top-level testsets are run.
 
 It's possible to filter run testsets by specifying `pattern`: the "subject" of a
 testset is the concatenation of the subject of its parent `@testset`, if any,
@@ -204,6 +207,7 @@ module in which it was written (e.g. `m`, when specified).
 function runtests(mod::Module, pattern::Union{AbstractString,Regex} = r"";
                   dry::Bool=false,
                   stats::Bool=false,
+                  shuffle::Bool=false,
                   group::Bool=true)
     regex = pattern isa Regex ? pattern :
         if VERSION >= v"1.3"
@@ -229,6 +233,9 @@ function runtests(mod::Module, pattern::Union{AbstractString,Regex} = r"";
 
     tests = filter(ts -> ts.run, tests)
     isempty(tests) && return
+
+    shuffle &&
+        shuffle!(tests)
 
     dry &&
         return foreach(ts -> dryrun(mod, ts, regex), tests)
