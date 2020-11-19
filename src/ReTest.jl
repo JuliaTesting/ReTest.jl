@@ -241,7 +241,18 @@ function runtests(mod::Module, pattern::Union{AbstractString,Regex} = r"";
         return foreach(ts -> dryrun(mod, ts, regex), tests)
 
     if group && nworkers() > 1
-        sort!(tests, by=ts->ts.source.file)
+        # make test groups according to file names
+        files = Dict{Symbol, Int}()
+        n = 1
+        for ts in tests
+            k = get!(files, ts.source.file, n)
+            n += (k == n)
+        end
+
+        sort!(tests, lt = function(s, t)
+                  files[s.source.file] < files[t.source.file]
+              end)
+
         groups = [1 => tests[1].source.file]
         for (ith, ts) in enumerate(tests)
             _, file = groups[end]
