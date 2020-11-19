@@ -27,6 +27,7 @@ using .Testset: Testset, Format
 
 
 mutable struct TestsetExpr
+    source::LineNumberNode
     desc::Union{String,Expr}
     loops::Union{Expr,Nothing}
     parent::Union{TestsetExpr,Nothing}
@@ -36,30 +37,30 @@ mutable struct TestsetExpr
     run::Bool
     body::Expr
 
-    TestsetExpr(desc, loops, parent, children=TestsetExpr[]) =
-        new(desc, loops, parent, children, String[])
+    TestsetExpr(source, desc, loops, parent, children=TestsetExpr[]) =
+        new(source, desc, loops, parent, children, String[])
 end
 
 isfor(ts::TestsetExpr) = ts.loops !== nothing
 isfinal(ts::TestsetExpr) = isempty(ts.children)
 
 # replace unqualified `@testset` by TestsetExpr
-function replace_ts(x::Expr, parent)
+function replace_ts(source, x::Expr, parent)
     if x.head === :macrocall && x.args[1] === Symbol("@testset")
         @assert x.args[2] isa LineNumberNode
-        ts = parse_ts(Tuple(x.args[3:end]), parent)
+        ts = parse_ts(source, Tuple(x.args[3:end]), parent)
         parent !== nothing && push!(parent.children, ts)
         ts
     else
-        body = map(z -> replace_ts(z, parent), x.args)
+        body = map(z -> replace_ts(source, z, parent), x.args)
         Expr(x.head, body...)
     end
 end
 
-replace_ts(x, _) = x
+replace_ts(source, x, _) = x
 
 # create a TestsetExpr from @testset's args
-function parse_ts(args::Tuple, parent=nothing)
+function parse_ts(source, args::Tuple, parent=nothing)
     length(args) == 2 || error("unsupported @testset")
 
     desc = args[1]
@@ -77,8 +78,8 @@ function parse_ts(args::Tuple, parent=nothing)
         error("Expected begin/end block or for loop as argument to @testset")
     end
 
-    ts = TestsetExpr(desc, loops, parent)
-    ts.body = replace_ts(tsbody, ts)
+    ts = TestsetExpr(source, desc, loops, parent)
+    ts.body = replace_ts(source, tsbody, ts)
     ts
 end
 
@@ -202,7 +203,8 @@ module in which it was written (e.g. `m`, when specified).
 """
 function runtests(mod::Module, pattern::Union{AbstractString,Regex} = r"";
                   dry::Bool=false,
-                  stats::Bool=false)
+                  stats::Bool=false,
+                  group::Bool=true)
     regex = pattern isa Regex ? pattern :
         if VERSION >= v"1.3"
             r"" * pattern
@@ -216,7 +218,8 @@ function runtests(mod::Module, pattern::Union{AbstractString,Regex} = r"";
     for idx in eachindex(tests)
         ts = tests[idx]
         if !(ts isa TestsetExpr)
-            ts = tests[idx] = parse_ts(ts)
+            ts = parse_ts(ts.source, ts.ts)
+            tests[idx] = ts
         end
         run = resolve!(mod, ts, regex)
         run || continue
@@ -225,9 +228,22 @@ function runtests(mod::Module, pattern::Union{AbstractString,Regex} = r"";
     end
 
     tests = filter(ts -> ts.run, tests)
+    isempty(tests) && return
 
     dry &&
         return foreach(ts -> dryrun(mod, ts, regex), tests)
+
+    if group && nworkers() > 1
+        sort!(tests, by=ts->ts.source.file)
+        groups = [1 => tests[1].source.file]
+        for (ith, ts) in enumerate(tests)
+            _, file = groups[end]
+            if ts.source.file != file
+                push!(groups, ith => ts.source.file)
+            end
+        end
+        todo = fill(true, length(tests))
+    end
 
     outchan = RemoteChannel(() -> Channel{Union{Nothing,Testset.ReTestSet}}())
 
@@ -250,7 +266,7 @@ function runtests(mod::Module, pattern::Union{AbstractString,Regex} = r"";
                 Testset.print_test_errors(rts)
                 errored = true
                 allpass = false
-                empty!(tests)
+                ndone = length(tests)
             end
             nprinted += 1
             if rts.exception !== nothing
@@ -260,10 +276,32 @@ function runtests(mod::Module, pattern::Union{AbstractString,Regex} = r"";
     end
 
     ntests = 0
+    ndone = 0
     @sync for wrkr in workers()
         @async begin
-            while !isempty(tests)
-                ts = popfirst!(tests)
+            file = nothing
+            idx = 0
+            while ndone < length(tests)
+                ndone += 1
+                if !@isdefined(groups)
+                    ts = tests[ndone]
+                else
+                    if file === nothing
+                        if isempty(groups)
+                            idx = findfirst(todo)
+                        else
+                            idx, file = popfirst!(groups)
+                        end
+                    end
+                    ts = tests[idx]
+                    todo[idx] = false
+                    if idx == length(tests) || file === nothing ||
+                            tests[idx+1].source.file != file
+                        file = nothing
+                    else
+                        idx += 1
+                    end
+                end
                 resp = try
                     remotecall_fetch(wrkr, mod, ts, regex, outchan) do mod, ts, regex, outchan
                         mts = make_ts(ts, regex, outchan)
@@ -272,7 +310,7 @@ function runtests(mod::Module, pattern::Union{AbstractString,Regex} = r"";
                     end
                 catch e
                     allpass = false
-                    empty!(tests)
+                    ndone = length(tests)
                     isa(e, InterruptException) || rethrow()
                     return
                 end
@@ -324,7 +362,7 @@ function dryrun(mod::Module, ts::TestsetExpr, rx::Regex, parentsubj="", align::I
             Core.eval(mod, Expr(:(=), ts.loops.args[1], x))
             descx = Core.eval(mod, desc)::String
             # avoid repeating ourselves, transform this iteration into a "begin/end" testset
-            beginend = TestsetExpr(descx, nothing, ts.parent, ts.children)
+            beginend = TestsetExpr(ts.source, descx, nothing, ts.parent, ts.children)
             beginend.run = true
             dryrun(mod, beginend, rx, parentsubj, align)
         end
