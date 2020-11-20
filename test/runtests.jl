@@ -163,6 +163,11 @@ RUN = []
     end
 end
 
+@testset "D&E" begin
+    push!(RUN, "D&E")
+    @test true
+end
+
 function check(rx, list)
     empty!(RUN)
     runtests(P, rx)
@@ -172,10 +177,19 @@ end
 
 import .P # test ReTest's wrapping of non-regex patterns
 P.check("b", ["a", "b", "b|c"]) # an implicit prefix r".*" is added
+P.check("B", ["a", "b", "b|c"]) # idem, case-insensitive
+P.check(r"B", []) # not case-insensitive
 
 if VERSION >= v"1.3"
     P.check("b|c", ["a", "b|c"]) # "b" is not matched
+    P.check("B|C", ["a", "b|c"]) # idem, case-insensitive
 end
+
+P.check("d&e", ["D&E"])
+P.check("d&E", ["D&E"])
+P.check(r"d&E", [])
+P.check(r"d&E"i, ["D&E"])
+
 
 RUN = []
 @testset "toplevel" begin

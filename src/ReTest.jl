@@ -195,11 +195,11 @@ Moreover if a testset is run, its enclosing testset, if any, also has to run
 (although not necessarily exhaustively, i.e. other nested testsets
 might be filtered out).
 
-If the passed `pattern` is a string, then it is wrapped in a `Regex` and must
-match literally the subjects.
-This means for example that `"a|b"` will match a subject like `"a|b"` but not like `"a"`
-(only in Julia versions >= 1.3; in older versions, the regex is simply created as
-`Regex(pattern)`).
+If the passed `pattern` is a string, then it is wrapped in a `Regex` with the
+"case-insensitive" flag, and must match literally the subjects.
+This means for example that `"a|b"` will match a subject like `"a|b"` or `"A|B"`,
+but not like `"a"` (only in Julia versions >= 1.3; in older versions,
+the regex is simply created as `Regex(pattern, "i")`).
 
 Note: this function executes each (top-level) `@testset` block using `eval` *within* the
 module in which it was written (e.g. `m`, when specified).
@@ -211,9 +211,9 @@ function runtests(mod::Module, pattern::Union{AbstractString,Regex} = r"";
                   group::Bool=true)
     regex = pattern isa Regex ? pattern :
         if VERSION >= v"1.3"
-            r"" * pattern
+            r""i * pattern
         else
-            Regex(pattern)
+            Regex(pattern, "i")
         end
 
     tests = get_tests(mod)
