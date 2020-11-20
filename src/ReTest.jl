@@ -1,6 +1,6 @@
 module ReTest
 
-export runtests, @testset
+export retest, @testset
 
 using Distributed
 using Random: shuffle!
@@ -21,6 +21,7 @@ using Test: Test,
     detect_ambiguities, detect_unbound_args
 
 using InlineTest: @testset, InlineTest, get_tests, TESTED_MODULES, INLINE_TEST
+import InlineTest: retest
 
 include("testset.jl")
 
@@ -168,8 +169,8 @@ make_ts(x, rx, _) = x
 make_ts(ex::Expr, rx, outchan) = Expr(ex.head, map(x -> make_ts(x, rx, outchan), ex.args)...)
 
 """
-    runtests([m::Module], pattern = r""; dry::Bool=false, stats::Bool=false,
-                                         shuffle::Bool=false)
+    retest([m::Module], pattern = r""; dry::Bool=false, stats::Bool=false,
+                                       shuffle::Bool=false)
 
 Run all the tests declared in `@testset` blocks, within `m` if specified,
 or within all currently loaded modules otherwise.
@@ -204,11 +205,11 @@ the regex is simply created as `Regex(pattern, "i")`).
 Note: this function executes each (top-level) `@testset` block using `eval` *within* the
 module in which it was written (e.g. `m`, when specified).
 """
-function runtests(mod::Module, pattern::Union{AbstractString,Regex} = r"";
-                  dry::Bool=false,
-                  stats::Bool=false,
-                  shuffle::Bool=false,
-                  group::Bool=true)
+function retest(mod::Module, pattern::Union{AbstractString,Regex} = r"";
+                dry::Bool=false,
+                stats::Bool=false,
+                shuffle::Bool=false,
+                group::Bool=true)
     regex = pattern isa Regex ? pattern :
         if VERSION >= v"1.3"
             r""i * pattern
@@ -344,14 +345,14 @@ function runtests(mod::Module, pattern::Union{AbstractString,Regex} = r"";
     end
 end
 
-function runtests(pattern::Union{AbstractString,Regex} = r"")
+function retest(pattern::Union{AbstractString,Regex} = r"")
     # TESTED_MODULES is not up-to-date w.r.t. package modules which have
     # precompilation, so we have to also look in Base.loaded_modules
     # TODO: look recursively in "loaded modules" which use ReTest for sub-modules
     for m in unique(Iterators.flatten((values(Base.loaded_modules), TESTED_MODULES)))
         if isdefined(m, INLINE_TEST[])
             # will automatically skip ReTest and ReTest.ReTestTest
-            runtests(m, pattern)
+            retest(m, pattern)
         end
     end
 end
@@ -399,7 +400,7 @@ end # module ReTestTest
 @testset "self test" begin
     @assert typeof(@__MODULE__) == Module
     @test 1 != 2
-    runtests(ReTestTest)
+    retest(ReTestTest)
 end
 
 end # module ReTest

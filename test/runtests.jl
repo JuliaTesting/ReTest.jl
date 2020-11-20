@@ -53,11 +53,11 @@ innertestsets = ["d", "e1", "e2", "g", "h1", "h2"]
 
 function check(rx, list)
     empty!(RUN)
-    runtests(M, Regex(rx))
+    retest(M, Regex(rx))
     @test RUN == list
     mktemp() do path, io
         redirect_stdout(io) do
-            runtests(M, Regex(rx), dry=true)
+            retest(M, Regex(rx), dry=true)
         end
         seekstart(io)
         expected = map(list) do t
@@ -96,7 +96,7 @@ check(".*h\$", [])
 
 # by default, respect order of tests:
 check("", ["a", "b1", "b2", "c", "d", "e1", "e2", "f1", "g", "h1", "h2"])
-runtests(M)
+retest(M)
 
 module N
 using ReTest
@@ -131,7 +131,10 @@ end
 
 function check(rx, list)
     empty!(RUN)
-    runtests(N, Regex(rx))
+    retest(N, Regex(rx))
+    @test sort(RUN) == sort(list)
+    empty!(RUN)
+    N.runtests(Regex(rx))
     @test sort(RUN) == sort(list)
 end
 end
@@ -170,7 +173,10 @@ end
 
 function check(rx, list)
     empty!(RUN)
-    runtests(P, rx)
+    retest(P, rx)
+    @test sort(RUN) == sort(list)
+    empty!(RUN)
+    P.runtests(rx)
     @test sort(RUN) == sort(list)
 end
 end
@@ -200,10 +206,10 @@ RUN = []
     @test true
 end
 
-runtests()
+retest()
 @test RUN == ["toplevel"]
 
-runtests(r"^/f1") # just test that a regex can be passed
+retest(r"^/f1") # just test that a regex can be passed
 
 module Loops1
 using ReTest
@@ -230,10 +236,10 @@ RUN = []
 end
 end
 
-@test_logs (:warn, r"could not evaluate testset-for iterator.*") runtests(Loops1, r"asd")
+@test_logs (:warn, r"could not evaluate testset-for iterator.*") retest(Loops1, r"asd")
 @test Loops1.RUN == [1, 0, 2, 0]
 empty!(Loops1.RUN)
-runtests(Loops1) # should not log
+retest(Loops1) # should not log
 @test Loops1.RUN == [1, 0, -1, 2, 0, -1]
 
 module Loops2
@@ -258,10 +264,10 @@ RUN = []
 end
 end
 
-@test_logs (:warn, r"could not evaluate testset-for iterator.*") runtests(Loops2, r"asd")
+@test_logs (:warn, r"could not evaluate testset-for iterator.*") retest(Loops2, r"asd")
 @test Loops2.RUN == [1, 0, 2, 0]
 empty!(Loops2.RUN)
-runtests(Loops2)
+retest(Loops2)
 @test Loops2.RUN == [1, 0, -1, 2, 0, -1]
 
 module Loops3
@@ -286,10 +292,10 @@ RUN = []
 end
 end
 
-runtests(Loops3, r"asd")
+retest(Loops3, r"asd")
 @test Loops3.RUN == []
 empty!(Loops3.RUN)
-runtests(Loops3)
+retest(Loops3)
 @test Loops3.RUN == [1, 0, -1, 2, 0, -1]
 
 ### Failing ##################################################################
@@ -302,7 +308,7 @@ using ReTest
 end
 end
 
-@test_throws Test.TestSetException runtests(Failing)
+@test_throws Test.TestSetException retest(Failing)
 
 ### InlineTest ###############################################################
 

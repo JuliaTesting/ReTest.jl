@@ -1,9 +1,9 @@
 using FakePackage, ReTest
 
-runtests(FakePackage)
+retest(FakePackage)
 @test FakePackage.RUN == [1, 2]
 
-runtests(FakePackage, r"begin-end")
+FakePackage.runtests(r"begin-end")
 @test FakePackage.RUN == [1, 2, 1]
-runtests(FakePackage, r" for")
+FakePackage.runtests(r" for")
 @test FakePackage.RUN == [1, 2, 1, 2]

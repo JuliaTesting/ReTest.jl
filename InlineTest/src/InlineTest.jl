@@ -38,6 +38,8 @@ function get_tests(m::Module)
     getfield(m, inline_test)::Vector{Any}
 end
 
+function retest end
+
 """
     @testset args...
 
@@ -48,6 +50,11 @@ Invocations of `@testset` can be nested, but qualified invocations of
 Internally, `@testset` invocations are converted to `Test.@testset` at execution time.
 """
 macro testset(args...)
+    if !isdefined(__module__, :runtests)
+        @eval __module__ function runtests(specs...; kwargs...)
+            $retest($__module__, specs...; kwargs...)
+        end
+    end
     # this must take effect at compile/run time rather than parse time, e.g.
     # if the @testset if in a `if false` branch
     # TODO: test that
