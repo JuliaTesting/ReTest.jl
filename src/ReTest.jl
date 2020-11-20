@@ -345,14 +345,14 @@ function retest(mod::Module, pattern::Union{AbstractString,Regex} = r"";
     end
 end
 
-function retest(pattern::Union{AbstractString,Regex} = r"")
+function retest(pattern::Union{AbstractString,Regex} = r""; kwargs...)
     # TESTED_MODULES is not up-to-date w.r.t. package modules which have
     # precompilation, so we have to also look in Base.loaded_modules
     # TODO: look recursively in "loaded modules" which use ReTest for sub-modules
     for m in unique(Iterators.flatten((values(Base.loaded_modules), TESTED_MODULES)))
         if isdefined(m, INLINE_TEST[])
             # will automatically skip ReTest and ReTest.ReTestTest
-            retest(m, pattern)
+            retest(m, pattern; kwargs...)
         end
     end
 end

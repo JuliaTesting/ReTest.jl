@@ -207,6 +207,9 @@ RUN = []
 end
 
 retest()
+retest("a", shuffle=true, stats=true)
+retest("b", dry=true)
+
 @test RUN == ["toplevel"]
 
 retest(r"^/f1") # just test that a regex can be passed
