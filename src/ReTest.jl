@@ -363,7 +363,7 @@ function retest(args::Union{Module,AbstractString,Regex}...; kwargs...)
         append!(modules, Iterators.flatten((values(Base.loaded_modules), TESTED_MODULES)))
         unique!(modules)
         # will automatically skip ReTest and ReTest.ReTestTest
-        filter!(m -> isdefined(m, INLINE_TEST[]), modules)
+        filter!(m -> isdefined(m, INLINE_TEST[]) && m ∉ (ReTest, ReTestTest),  modules)
     end
     for mod in modules
         retest(mod, pattern...; kwargs...)
