@@ -169,10 +169,10 @@ make_ts(x, rx, _) = x
 make_ts(ex::Expr, rx, outchan) = Expr(ex.head, map(x -> make_ts(x, rx, outchan), ex.args)...)
 
 """
-    retest([m::Module], pattern = r""; dry::Bool=false, stats::Bool=false,
+    retest([m::Module...], pattern = r""; dry::Bool=false, stats::Bool=false,
                                        shuffle::Bool=false)
 
-Run all the tests declared in `@testset` blocks, within `m` if specified,
+Run all the tests declared in `@testset` blocks, within modules `m` if specified,
 or within all currently loaded modules otherwise.
 If `dry` is `true`, don't actually run the tests, just print the descriptions
 of the testsets which would (presumably) run.
@@ -345,15 +345,28 @@ function retest(mod::Module, pattern::Union{AbstractString,Regex} = r"";
     end
 end
 
-function retest(pattern::Union{AbstractString,Regex} = r""; kwargs...)
-    # TESTED_MODULES is not up-to-date w.r.t. package modules which have
-    # precompilation, so we have to also look in Base.loaded_modules
-    # TODO: look recursively in "loaded modules" which use ReTest for sub-modules
-    for m in unique(Iterators.flatten((values(Base.loaded_modules), TESTED_MODULES)))
-        if isdefined(m, INLINE_TEST[])
-            # will automatically skip ReTest and ReTest.ReTestTest
-            retest(m, pattern; kwargs...)
+function retest(args::Union{Module,AbstractString,Regex}...; kwargs...)
+    pattern = []
+    modules = Module[]
+    for arg in args
+        if arg isa Union{AbstractString,Regex}
+            !isempty(pattern) && throw(ArgumentError("cannot pass multiple patterns"))
+            push!(pattern, arg)
+        else
+            push!(modules, arg)
         end
+    end
+    if isempty(modules)
+        # TESTED_MODULES is not up-to-date w.r.t. package modules which have
+        # precompilation, so we have to also look in Base.loaded_modules
+        # TODO: look recursively in "loaded modules" which use ReTest for sub-modules
+        append!(modules, Iterators.flatten((values(Base.loaded_modules), TESTED_MODULES)))
+        unique!(modules)
+        # will automatically skip ReTest and ReTest.ReTestTest
+        filter!(m -> isdefined(m, INLINE_TEST[]), modules)
+    end
+    for mod in modules
+        retest(mod, pattern...; kwargs...)
     end
 end
 

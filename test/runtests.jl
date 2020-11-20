@@ -208,7 +208,8 @@ end
 
 retest()
 retest("a", shuffle=true, stats=true)
-retest("b", dry=true)
+retest(M, N, P, "b", dry=true)
+@test_throws ArgumentError retest("A", r"b")
 
 @test RUN == ["toplevel"]
 
