@@ -24,7 +24,7 @@ using Test: Test,
 
 
 const INLINE_TEST = Ref{Symbol}(:__INLINE_TEST__)
-const TESTED_MODULES = Module[]
+const TESTED_MODULES = Union{Module,Nothing}[]
 
 __init__() = INLINE_TEST[] = gensym()
 

@@ -196,6 +196,7 @@ P.check("d&E", ["D&E"])
 P.check(r"d&E", [])
 P.check(r"d&E"i, ["D&E"])
 
+### toplevel #################################################################
 
 RUN = []
 @testset "toplevel" begin
@@ -214,6 +215,33 @@ retest(M, N, P, "b", dry=true)
 @test RUN == ["toplevel"]
 
 retest(r"^/f1") # just test that a regex can be passed
+
+empty!(RUN)
+
+module Overwritten
+using ReTest
+import Main: RUN
+@testset "first" begin
+    push!(RUN, 1)
+end
+end
+retest(Overwritten)
+@test RUN == [1]
+
+empty!(RUN)
+
+module Overwritten
+using ReTest
+import Main: RUN
+@testset "second" begin
+    push!(RUN, 2)
+end
+end
+retest(Overwritten)
+@test RUN == [2] # 1 must not appear (i.e. ReTest must not keep a reference to
+                 # the old overwritten version of `Overwritten`
+
+### Loops ####################################################################
 
 module Loops1
 using ReTest

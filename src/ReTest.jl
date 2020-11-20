@@ -360,6 +360,21 @@ function retest(args::Union{Module,AbstractString,Regex}...; kwargs...)
         # TESTED_MODULES is not up-to-date w.r.t. package modules which have
         # precompilation, so we have to also look in Base.loaded_modules
         # TODO: look recursively in "loaded modules" which use ReTest for sub-modules
+
+        # ALSO: TESTED_MODULES might have "duplicate" entries, i.e. modules with the same
+        # name, when one overwrites itself by being redefined; in this case,
+        # let's just delete older entries:
+        seen = Set{String}()
+        for idx in reverse(eachindex(TESTED_MODULES))
+            str = string(TESTED_MODULES[idx])
+            if str in seen
+                TESTED_MODULES[idx] = nothing
+            else
+                push!(seen, str)
+            end
+        end
+        filter!(!=(nothing), TESTED_MODULES)
+
         append!(modules, Iterators.flatten((values(Base.loaded_modules), TESTED_MODULES)))
         unique!(modules)
         # will automatically skip ReTest and ReTest.ReTestTest
