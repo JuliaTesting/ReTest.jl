@@ -19,7 +19,7 @@ end
     @test true
 end
 
-@testset "c" begin
+@testset verbose=true "c" begin
     push!(RUN, "c")
     @test true
 
@@ -34,7 +34,7 @@ end
     end
 end
 
-@testset "f$i" for i=1:1
+@testset "f$i" verbose=true for i=1:1
     push!(RUN, "f$i")
     @test true
 
@@ -108,7 +108,7 @@ RUN = []
     push!(RUN, "i")
     @test true
 
-    @testset "j" begin
+    @testset "j" verbose=false begin # false, just to test that it works
         push!(RUN, "j")
         @test true
 
@@ -118,7 +118,7 @@ RUN = []
         end
     end
 
-    @testset "l$i" for i=1:1
+    @testset "l$i" verbose=true for i=1:1
         push!(RUN, "l$i")
         @test true
 

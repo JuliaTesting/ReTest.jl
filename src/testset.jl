@@ -64,7 +64,7 @@ mutable struct ReTestSet <: AbstractTestSet
     exception::Union{TestSetException,Nothing}
 end
 
-ReTestSet(desc; verbose = false) = ReTestSet(desc, [], 0, false, verbose,
+ReTestSet(desc; verbose = true) = ReTestSet(desc, [], 0, false, verbose,
                                              NamedTuple(), nothing)
 
 # For a non-passed result, simply store the result
@@ -378,19 +378,20 @@ function get_testset_string(remove_last=false)
 end
 
 # non-inline testset with regex filtering support
-macro testset(isfinal::Bool, rx::Regex, desc::String, outchan, body)
-    Testset.testset_beginend(isfinal, rx, desc, outchan,  body, __source__)
+macro testset(isfinal::Bool, rx::Regex, desc::String, options, outchan, body)
+    Testset.testset_beginend(isfinal, rx, desc, options, outchan,  body, __source__)
 end
 
-macro testset(isfinal::Bool, rx::Regex, desc::Union{String,Expr}, outchan,
+macro testset(isfinal::Bool, rx::Regex, desc::Union{String,Expr}, options, outchan,
               loopiter, loopvals, body)
-    Testset.testset_forloop(isfinal, rx, desc, outchan, loopiter, loopvals, body, __source__)
+    Testset.testset_forloop(isfinal, rx, desc, options, outchan, loopiter, loopvals, body, __source__)
 end
 
 """
 Generate the code for a `@testset` with a `begin`/`end` argument
 """
-function testset_beginend(isfinal::Bool, rx::Regex, desc::String, outchan, tests, source)
+function testset_beginend(isfinal::Bool, rx::Regex, desc::String, options,
+                          outchan, tests, source)
     # Generate a block of code that initializes a new testset, adds
     # it to the task local storage, evaluates the test(s), before
     # finally removing the testset and giving it a chance to take
@@ -402,7 +403,7 @@ function testset_beginend(isfinal::Bool, rx::Regex, desc::String, outchan, tests
         end
         if !$isfinal || occursin($rx, current_str)
             local ret
-            local ts = ReTestSet($desc)
+            local ts = ReTestSet($desc; verbose=$(options.verbose))
             push_testset(ts)
             # we reproduce the logic of guardseed, but this function
             # cannot be used as it changes slightly the semantic of @testset,
@@ -445,7 +446,7 @@ end
 """
 Generate the code for a `@testset` with a `for` loop argument
 """
-function testset_forloop(isfinal::Bool, rx::Regex, desc::Union{String,Expr}, outchan,
+function testset_forloop(isfinal::Bool, rx::Regex, desc::Union{String,Expr}, options, outchan,
                          loopiter, loopvals,
                          tests, source)
 
@@ -467,7 +468,7 @@ function testset_forloop(isfinal::Bool, rx::Regex, desc::Union{String,Expr}, out
                 # it's 1000 times faster to copy from tmprng rather than calling Random.seed!
                 copy!(RNG, tmprng)
             end
-            ts = ReTestSet($(esc(desc)))
+            ts = ReTestSet($(esc(desc)); verbose=$(options.verbose))
             push_testset(ts)
             first_iteration = false
             try

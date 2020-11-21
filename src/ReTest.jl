@@ -27,10 +27,14 @@ include("testset.jl")
 
 using .Testset: Testset, Format
 
+Base.@kwdef mutable struct Options
+    verbose::Bool = false
+end
 
 mutable struct TestsetExpr
     source::LineNumberNode
     desc::Union{String,Expr}
+    options::Options
     loops::Union{Expr,Nothing}
     parent::Union{TestsetExpr,Nothing}
     children::Vector{TestsetExpr}
@@ -39,8 +43,8 @@ mutable struct TestsetExpr
     run::Bool
     body::Expr
 
-    TestsetExpr(source, desc, loops, parent, children=TestsetExpr[]) =
-        new(source, desc, loops, parent, children, String[])
+    TestsetExpr(source, desc, options, loops, parent, children=TestsetExpr[]) =
+        new(source, desc, options, loops, parent, children, String[])
 end
 
 isfor(ts::TestsetExpr) = ts.loops !== nothing
@@ -63,12 +67,22 @@ replace_ts(source, x, _) = x
 
 # create a TestsetExpr from @testset's args
 function parse_ts(source, args::Tuple, parent=nothing)
-    length(args) == 2 || error("unsupported @testset")
+    local desc
+    options = Options()
+    for arg in args[1:end-1]
+        if arg isa String || Meta.isexpr(arg, :string)
+            desc = arg
+        elseif Meta.isexpr(arg, :(=))
+            arg.args[1] in fieldnames(Options) || error("unsupported @testset option")
+            # TODO: make that work with non-literals:
+            setfield!(options, arg.args[1], arg.args[2])
+        else
+            error("unsupported @testset")
+        end
+    end
+    @isdefined(desc) || error("@testset requires a description")
 
-    desc = args[1]
-    desc isa String || Meta.isexpr(desc, :string) || error("unsupported @testset")
-
-    body = args[2]
+    body = args[end]
     isa(body, Expr) || error("Expected begin/end block or for loop as argument to @testset")
     if body.head === :for
         loops = body.args[1]
@@ -80,7 +94,7 @@ function parse_ts(source, args::Tuple, parent=nothing)
         error("Expected begin/end block or for loop as argument to @testset")
     end
 
-    ts = TestsetExpr(source, desc, loops, parent)
+    ts = TestsetExpr(source, desc, options, loops, parent)
     ts.body = replace_ts(source, tsbody, ts)
     ts
 end
@@ -155,12 +169,12 @@ function make_ts(ts::TestsetExpr, rx::Regex, outchan)
     end
     if ts.loops === nothing
         quote
-            @testset $(isfinal(ts)) $rx $(ts.desc) $outchan $body
+            @testset $(isfinal(ts)) $rx $(ts.desc) $(ts.options) $outchan $body
         end
     else
         loopvals = something(ts.loopvalues, ts.loops.args[2])
         quote
-            @testset $(isfinal(ts)) $rx $(ts.desc) $outchan $(ts.loops.args[1]) $loopvals $body
+            @testset $(isfinal(ts)) $rx $(ts.desc) $(ts.options) $outchan $(ts.loops.args[1]) $loopvals $body
         end
     end
 end
@@ -409,7 +423,7 @@ function dryrun(mod::Module, ts::TestsetExpr, rx::Regex, parentsubj="", align::I
             Core.eval(mod, Expr(:(=), ts.loops.args[1], x))
             descx = Core.eval(mod, desc)::String
             # avoid repeating ourselves, transform this iteration into a "begin/end" testset
-            beginend = TestsetExpr(ts.source, descx, nothing, ts.parent, ts.children)
+            beginend = TestsetExpr(ts.source, descx, ts.options, nothing, ts.parent, ts.children)
             beginend.run = true
             dryrun(mod, beginend, rx, parentsubj, align)
         end
