@@ -41,6 +41,7 @@ mutable struct TestsetExpr
     strings::Vector{String}
     loopvalues::Any
     run::Bool
+    descwidth::Int # max width of self and children shown descriptions
     body::Expr
 
     TestsetExpr(source, desc, options, loops, parent, children=TestsetExpr[]) =
@@ -99,15 +100,20 @@ function parse_ts(source, args::Tuple, parent=nothing)
     ts
 end
 
-function resolve!(mod::Module, ts::TestsetExpr, rx::Regex, force::Bool=false)
+function resolve!(mod::Module, ts::TestsetExpr, rx::Regex;
+                  force::Bool=false, shown::Bool=true, depth::Int=0)
     strings = empty!(ts.strings)
     desc = ts.desc
     ts.run = force || isempty(rx.pattern)
     ts.loopvalues = nothing # unnecessary ?
 
     parentstrs = ts.parent === nothing ? [""] : ts.parent.strings
+    ts.descwidth = 0
 
     if desc isa String
+        if shown
+            ts.descwidth = textwidth(desc) + 2*depth
+        end
         for str in parentstrs
             ts.run && break
             new = str * '/' * desc
@@ -135,11 +141,25 @@ function resolve!(mod::Module, ts::TestsetExpr, rx::Regex, force::Bool=false)
                 @warn "could not evaluate testset-for iterator, default to inclusion"
             end
             ts.run = true
+            if shown
+                # set ts.descwidth to a lower bound to reduce misalignment
+                ts.descwidth = 2*depth + mapreduce(textwidth, +,
+                                                   filter(x -> x isa String, desc.args))
+            end
         end
         for x in xs # empty loop if eval above threw
-            ts.run && break
             Core.eval(mod, Expr(:(=), loops.args[1], x))
             descx = Core.eval(mod, desc)::String
+            if shown
+                ts.descwidth = max(ts.descwidth, textwidth(descx) + 2*depth)
+            end
+            if ts.run
+                if !shown # no need to compute subsequent descx to update ts.descwidth
+                    break
+                else
+                    continue
+                end
+            end
             for str in parentstrs
                 new = str * '/' * descx
                 if occursin(rx, new)
@@ -152,8 +172,14 @@ function resolve!(mod::Module, ts::TestsetExpr, rx::Regex, force::Bool=false)
         end
     end
     run = ts.run
+
     for tsc in ts.children
-        run |= resolve!(mod, tsc, rx, ts.run)
+        run |= resolve!(mod, tsc, rx, force=ts.run,
+                        shown=shown & ts.options.verbose, depth=depth+1)
+        ts.descwidth = max(ts.descwidth, tsc.descwidth)
+    end
+    if !run
+        ts.descwidth = 0
     end
     ts.run = run
 end
@@ -258,12 +284,11 @@ function retest(mod::Module, pattern::Union{AbstractString,Regex} = r"";
 
     tests = updatetests!(mod)
 
-    desc_align = 0
+    descwidth = 0
     for ts in tests
         run = resolve!(mod, ts, regex)
         run || continue
-        desc_len = length(ts.desc isa String ? ts.desc : ts.desc.args[1])
-        desc_align = max(desc_align, desc_len)
+        descwidth = max(descwidth, ts.descwidth)
     end
 
     tests = filter(ts -> ts.run, tests)
@@ -306,7 +331,7 @@ function retest(mod::Module, pattern::Union{AbstractString,Regex} = r"";
 
     printer = @async begin
         errored = false
-        format = Format(stats, desc_align)
+        format = Format(stats, descwidth)
 
         while true
             rts = take!(outchan)
