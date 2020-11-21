@@ -342,6 +342,37 @@ end
 
 @test_throws Test.TestSetException retest(Failing)
 
+### Duplicate ################################################################
+
+module Duplicate
+using ReTest
+
+RUN = []
+
+@testset "dupe" begin
+    @test true
+    push!(RUN, 1)
+end
+@testset "dupe" begin
+    @test true
+    push!(RUN, 2)
+end
+
+@testset "dupe$i" for i=3:4
+    @test true
+    push!(RUN, i)
+end
+@testset "dupe$i" for i=5:6
+    @test true
+    push!(RUN, i)
+end
+end
+
+@test_logs (
+    :warn, r"duplicate description for @testset, overwriting:.*") (
+    :warn,  r"duplicate description for @testset, overwriting:.*")  Duplicate.runtests()
+@test Duplicate.RUN == [2, 5, 6]
+
 ### InlineTest ###############################################################
 
 using Pkg

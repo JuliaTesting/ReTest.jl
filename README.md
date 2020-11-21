@@ -102,6 +102,10 @@ module in which it was written (e.g. `m`, when specified).
   the same regex, less tests might be run (or more!). See `retest`'s docstring
   to know what testsets are guaranteed to run.
 
+* Descriptions of testsets must be unique within a module, otherwise they are
+  overwritten and a warning is issued, unless `Revise` is loaded;
+  the reason is the current implemented heuristic to allow `Revise` do its magic.
+
 ### Switching from `Test` to `ReTest`
 
 When used in a package `MyPackage`, the test code can be organized as follows:
@@ -140,3 +144,13 @@ Note that if you want to run `@testset "b"`, there is no way to not run
 `@test true` in `@testset "a"`; so if it was an expensive test to run,
 instead of `@test true`, it could be useful to wrap it in its own testset, so that
 it can be filtered out.
+
+### Working with `Revise`
+
+When `Revise` is loaded and a testset is updated, `ReTest` will observe that a
+new testset is added with the same description as a previously existing one,
+which is then overwritten. This works only if the description is not modified,
+otherwise both the old and new versions of the testset will co-exist. For
+testsets in a "script" loaded with `includet`, e.g. those in a "test/tests.jl"
+file, you can request `Revise` to "load" the updated testsets by putting
+`__revise_mode__ = :eval` in the enclosing module.

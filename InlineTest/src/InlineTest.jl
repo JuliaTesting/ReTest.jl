@@ -32,10 +32,10 @@ __init__() = INLINE_TEST[] = gensym()
 function get_tests(m::Module)
     inline_test::Symbol = INLINE_TEST[]
     if !isdefined(m, inline_test)
-        @eval m $inline_test = []
+        @eval m $inline_test = (tests=[], news=[], map=Dict{Union{String,Expr},Int}())
         push!(TESTED_MODULES, m)
     end
-    getfield(m, inline_test)::Vector{Any}
+    getfield(m, inline_test)
 end
 
 function retest end
@@ -59,7 +59,7 @@ macro testset(args...)
     # if the @testset if in a `if false` branch
     # TODO: test that
     quote
-        push!(get_tests($__module__), (ts=$args, source=$(QuoteNode(__source__))))
+        push!(get_tests($__module__).news, (ts=$args, source=$(QuoteNode(__source__))))
         nothing
     end
 end

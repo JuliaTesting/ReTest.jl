@@ -20,7 +20,7 @@ using Test: Test,
     @inferred,
     detect_ambiguities, detect_unbound_args
 
-using InlineTest: @testset, InlineTest, get_tests, TESTED_MODULES, INLINE_TEST
+using InlineTest: @testset, InlineTest, TESTED_MODULES, INLINE_TEST
 import InlineTest: retest
 
 include("testset.jl")
@@ -182,6 +182,31 @@ end
 make_ts(x, rx, _) = x
 make_ts(ex::Expr, rx, outchan) = Expr(ex.head, map(x -> make_ts(x, rx, outchan), ex.args)...)
 
+# convert raw tests from InlineTest into TestsetExpr tests, and handle overwriting
+function updatetests!(mod::Module)
+    tests, news, map = InlineTest.get_tests(mod)
+    # work-around lack of ordered-dict
+    # map: we keep only the latest version of a test at a given location,
+    #      to be Revise-friendly (just an imperfect heuristic)
+    for (tsargs, source) in news
+        ts = parse_ts(source, tsargs)
+        idx = get!(map, ts.desc, length(tests) + 1)
+        if idx == length(tests) + 1
+            push!(tests, ts)
+        else
+            revise = Base.PkgId(Base.UUID("295af30f-e4ad-537b-8983-00126c2a3abe"), "Revise")
+            if !(revise in keys(Base.loaded_modules))
+                desc = ts.desc isa String ? string('"', ts.desc, '"') : ts.desc
+                source = string(ts.source.file, ':', ts.source.line)
+                @warn "duplicate description for @testset, overwriting: $desc at $source"
+            end
+            tests[idx] = ts
+        end
+    end
+    empty!(news)
+    tests
+end
+
 """
     retest([m::Module...], pattern = r""; dry::Bool=false, stats::Bool=false,
                                        shuffle::Bool=false)
@@ -231,15 +256,10 @@ function retest(mod::Module, pattern::Union{AbstractString,Regex} = r"";
             Regex(pattern, "i")
         end
 
-    tests = get_tests(mod)
+    tests = updatetests!(mod)
 
     desc_align = 0
-    for idx in eachindex(tests)
-        ts = tests[idx]
-        if !(ts isa TestsetExpr)
-            ts = parse_ts(ts.source, ts.ts)
-            tests[idx] = ts
-        end
+    for ts in tests
         run = resolve!(mod, ts, regex)
         run || continue
         desc_len = length(ts.desc isa String ? ts.desc : ts.desc.args[1])
