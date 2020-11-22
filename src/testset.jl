@@ -301,6 +301,7 @@ function print_counts(ts::ReTestSet, fmt::Format, depth, align,
     subtotal = passes + fails + errors + broken + c_passes + c_fails + c_errors + c_broken
     # Print test set header, with an alignment that ensures all
     # the test results appear above each other
+    bold = ts.overall
     style = ts.overall ? (bold=true, color=:white) : NamedTuple()
     printstyled(rpad(string("  "^depth, ts.description), align, " "); style...)
     printstyled(" | ", bold=true)
@@ -316,7 +317,7 @@ function print_counts(ts::ReTestSet, fmt::Format, depth, align,
         # which messes up alignments (and am too lazy to fix)
         if !(ts.overall && np == 0)
             printstyled(lpad(string(np), pass_width, " "), "  ",
-                        color = np > 0 ? :green : Base.warn_color())
+                        color = np > 0 ? :green : Base.warn_color(), bold=bold)
         else
             print_total = false
         end
@@ -326,28 +327,28 @@ function print_counts(ts::ReTestSet, fmt::Format, depth, align,
     end
 
     if nf > 0
-        printstyled(lpad(string(nf), fail_width, " "), "  ", color=Base.error_color())
+        printstyled(lpad(string(nf), fail_width, " "), "  ", color=Base.error_color(), bold=bold)
     elseif fail_width > 0
         # No fails at this level, but some at another level
         print(lpad(" ", fail_width), "  ")
     end
 
     if ne > 0
-        printstyled(lpad(string(ne), error_width, " "), "  ", color=Base.error_color())
+        printstyled(lpad(string(ne), error_width, " "), "  ", color=Base.error_color(), bold=bold)
     elseif error_width > 0
         # No errors at this level, but some at another level
         print(lpad(" ", error_width), "  ")
     end
 
     if nb > 0
-        printstyled(lpad(string(nb), broken_width, " "), "  ", color=Base.warn_color())
+        printstyled(lpad(string(nb), broken_width, " "), "  ", color=Base.warn_color(), bold=bold)
     elseif broken_width > 0
         # None broken at this level, but some at another level
         print(lpad(" ", broken_width), "  ")
     end
 
     if total_width > 0 && print_total
-        printstyled(lpad(string(subtotal), total_width, " "), fmt.stats ? "  " : "", color=Base.info_color())
+        printstyled(lpad(string(subtotal), total_width, " "), fmt.stats ? "  " : "", color=Base.info_color(), bold=bold)
     end
 
     if fmt.stats && print_total # copied from Julia/test/runtests.jl
