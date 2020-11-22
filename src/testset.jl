@@ -165,9 +165,9 @@ function print_test_results(ts::ReTestSet, fmt::Format, depth_pad=0)
 
     # Calculate the alignment of the test result counts by
     # recursively walking the tree of test sets
-    if !ts.overall # we don't print recursively
-        align = max(get_alignment(ts, 0), length(ts.mod))
-    end
+   if !ts.overall # otherwise, we don't print recursively
+       align = get_alignment(ts, 0)
+   end
 
     if !ts.overall && align > fmt.desc_align
         upd = true
@@ -179,7 +179,7 @@ function print_test_results(ts::ReTestSet, fmt::Format, depth_pad=0)
     # Print the outer test set header once
     if upd
         pad = nprinted == 0 ? "" : " "
-        printstyled(rpad(ts.mod, align, " "), " |", pad; bold=true, color=:white)
+        printstyled(rpad("", align, " "), " |", pad; bold=true, color=:white)
         if pass_width > 0
             printstyled(lpad("Pass", pass_width, " "), "  "; bold=true, color=:green)
         end
@@ -310,11 +310,16 @@ function print_counts(ts::ReTestSet, fmt::Format, depth, align,
     ne = errors + c_errors
     nb = broken + c_broken
 
+    print_total = true
     if np > 0 || np == 0 && nf == 0 && ne == 0 && nb == 0
         # print `0` in warn color instead of "No tests" like in Test module,
         # which messes up alignments (and am too lazy to fix)
-        printstyled(lpad(string(np), pass_width, " "), "  ",
-                    color = np > 0 ? :green : Base.warn_color())
+        if !(ts.overall && np == 0)
+            printstyled(lpad(string(np), pass_width, " "), "  ",
+                        color = np > 0 ? :green : Base.warn_color())
+        else
+            print_total = false
+        end
     elseif pass_width > 0
         # No passes at this level, but some at another level
         print(lpad(" ", pass_width), "  ")
@@ -341,11 +346,11 @@ function print_counts(ts::ReTestSet, fmt::Format, depth, align,
         print(lpad(" ", broken_width), "  ")
     end
 
-    if total_width > 0
+    if total_width > 0 && print_total
         printstyled(lpad(string(subtotal), total_width, " "), fmt.stats ? "  " : "", color=Base.info_color())
     end
 
-    if fmt.stats # copied from Julia/test/runtests.jl
+    if fmt.stats && print_total # copied from Julia/test/runtests.jl
         ts.overall && set_timed!(ts)
         timed = ts.timed
         elapsed_align = textwidth("Time (s)")
@@ -537,12 +542,16 @@ function set_timed!(ts, timed, rss)
 end
 
 function set_timed!(ts)
-    @assert ts.overall
+    if ts.overall
+        foreach(get_timed!, ts.results)
+    end
     ts.timed = NamedTuple{(:time, :bytes, :gctime, :rss)}(
         ntuple(Val(4)) do i
             # init=0.0 kwarg not available on old Julia
             Float64(sum(tsc.timed[i] for tsc in ts.results))
         end)
 end
+
+get_timed!(ts) = isempty(ts.timed) ? set_timed!(ts) : ts
 
 end # module

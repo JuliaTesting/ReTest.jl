@@ -380,6 +380,49 @@ end
     :warn,  r"duplicate description for @testset, overwriting:.*")  Duplicate.runtests()
 @test Duplicate.RUN == [2, 5, 6]
 
+### Display ##################################################################
+
+# we exercise a bunch of codepaths, and this allows to have an idea whether
+# everything prints properly (writing proper display tests will be soooo boring)
+
+module X
+using ReTest
+
+@testset "X.full" begin
+    @test true
+    @testset "X.inner" begin
+    end
+end
+end
+
+module YYYYYYYYYYYYY
+using ReTest
+
+@testset "Y.broken" begin
+    @test_broken false
+end
+@testset "Y.loop $('*'^(10-3*i))" for i=1:2
+    @test true
+    @testset "Y.inner_____________" begin
+        @test true
+        @testset "Y.core" begin
+            @test true
+        end
+    end
+end
+end
+
+for dry=(true, false),
+    verbose=0:3,
+    stats=(true, false),
+    mod=((X,), (YYYYYYYYYYYYY,), (X, YYYYYYYYYYYYY)),
+    regex=(r"inner", r"")
+
+    modstr = length(mod) == 1 ? string(mod[1]) : string(mod)
+    println("\n####################### Display: mod=$modstr stats=$stats dry=$dry verbose=$verbose\n")
+    retest(mod..., regex; shuffle=true, verbose=verbose, stats=stats, dry=dry)
+end
+
 ### InlineTest ###############################################################
 
 using Pkg

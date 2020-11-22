@@ -183,7 +183,7 @@ function resolve!(mod::Module, ts::TestsetExpr, rx::Regex;
                         depth=depth+1, verbose=verbose-1)
         ts.descwidth = max(ts.descwidth, tsc.descwidth)
     end
-    if !run
+    if !run || verbose <= 0
         ts.descwidth = 0
     end
     ts.run = run
@@ -290,19 +290,34 @@ function retest(args::Union{Module,AbstractString,Regex}...;
 
     modules, regex, verbose = process_args(args, verbose)
 
-    firstmod = true
-    for mod in modules
-        firstmod || println()
-        firstmod = false
+    overall = length(modules) > 1
+    root = Testset.ReTestSet("", "Overall", true)
 
-        tests, descwidth = fetchtests(mod, regex, verbose)
+    if overall
+        tests_descs = fetchtests.(modules, regex, verbose, overall)
+        alltests = first.(tests_descs)
+        descwidth = max(textwidth(root.description),
+                        maximum(last, tests_descs))
+        format = Format(stats, descwidth)
+    end
+
+    for imod in eachindex(modules)
+        mod = modules[imod]
+
+        if overall
+            tests = alltests[imod]
+        else
+            tests, descwidth = fetchtests(mod, regex, verbose, overall)
+        end
         isempty(tests) && continue
 
         shuffle &&
             shuffle!(tests)
 
         if dry
-            foreach(ts -> dryrun(mod, ts, regex), tests)
+            overall &&
+                println(mod)
+            foreach(ts -> dryrun(mod, ts, regex, overall*2), tests)
             continue
         end
 
@@ -334,14 +349,23 @@ function retest(args::Union{Module,AbstractString,Regex}...;
         nprinted = 0
         allpass = true
         exception = Ref{Exception}()
-        overall = Testset.ReTestSet(string(mod), "Overall", true)
+
+        module_ts = Testset.ReTestSet("", string(mod) * ':', true)
+        push!(root.results, module_ts)
+
+        many = length(tests) > 1 || isfor(tests[1]) # FIXME: isfor when only one iteration
 
         printer = @async begin
             errored = false
-            format = Format(stats, descwidth)
+
+            if !overall
+                format = Format(stats, descwidth)
+            end
             print_overall() =
-                if length(tests) > 1 || verbose == 0
-                    Testset.print_test_results(overall, format)
+                if many || verbose == 0
+                    @assert endswith(module_ts.description, ':')
+                    module_ts.description = chop(module_ts.description, tail=1)
+                    Testset.print_test_results(module_ts, format)
                 else
                     nothing
                 end
@@ -355,7 +379,9 @@ function retest(args::Union{Module,AbstractString,Regex}...;
                 errored && continue
 
                 if verbose > 0 || rts.anynonpass
-                    Testset.print_test_results(rts, format)
+                    Testset.print_test_results(
+                        rts, format,
+                        !rts.overall & isindented(verbose, overall, many))
                 end
                 if rts.anynonpass
                     print_overall()
@@ -374,6 +400,15 @@ function retest(args::Union{Module,AbstractString,Regex}...;
 
         ntests = 0
         ndone = 0
+
+        if overall || !many
+            # + if overall, we print the module as a header, to know where the currently
+            #   printed testsets belong
+            # + if !many, we won't print the overall afterwads, which would be redundant
+            #   with the only one printed top-level testset
+            ntests += 1
+            wait(@async put!(outchan, module_ts))
+        end
 
         @sync for wrkr in workers()
             @async begin
@@ -414,21 +449,27 @@ function retest(args::Union{Module,AbstractString,Regex}...;
                     end
                     if resp isa Vector
                         ntests += length(resp)
-                        append!(overall.results, resp)
+                        append!(module_ts.results, resp)
                     else
                         ntests += 1
-                        push!(overall.results, resp)
+                        push!(module_ts.results, resp)
                     end
                 end
             end
         end
         put!(outchan, nothing)
         wait(printer)
+
         @assert !allpass || nprinted == ntests
         if isassigned(exception)
             throw(exception[])
         end
+        overall && verbose > 0 &&
+            println()
     end
+    overall && !dry &&
+        Testset.print_test_results(root, format)
+    nothing
 end
 
 function process_args(args, verbose)
@@ -498,7 +539,7 @@ function computemodules!(modules::Vector{Module})
     modules
 end
 
-function fetchtests(mod, regex, verbose)
+function fetchtests(mod, regex, verbose, overall)
     tests = updatetests!(mod)
     descwidth = 0
 
@@ -509,14 +550,19 @@ function fetchtests(mod, regex, verbose)
     end
 
     tests = filter(ts -> ts.run, tests)
+    many = length(tests) > 1
+    indented = isindented(verbose, overall, many)
 
-    if length(tests) > 1 || verbose == 0
-        descwidth = max(descwidth, textwidth("Overall"))
+    if indented
+        descwidth += 2
     end
+    descwidth = max(descwidth, textwidth(string(mod)) + indented)
     tests, descwidth
 end
 
-function dryrun(mod::Module, ts::TestsetExpr, rx::Regex, parentsubj="", align::Int=0)
+isindented(verbose, overall, many) = (verbose > 0) & (overall | !many)
+
+function dryrun(mod::Module, ts::TestsetExpr, rx::Regex, align::Int=0, parentsubj="", )
     ts.run || return
     desc = ts.desc
 
@@ -527,7 +573,7 @@ function dryrun(mod::Module, ts::TestsetExpr, rx::Regex, parentsubj="", align::I
         end
         println(' '^align, desc)
         for tsc in ts.children
-            dryrun(mod, tsc, rx, subject, align + 2)
+            dryrun(mod, tsc, rx, align + 2, subject)
         end
     else
         loopvals = ts.loopvalues
@@ -543,7 +589,7 @@ function dryrun(mod::Module, ts::TestsetExpr, rx::Regex, parentsubj="", align::I
             beginend = TestsetExpr(ts.source, ts.mod, descx, ts.options, nothing,
                                    ts.parent, ts.children)
             beginend.run = true
-            dryrun(mod, beginend, rx, parentsubj, align)
+            dryrun(mod, beginend, rx, align, parentsubj)
         end
     end
 end
