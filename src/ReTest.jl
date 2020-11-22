@@ -279,7 +279,7 @@ the regex is simply created as `Regex(pattern, "i")`).
 Note: this function executes each (top-level) `@testset` block using `eval` *within* the
 module in which it was written (e.g. `m`, when specified).
 """
-function retest(mod::Module, pattern::Union{AbstractString,Regex} = r"";
+function retest(args::Union{Module,AbstractString,Regex}...;
                 dry::Bool=false,
                 stats::Bool=false,
                 shuffle::Bool=false,
@@ -287,12 +287,175 @@ function retest(mod::Module, pattern::Union{AbstractString,Regex} = r"";
                 verbose::Real=true, # should be @nospecialize, but not supported on old Julia
                 )
 
-    ########## process pattern
-    regex = pattern isa Regex ? pattern :
-        if VERSION >= v"1.3"
-            r""i * pattern
+
+    modules, regex, verbose = process_args(args, verbose)
+
+    firstmod = true
+    for mod in modules
+        firstmod || println()
+        firstmod = false
+
+        tests, descwidth = fetchtests(mod, regex, verbose)
+        isempty(tests) && continue
+
+        shuffle &&
+            shuffle!(tests)
+
+        if dry
+            foreach(ts -> dryrun(mod, ts, regex), tests)
+            continue
+        end
+
+        if group && nworkers() > 1
+            # make test groups according to file names
+            files = Dict{Symbol, Int}()
+            n = 1
+            for ts in tests
+                k = get!(files, ts.source.file, n)
+                n += (k == n)
+            end
+
+            sort!(tests, lt = function(s, t)
+                      files[s.source.file] < files[t.source.file]
+                  end)
+
+            groups = [1 => tests[1].source.file]
+            for (ith, ts) in enumerate(tests)
+                _, file = groups[end]
+                if ts.source.file != file
+                    push!(groups, ith => ts.source.file)
+                end
+            end
+            todo = fill(true, length(tests))
+        end
+
+        outchan = RemoteChannel(() -> Channel{Union{Nothing,Testset.ReTestSet}}(0))
+
+        nprinted = 0
+        allpass = true
+        exception = Ref{Exception}()
+        overall = Testset.ReTestSet(string(mod), "Overall", true)
+
+        printer = @async begin
+            errored = false
+            format = Format(stats, descwidth)
+            print_overall() =
+                if length(tests) > 1 || verbose == 0
+                    Testset.print_test_results(overall, format)
+                else
+                    nothing
+                end
+
+            while true
+                rts = take!(outchan)
+                if rts === nothing
+                    errored || print_overall()
+                    break
+                end
+                errored && continue
+
+                if verbose > 0 || rts.anynonpass
+                    Testset.print_test_results(rts, format)
+                end
+                if rts.anynonpass
+                    print_overall()
+                    println()
+                    Testset.print_test_errors(rts)
+                    errored = true
+                    allpass = false
+                    ndone = length(tests)
+                end
+                nprinted += 1
+                if rts.exception !== nothing
+                    exception[] = rts.exception
+                end
+            end
+        end
+
+        ntests = 0
+        ndone = 0
+
+        @sync for wrkr in workers()
+            @async begin
+                file = nothing
+                idx = 0
+                while ndone < length(tests)
+                    ndone += 1
+                    if !@isdefined(groups)
+                        ts = tests[ndone]
+                    else
+                        if file === nothing
+                            if isempty(groups)
+                                idx = findfirst(todo)
+                            else
+                                idx, file = popfirst!(groups)
+                            end
+                        end
+                        ts = tests[idx]
+                        todo[idx] = false
+                        if idx == length(tests) || file === nothing ||
+                                tests[idx+1].source.file != file
+                            file = nothing
+                        else
+                            idx += 1
+                        end
+                    end
+                    resp = try
+                        remotecall_fetch(wrkr, mod, ts, regex, outchan
+                                         ) do mod, ts, regex, outchan
+                            mts = make_ts(ts, regex, outchan)
+                            Core.eval(mod, mts)
+                        end
+                    catch e
+                        allpass = false
+                        ndone = length(tests)
+                        isa(e, InterruptException) || rethrow()
+                        return
+                    end
+                    if resp isa Vector
+                        ntests += length(resp)
+                        append!(overall.results, resp)
+                    else
+                        ntests += 1
+                        push!(overall.results, resp)
+                    end
+                end
+            end
+        end
+        put!(outchan, nothing)
+        wait(printer)
+        @assert !allpass || nprinted == ntests
+        if isassigned(exception)
+            throw(exception[])
+        end
+    end
+end
+
+function process_args(args, verbose)
+    ########## process args
+    local pattern
+    modules = Module[]
+    for arg in args
+        if arg isa Union{AbstractString,Regex}
+            @isdefined(pattern) && throw(ArgumentError("cannot pass multiple patterns"))
+            pattern = arg
         else
-            Regex(pattern, "i")
+            push!(modules, arg)
+        end
+    end
+
+    ########## process pattern
+    regex =
+        if !@isdefined(pattern)
+            r""
+        elseif pattern isa Regex
+            pattern
+        else
+            if VERSION >= v"1.3"
+                r""i * pattern
+            else
+                Regex(pattern, "i")
+            end
         end
 
     ########## process verbose
@@ -304,162 +467,10 @@ function retest(mod::Module, pattern::Union{AbstractString,Regex} = r"";
     end
     verbose = Int(verbose)
 
-    ########## resolve! & description width
-    tests = updatetests!(mod)
-    overall = Testset.ReTestSet(string(mod), "Overall", true)
-    descwidth = 0
-
-    for ts in tests
-        run = resolve!(mod, ts, regex, verbose=verbose)
-        run || continue
-        descwidth = max(descwidth, ts.descwidth)
-    end
-
-    tests = filter(ts -> ts.run, tests)
-    isempty(tests) && return
-    if length(tests) > 1 || verbose == 0
-        descwidth = max(descwidth, textwidth(overall.description))
-    end
-
-    shuffle &&
-        shuffle!(tests)
-
-    dry &&
-        return foreach(ts -> dryrun(mod, ts, regex), tests)
-
-    if group && nworkers() > 1
-        # make test groups according to file names
-        files = Dict{Symbol, Int}()
-        n = 1
-        for ts in tests
-            k = get!(files, ts.source.file, n)
-            n += (k == n)
-        end
-
-        sort!(tests, lt = function(s, t)
-                  files[s.source.file] < files[t.source.file]
-              end)
-
-        groups = [1 => tests[1].source.file]
-        for (ith, ts) in enumerate(tests)
-            _, file = groups[end]
-            if ts.source.file != file
-                push!(groups, ith => ts.source.file)
-            end
-        end
-        todo = fill(true, length(tests))
-    end
-
-    outchan = RemoteChannel(() -> Channel{Union{Nothing,Testset.ReTestSet}}(0))
-
-    nprinted = 0
-    allpass = true
-    exception = Ref{Exception}()
-
-    printer = @async begin
-        errored = false
-        format = Format(stats, descwidth)
-        print_overall() =
-            if length(tests) > 1 || verbose == 0
-                Testset.print_test_results(overall, format)
-            else
-                nothing
-            end
-
-        while true
-            rts = take!(outchan)
-            if rts === nothing
-                errored || print_overall()
-                break
-            end
-            errored && continue
-
-            if verbose > 0 || rts.anynonpass
-                Testset.print_test_results(rts, format)
-            end
-            if rts.anynonpass
-                print_overall()
-                println()
-                Testset.print_test_errors(rts)
-                errored = true
-                allpass = false
-                ndone = length(tests)
-            end
-            nprinted += 1
-            if rts.exception !== nothing
-                exception[] = rts.exception
-            end
-        end
-    end
-
-    ntests = 0
-    ndone = 0
-
-    @sync for wrkr in workers()
-        @async begin
-            file = nothing
-            idx = 0
-            while ndone < length(tests)
-                ndone += 1
-                if !@isdefined(groups)
-                    ts = tests[ndone]
-                else
-                    if file === nothing
-                        if isempty(groups)
-                            idx = findfirst(todo)
-                        else
-                            idx, file = popfirst!(groups)
-                        end
-                    end
-                    ts = tests[idx]
-                    todo[idx] = false
-                    if idx == length(tests) || file === nothing ||
-                            tests[idx+1].source.file != file
-                        file = nothing
-                    else
-                        idx += 1
-                    end
-                end
-                resp = try
-                    remotecall_fetch(wrkr, mod, ts, regex, outchan) do mod, ts, regex, outchan
-                        mts = make_ts(ts, regex, outchan)
-                        Core.eval(mod, mts)
-                    end
-                catch e
-                    allpass = false
-                    ndone = length(tests)
-                    isa(e, InterruptException) || rethrow()
-                    return
-                end
-                if resp isa Vector
-                    ntests += length(resp)
-                    append!(overall.results, resp)
-                else
-                    ntests += 1
-                    push!(overall.results, resp)
-                end
-            end
-        end
-    end
-    put!(outchan, nothing)
-    wait(printer)
-    @assert !allpass || nprinted == ntests
-    if isassigned(exception)
-        throw(exception[])
-    end
+    computemodules!(modules), regex, verbose
 end
 
-function retest(args::Union{Module,AbstractString,Regex}...; kwargs...)
-    pattern = []
-    modules = Module[]
-    for arg in args
-        if arg isa Union{AbstractString,Regex}
-            !isempty(pattern) && throw(ArgumentError("cannot pass multiple patterns"))
-            push!(pattern, arg)
-        else
-            push!(modules, arg)
-        end
-    end
+function computemodules!(modules::Vector{Module})
     if isempty(modules)
         # TESTED_MODULES is not up-to-date w.r.t. package modules which have
         # precompilation, so we have to also look in Base.loaded_modules
@@ -484,12 +495,25 @@ function retest(args::Union{Module,AbstractString,Regex}...; kwargs...)
         # will automatically skip ReTest and ReTest.ReTestTest
         filter!(m -> isdefined(m, INLINE_TEST[]) && m ∉ (ReTest, ReTestTest),  modules)
     end
-    firstmod = true
-    for mod in modules
-        firstmod || println()
-        firstmod = false
-        retest(mod, pattern...; kwargs...)
+    modules
+end
+
+function fetchtests(mod, regex, verbose)
+    tests = updatetests!(mod)
+    descwidth = 0
+
+    for ts in tests
+        run = resolve!(mod, ts, regex, verbose=verbose)
+        run || continue
+        descwidth = max(descwidth, ts.descwidth)
     end
+
+    tests = filter(ts -> ts.run, tests)
+
+    if length(tests) > 1 || verbose == 0
+        descwidth = max(descwidth, textwidth("Overall"))
+    end
+    tests, descwidth
 end
 
 function dryrun(mod::Module, ts::TestsetExpr, rx::Regex, parentsubj="", align::Int=0)
