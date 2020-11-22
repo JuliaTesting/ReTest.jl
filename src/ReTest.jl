@@ -34,6 +34,7 @@ end
 
 mutable struct TestsetExpr
     source::LineNumberNode
+    mod::String # enclosing module
     desc::Union{String,Expr}
     options::Options
     loops::Union{Expr,Nothing}
@@ -45,30 +46,30 @@ mutable struct TestsetExpr
     descwidth::Int # max width of self and children shown descriptions
     body::Expr
 
-    TestsetExpr(source, desc, options, loops, parent, children=TestsetExpr[]) =
-        new(source, desc, options, loops, parent, children, String[])
+    TestsetExpr(source, mod, desc, options, loops, parent, children=TestsetExpr[]) =
+        new(source, mod, desc, options, loops, parent, children, String[])
 end
 
 isfor(ts::TestsetExpr) = ts.loops !== nothing
 isfinal(ts::TestsetExpr) = isempty(ts.children)
 
 # replace unqualified `@testset` by TestsetExpr
-function replace_ts(source, x::Expr, parent)
+function replace_ts(source, mod, x::Expr, parent)
     if x.head === :macrocall && x.args[1] === Symbol("@testset")
         @assert x.args[2] isa LineNumberNode
-        ts = parse_ts(source, Tuple(x.args[3:end]), parent)
+        ts = parse_ts(source, mod, Tuple(x.args[3:end]), parent)
         parent !== nothing && push!(parent.children, ts)
         ts
     else
-        body = map(z -> replace_ts(source, z, parent), x.args)
+        body = map(z -> replace_ts(source, mod, z, parent), x.args)
         Expr(x.head, body...)
     end
 end
 
-replace_ts(source, x, _) = x
+replace_ts(source, mod, x, _) = x
 
 # create a TestsetExpr from @testset's args
-function parse_ts(source, args::Tuple, parent=nothing)
+function parse_ts(source, mod, args::Tuple, parent=nothing)
     local desc
     options = Options()
     for arg in args[1:end-1]
@@ -96,8 +97,8 @@ function parse_ts(source, args::Tuple, parent=nothing)
         error("Expected begin/end block or for loop as argument to @testset")
     end
 
-    ts = TestsetExpr(source, desc, options, loops, parent)
-    ts.body = replace_ts(source, tsbody, ts)
+    ts = TestsetExpr(source, mod, desc, options, loops, parent)
+    ts.body = replace_ts(source, mod, tsbody, ts)
     ts
 end
 
@@ -199,12 +200,12 @@ function make_ts(ts::TestsetExpr, rx::Regex, outchan)
     end
     if ts.loops === nothing
         quote
-            @testset $(isfinal(ts)) $rx $(ts.desc) $(ts.options) $outchan $body
+            @testset $(ts.mod) $(isfinal(ts)) $rx $(ts.desc) $(ts.options) $outchan $body
         end
     else
         loopvals = something(ts.loopvalues, ts.loops.args[2])
         quote
-            @testset $(isfinal(ts)) $rx $(ts.desc) $(ts.options) $outchan $(ts.loops.args[1]) $loopvals $body
+            @testset $(ts.mod) $(isfinal(ts)) $rx $(ts.desc) $(ts.options) $outchan $(ts.loops.args[1]) $loopvals $body
         end
     end
 end
@@ -219,7 +220,7 @@ function updatetests!(mod::Module)
     # map: we keep only the latest version of a test at a given location,
     #      to be Revise-friendly (just an imperfect heuristic)
     for (tsargs, source) in news
-        ts = parse_ts(source, tsargs)
+        ts = parse_ts(source, string(mod), tsargs)
         idx = get!(map, ts.desc, length(tests) + 1)
         if idx == length(tests) + 1
             push!(tests, ts)
@@ -305,7 +306,7 @@ function retest(mod::Module, pattern::Union{AbstractString,Regex} = r"";
 
     ########## resolve! & description width
     tests = updatetests!(mod)
-    overall = Testset.ReTestSet("Overall $mod", true)
+    overall = Testset.ReTestSet(string(mod), "Overall", true)
     descwidth = 0
 
     for ts in tests
@@ -511,7 +512,8 @@ function dryrun(mod::Module, ts::TestsetExpr, rx::Regex, parentsubj="", align::I
             Core.eval(mod, Expr(:(=), ts.loops.args[1], x))
             descx = Core.eval(mod, desc)::String
             # avoid repeating ourselves, transform this iteration into a "begin/end" testset
-            beginend = TestsetExpr(ts.source, descx, ts.options, nothing, ts.parent, ts.children)
+            beginend = TestsetExpr(ts.source, ts.mod, descx, ts.options, nothing,
+                                   ts.parent, ts.children)
             beginend.run = true
             dryrun(mod, beginend, rx, parentsubj, align)
         end

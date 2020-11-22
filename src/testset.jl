@@ -55,8 +55,9 @@ end
 Format(stats, desc_align) = Format(stats, desc_align, 0, 0, 0,0 ,0)
 
 mutable struct ReTestSet <: AbstractTestSet
+    mod::String # enclosing module
     description::AbstractString
-    overall::Bool
+    overall::Bool # TODO: could be conveyed by having self.mod == ""
     results::Vector
     n_passed::Int
     anynonpass::Bool
@@ -65,8 +66,8 @@ mutable struct ReTestSet <: AbstractTestSet
     exception::Union{TestSetException,Nothing}
 end
 
-ReTestSet(desc, overall=false; verbose = true) =
-    ReTestSet(desc, overall, [], 0, false, verbose, NamedTuple(), nothing)
+ReTestSet(mod, desc, overall=false; verbose = true) =
+    ReTestSet(mod, desc, overall, [], 0, false, verbose, NamedTuple(), nothing)
 
 # For a non-passed result, simply store the result
 record(ts::ReTestSet, t::Union{Broken,Fail,Error}) = (push!(ts.results, t); t)
@@ -165,7 +166,7 @@ function print_test_results(ts::ReTestSet, fmt::Format, depth_pad=0)
     # Calculate the alignment of the test result counts by
     # recursively walking the tree of test sets
     if !ts.overall # we don't print recursively
-        align = max(get_alignment(ts, 0), length("Test Summary:"))
+        align = max(get_alignment(ts, 0), length(ts.mod))
     end
 
     if !ts.overall && align > fmt.desc_align
@@ -178,7 +179,7 @@ function print_test_results(ts::ReTestSet, fmt::Format, depth_pad=0)
     # Print the outer test set header once
     if upd
         pad = nprinted == 0 ? "" : " "
-        printstyled(rpad("Test Summary:", align, " "), " |", pad; bold=true, color=:white)
+        printstyled(rpad(ts.mod, align, " "), " |", pad; bold=true, color=:white)
         if pass_width > 0
             printstyled(lpad("Pass", pass_width, " "), "  "; bold=true, color=:green)
         end
@@ -393,19 +394,19 @@ function get_testset_string(remove_last=false)
 end
 
 # non-inline testset with regex filtering support
-macro testset(isfinal::Bool, rx::Regex, desc::String, options, outchan, body)
-    Testset.testset_beginend(isfinal, rx, desc, options, outchan,  body, __source__)
+macro testset(mod::String, isfinal::Bool, rx::Regex, desc::String, options, outchan, body)
+    Testset.testset_beginend(mod, isfinal, rx, desc, options, outchan,  body, __source__)
 end
 
-macro testset(isfinal::Bool, rx::Regex, desc::Union{String,Expr}, options, outchan,
+macro testset(mod::String, isfinal::Bool, rx::Regex, desc::Union{String,Expr}, options, outchan,
               loopiter, loopvals, body)
-    Testset.testset_forloop(isfinal, rx, desc, options, outchan, loopiter, loopvals, body, __source__)
+    Testset.testset_forloop(mod, isfinal, rx, desc, options, outchan, loopiter, loopvals, body, __source__)
 end
 
 """
 Generate the code for a `@testset` with a `begin`/`end` argument
 """
-function testset_beginend(isfinal::Bool, rx::Regex, desc::String, options,
+function testset_beginend(mod::String, isfinal::Bool, rx::Regex, desc::String, options,
                           outchan, tests, source)
     # Generate a block of code that initializes a new testset, adds
     # it to the task local storage, evaluates the test(s), before
@@ -418,7 +419,7 @@ function testset_beginend(isfinal::Bool, rx::Regex, desc::String, options,
         end
         if !$isfinal || occursin($rx, current_str)
             local ret
-            local ts = ReTestSet($desc; verbose=$(options.transient_verbose))
+            local ts = ReTestSet($mod, $desc; verbose=$(options.transient_verbose))
             push_testset(ts)
             # we reproduce the logic of guardseed, but this function
             # cannot be used as it changes slightly the semantic of @testset,
@@ -461,7 +462,7 @@ end
 """
 Generate the code for a `@testset` with a `for` loop argument
 """
-function testset_forloop(isfinal::Bool, rx::Regex, desc::Union{String,Expr}, options, outchan,
+function testset_forloop(mod::String, isfinal::Bool, rx::Regex, desc::Union{String,Expr}, options, outchan,
                          loopiter, loopvals,
                          tests, source)
 
@@ -483,7 +484,7 @@ function testset_forloop(isfinal::Bool, rx::Regex, desc::Union{String,Expr}, opt
                 # it's 1000 times faster to copy from tmprng rather than calling Random.seed!
                 copy!(RNG, tmprng)
             end
-            ts = ReTestSet($(esc(desc)); verbose=$(options.transient_verbose))
+            ts = ReTestSet($mod, $(esc(desc)); verbose=$(options.transient_verbose))
             push_testset(ts)
             first_iteration = false
             try
