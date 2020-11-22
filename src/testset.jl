@@ -325,7 +325,7 @@ function print_counts(ts::ReTestSet, fmt::Format, depth, align,
 
     if np == 0 && nf == 0 && ne == 0 && nb == 0
         printstyled("No tests", color=Base.info_color())
-    elseif ((np > 0) + (nf > 0) + (ne > 0) + (nb > 0)) > 1
+    elseif total_width > 0
         printstyled(lpad(string(subtotal), total_width, " "), color=Base.info_color())
     end
 
