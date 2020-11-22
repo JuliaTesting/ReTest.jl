@@ -403,7 +403,7 @@ function testset_beginend(isfinal::Bool, rx::Regex, desc::String, options,
         end
         if !$isfinal || occursin($rx, current_str)
             local ret
-            local ts = ReTestSet($desc; verbose=$(options.verbose))
+            local ts = ReTestSet($desc; verbose=$(options.transient_verbose))
             push_testset(ts)
             # we reproduce the logic of guardseed, but this function
             # cannot be used as it changes slightly the semantic of @testset,
@@ -468,7 +468,7 @@ function testset_forloop(isfinal::Bool, rx::Regex, desc::Union{String,Expr}, opt
                 # it's 1000 times faster to copy from tmprng rather than calling Random.seed!
                 copy!(RNG, tmprng)
             end
-            ts = ReTestSet($(esc(desc)); verbose=$(options.verbose))
+            ts = ReTestSet($(esc(desc)); verbose=$(options.transient_verbose))
             push_testset(ts)
             first_iteration = false
             try

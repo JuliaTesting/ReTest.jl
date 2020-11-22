@@ -28,7 +28,8 @@ include("testset.jl")
 using .Testset: Testset, Format
 
 Base.@kwdef mutable struct Options
-    verbose::Bool = false
+    verbose::Bool = false # annotated verbosity
+    transient_verbose::Bool = false # verbosity for next run
 end
 
 mutable struct TestsetExpr
@@ -101,7 +102,8 @@ function parse_ts(source, args::Tuple, parent=nothing)
 end
 
 function resolve!(mod::Module, ts::TestsetExpr, rx::Regex;
-                  force::Bool=false, shown::Bool=true, depth::Int=0)
+                  force::Bool=false, shown::Bool=true, depth::Int=0,
+                  verbose::Int)
     strings = empty!(ts.strings)
     desc = ts.desc
     ts.run = force || isempty(rx.pattern)
@@ -109,6 +111,7 @@ function resolve!(mod::Module, ts::TestsetExpr, rx::Regex;
 
     parentstrs = ts.parent === nothing ? [""] : ts.parent.strings
     ts.descwidth = 0
+    ts.options.transient_verbose = shown & ((verbose > 1) | ts.options.verbose)
 
     if desc isa String
         if shown
@@ -175,7 +178,8 @@ function resolve!(mod::Module, ts::TestsetExpr, rx::Regex;
 
     for tsc in ts.children
         run |= resolve!(mod, tsc, rx, force=ts.run,
-                        shown=shown & ts.options.verbose, depth=depth+1)
+                        shown=shown & ts.options.transient_verbose,
+                        depth=depth+1, verbose=verbose-1)
         ts.descwidth = max(ts.descwidth, tsc.descwidth)
     end
     if !run
@@ -235,7 +239,7 @@ end
 
 """
     retest([m::Module...], pattern = r""; dry::Bool=false, stats::Bool=false,
-                                       shuffle::Bool=false)
+                                          shuffle::Bool=false, verbose::Real=true)
 
 Run all the tests declared in `@testset` blocks, within modules `m` if specified,
 or within all currently loaded modules otherwise.
@@ -243,6 +247,10 @@ If `dry` is `true`, don't actually run the tests, just print the descriptions
 of the testsets which would (presumably) run.
 If `stats` is `true`, print some time/memory statistics for each testset.
 If `shuffle` is `true`, shuffle the order in which top-level testsets are run.
+If specified, `verbose` must be an integer or `Inf` indicating the nesting level
+of testsets whose results must be printed (this is equivalent to adding the
+`verbose=true` annotation to corresponding testsets); the default behavior
+(`true` or `1`) corresponds to printing the result of top-level testsets.
 
 It's possible to filter run testsets by specifying `pattern`: the "subject" of a
 testset is the concatenation of the subject of its parent `@testset`, if any,
@@ -274,7 +282,11 @@ function retest(mod::Module, pattern::Union{AbstractString,Regex} = r"";
                 dry::Bool=false,
                 stats::Bool=false,
                 shuffle::Bool=false,
-                group::Bool=true)
+                group::Bool=true,
+                verbose::Real=true, # should be @nospecialize, but not supported on old Julia
+                )
+
+    ########## process pattern
     regex = pattern isa Regex ? pattern :
         if VERSION >= v"1.3"
             r""i * pattern
@@ -282,11 +294,20 @@ function retest(mod::Module, pattern::Union{AbstractString,Regex} = r"";
             Regex(pattern, "i")
         end
 
+    ########## process verbose
+    if !isinteger(verbose) && !isinf(verbose) || signbit(verbose)
+        throw(ArgumentError("`verbose` must be a non-negative integer or `Inf`"))
+    end
+    if verbose > typemax(Int)
+        verbose = typemax(Int) # can't use `max`, which promotes to Float64 with Inf
+    end
+    verbose = Int(verbose)
+
     tests = updatetests!(mod)
 
     descwidth = 0
     for ts in tests
-        run = resolve!(mod, ts, regex)
+        run = resolve!(mod, ts, regex, verbose=verbose)
         run || continue
         descwidth = max(descwidth, ts.descwidth)
     end
@@ -338,7 +359,9 @@ function retest(mod::Module, pattern::Union{AbstractString,Regex} = r"";
             rts === nothing && break
             errored && continue
 
-            Testset.print_test_results(rts, format)
+            if verbose > 0 || rts.anynonpass
+                Testset.print_test_results(rts, format)
+            end
             if rts.anynonpass
                 println()
                 Testset.print_test_errors(rts)

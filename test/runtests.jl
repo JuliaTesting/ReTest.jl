@@ -145,6 +145,8 @@ N.check(".*j/1", [])
 N.check("^/i/j0", [])
 N.check("^/i/l10", [])
 
+### module P #################################################################
+
 module P
 using ReTest
 
@@ -173,10 +175,10 @@ end
 
 function check(rx, list)
     empty!(RUN)
-    retest(P, rx)
+    retest(P, rx, verbose=0)
     @test sort(RUN) == sort(list)
     empty!(RUN)
-    P.runtests(rx)
+    P.runtests(rx, verbose=2)
     @test sort(RUN) == sort(list)
 end
 end
@@ -207,10 +209,14 @@ RUN = []
     @test true
 end
 
-retest()
+retest(verbose=Inf)
 retest("a", shuffle=true, stats=true)
 retest(M, N, P, "b", dry=true)
 @test_throws ArgumentError retest("A", r"b")
+
+for v in (-rand(1:9), 4.2, -Inf)
+    @test_throws ArgumentError retest(verbose=v)
+end
 
 @test RUN == ["toplevel"]
 
