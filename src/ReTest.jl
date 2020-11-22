@@ -303,9 +303,11 @@ function retest(mod::Module, pattern::Union{AbstractString,Regex} = r"";
     end
     verbose = Int(verbose)
 
+    ########## resolve! & description width
     tests = updatetests!(mod)
+    overall = Testset.ReTestSet("Overall $mod", true)
+    descwidth = textwidth(overall.description)
 
-    descwidth = 0
     for ts in tests
         run = resolve!(mod, ts, regex, verbose=verbose)
         run || continue
@@ -356,13 +358,17 @@ function retest(mod::Module, pattern::Union{AbstractString,Regex} = r"";
 
         while true
             rts = take!(outchan)
-            rts === nothing && break
+            if rts === nothing
+                errored || Testset.print_test_results(overall, format)
+                break
+            end
             errored && continue
 
             if verbose > 0 || rts.anynonpass
                 Testset.print_test_results(rts, format)
             end
             if rts.anynonpass
+                Testset.print_test_results(overall, format)
                 println()
                 Testset.print_test_errors(rts)
                 errored = true
@@ -378,6 +384,7 @@ function retest(mod::Module, pattern::Union{AbstractString,Regex} = r"";
 
     ntests = 0
     ndone = 0
+
     @sync for wrkr in workers()
         @async begin
             file = nothing
@@ -406,8 +413,7 @@ function retest(mod::Module, pattern::Union{AbstractString,Regex} = r"";
                 resp = try
                     remotecall_fetch(wrkr, mod, ts, regex, outchan) do mod, ts, regex, outchan
                         mts = make_ts(ts, regex, outchan)
-                        res = Core.eval(mod, mts)
-                        res isa Vector ? length(res) : 1
+                        Core.eval(mod, mts)
                     end
                 catch e
                     allpass = false
@@ -415,7 +421,13 @@ function retest(mod::Module, pattern::Union{AbstractString,Regex} = r"";
                     isa(e, InterruptException) || rethrow()
                     return
                 end
-                ntests += resp
+                if resp isa Vector
+                    ntests += length(resp)
+                    append!(overall.results, resp)
+                else
+                    ntests += 1
+                    push!(overall.results, resp)
+                end
             end
         end
     end
@@ -462,7 +474,10 @@ function retest(args::Union{Module,AbstractString,Regex}...; kwargs...)
         # will automatically skip ReTest and ReTest.ReTestTest
         filter!(m -> isdefined(m, INLINE_TEST[]) && m ∉ (ReTest, ReTestTest),  modules)
     end
+    firstmod = true
     for mod in modules
+        firstmod || println()
+        firstmod = false
         retest(mod, pattern...; kwargs...)
     end
 end

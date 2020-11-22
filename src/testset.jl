@@ -56,6 +56,7 @@ Format(stats, desc_align) = Format(stats, desc_align, 0, 0, 0,0 ,0)
 
 mutable struct ReTestSet <: AbstractTestSet
     description::AbstractString
+    overall::Bool
     results::Vector
     n_passed::Int
     anynonpass::Bool
@@ -64,8 +65,8 @@ mutable struct ReTestSet <: AbstractTestSet
     exception::Union{TestSetException,Nothing}
 end
 
-ReTestSet(desc; verbose = true) = ReTestSet(desc, [], 0, false, verbose,
-                                             NamedTuple(), nothing)
+ReTestSet(desc, overall=false; verbose = true) =
+    ReTestSet(desc, overall, [], 0, false, verbose, NamedTuple(), nothing)
 
 # For a non-passed result, simply store the result
 record(ts::ReTestSet, t::Union{Broken,Fail,Error}) = (push!(ts.results, t); t)
@@ -157,9 +158,11 @@ function print_test_results(ts::ReTestSet, fmt::Format, depth_pad=0)
 
     # Calculate the alignment of the test result counts by
     # recursively walking the tree of test sets
-    align = max(get_alignment(ts, 0), length("Test Summary:"))
+    if !ts.overall # we don't print recursively
+        align = max(get_alignment(ts, 0), length("Test Summary:"))
+    end
 
-    if align > fmt.desc_align
+    if !ts.overall && align > fmt.desc_align
         upd = true
         fmt.desc_align = align
     else
@@ -191,8 +194,10 @@ function print_test_results(ts::ReTestSet, fmt::Format, depth_pad=0)
         end
         println()
     end
+
     # Recursively print a summary at every level
-    print_counts(ts, fmt, depth_pad, align, pass_width, fail_width, error_width, broken_width, total_width)
+    print_counts(ts, fmt, depth_pad, align,
+                 pass_width, fail_width, error_width, broken_width, total_width)
 end
 
 # Called at the end of a @testset, behaviour depends on whether
@@ -289,7 +294,9 @@ function print_counts(ts::ReTestSet, fmt::Format, depth, align,
     subtotal = passes + fails + errors + broken + c_passes + c_fails + c_errors + c_broken
     # Print test set header, with an alignment that ensures all
     # the test results appear above each other
-    print(rpad(string("  "^depth, ts.description), align, " "), " | ")
+    style = ts.overall ? (bold=true, color=:white) : NamedTuple()
+    printstyled(rpad(string("  "^depth, ts.description), align, " "), " | "; style...)
+
 
     np = passes + c_passes
     if np > 0
@@ -330,6 +337,7 @@ function print_counts(ts::ReTestSet, fmt::Format, depth, align,
     end
 
     if fmt.stats # copied from Julia/test/runtests.jl
+        ts.overall && set_timed!(ts)
         timed = ts.timed
         elapsed_align = textwidth("Time (s)")
         gc_align      = textwidth("GC (s)")
@@ -339,13 +347,12 @@ function print_counts(ts::ReTestSet, fmt::Format, depth, align,
 
         time_str = @sprintf("%7.2f", timed.time)
         printstyled("| ", lpad(time_str, elapsed_align, " "), " | ", color=:white)
-        gc_str = @sprintf("%5.2f", timed.gcstats.total_time / 10^9)
+        gc_str = @sprintf("%5.2f", timed.gctime)
         printstyled(lpad(gc_str, gc_align, " "), " | ", color=:white)
 
         # since there may be quite a few digits in the percentage,
         # the left-padding here is less to make sure everything fits
-        percent_str = @sprintf("%4.1f",
-                               100 * timed.gcstats.total_time / (10^9 * timed.time))
+        percent_str = @sprintf("%4.1f", 100 * timed.gctime / timed.time)
         printstyled(lpad(percent_str, percent_align, " "), " | ", color=:white)
         alloc_str = @sprintf("%5.2f", timed.bytes / 2^20)
         printstyled(lpad(alloc_str, alloc_align, " "), " | ", color=:white)
@@ -356,7 +363,7 @@ function print_counts(ts::ReTestSet, fmt::Format, depth, align,
 
     # Only print results at lower levels if we had failures or if the user
     # wants.
-    if (np + nb != subtotal) || (ts.verbose)
+    if !ts.overall && ((np + nb != subtotal) || (ts.verbose))
         for t in ts.results
             if isa(t, ReTestSet)
                 print_counts(t, fmt, depth + 1, align,
@@ -514,10 +521,19 @@ end
 function set_timed!(ts, timed, rss)
     # on Julia < 1.5, @timed returns a Tuple; here we give the names as in
     # Julia 1.5+, but we filter out the `val` field, unused here
-    ts.timed = (time = timed[2], bytes = timed[3],
-                gctime = timed[4], gcstats = timed[5],
-                rss = rss)
+    ts.timed = (time = timed[2], bytes = timed[3], gctime = timed[4], rss = rss)
+    # julia/test/runtests.jl uses timed.gcstats.total_time/10^9, which is equal to gctime
+    # (timed[5] == timed.gcstats)
     ts
+end
+
+function set_timed!(ts)
+    @assert ts.overall
+    ts.timed = NamedTuple{(:time, :bytes, :gctime, :rss)}(
+        ntuple(Val(4)) do i
+            # init=0.0 kwarg not available on old Julia
+            Float64(sum(tsc.timed[i] for tsc in ts.results))
+        end)
 end
 
 end # module

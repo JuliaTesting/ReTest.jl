@@ -220,7 +220,8 @@ end
 
 @test RUN == ["toplevel"]
 
-retest(r"^/f1") # just test that a regex can be passed
+retest(r"^/f1", stats=true) # just test that a regex can be passed,
+                            # and that stats works for multiple subtests
 
 empty!(RUN)
 
@@ -231,7 +232,7 @@ import Main: RUN
     push!(RUN, 1)
 end
 end
-retest(Overwritten)
+retest(Overwritten, stats=true) # testing stats when there are not tests
 @test RUN == [1]
 
 empty!(RUN)
