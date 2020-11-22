@@ -302,8 +302,8 @@ function print_counts(ts::ReTestSet, fmt::Format, depth, align,
     # Print test set header, with an alignment that ensures all
     # the test results appear above each other
     style = ts.overall ? (bold=true, color=:white) : NamedTuple()
-    printstyled(rpad(string("  "^depth, ts.description), align, " "), " | "; style...)
-
+    printstyled(rpad(string("  "^depth, ts.description), align, " "); style...)
+    printstyled(" | ", bold=true)
 
     np = passes + c_passes
     nf = fails + c_fails
