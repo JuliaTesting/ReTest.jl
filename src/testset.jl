@@ -116,10 +116,11 @@ function print_test_results(ts::ReTestSet, fmt::Format; depth::Int=0, bold::Bool
     dig_error  = total_error  > 0               ? ndigits(total_error)  : 0
     dig_broken = total_broken > 0               ? ndigits(total_broken) : 0
 
+    # max(1, ...) : we always print something at least in "Pass", even when no tests
     nprinted = max(1, (total_pass > 0) + (total_fail > 0) +
                       (total_error > 0) + (total_broken > 0))
-    if nprinted <= 1
-        # do not print "Total" when only one column is printed
+    if nprinted == 1 && total_pass > 0
+        # do not print "Total" when only "Pass" column is printed
         total = 0
     end
     dig_total = total > 0 ? ndigits(total) : 0
@@ -178,8 +179,7 @@ function print_test_results(ts::ReTestSet, fmt::Format; depth::Int=0, bold::Bool
 
     # Print the outer test set header once
     if upd
-        pad = nprinted == 0 ? "" : " "
-        printstyled(rpad("", align, " "), " |", pad; bold=true, color=:white)
+        printstyled(rpad("", align, " "), " |", " "; bold=true, color=:white)
         if pass_width > 0
             printstyled(lpad("Pass", pass_width, " "), "  "; bold=true, color=:green)
         end
