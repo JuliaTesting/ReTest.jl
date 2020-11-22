@@ -107,16 +107,22 @@ function print_test_results(ts::ReTestSet, fmt::Format, depth_pad=0)
     total_fail   = fails  + c_fails
     total_error  = errors + c_errors
     total_broken = broken + c_broken
-    dig_pass   = total_pass   > 0 ? ndigits(total_pass)   : 0
-    dig_fail   = total_fail   > 0 ? ndigits(total_fail)   : 0
-    dig_error  = total_error  > 0 ? ndigits(total_error)  : 0
-    dig_broken = total_broken > 0 ? ndigits(total_broken) : 0
     total = total_pass + total_fail + total_error + total_broken
-    nprinted = (total_pass > 0) + (total_fail > 0) + (total_error > 0) + (total_broken > 0)
+
+    # if no tests, count that as a pass:
+    dig_pass   = total_pass   > 0 || total == 0 ? ndigits(total_pass)   : 0
+    dig_fail   = total_fail   > 0               ? ndigits(total_fail)   : 0
+    dig_error  = total_error  > 0               ? ndigits(total_error)  : 0
+    dig_broken = total_broken > 0               ? ndigits(total_broken) : 0
+
+    nprinted = max(1, (total_pass > 0) + (total_fail > 0) +
+                      (total_error > 0) + (total_broken > 0))
     if nprinted <= 1
-       total = 0
+        # do not print "Total" when only one column is printed
+        total = 0
     end
     dig_total = total > 0 ? ndigits(total) : 0
+
     # For each category, take max of digits and header width if there are
     # tests of that type
     pass_width   = dig_pass   > 0 ? max(6,   dig_pass) : 0
@@ -299,14 +305,20 @@ function print_counts(ts::ReTestSet, fmt::Format, depth, align,
 
 
     np = passes + c_passes
-    if np > 0
-        printstyled(lpad(string(np), pass_width, " "), "  ", color=:green)
+    nf = fails + c_fails
+    ne = errors + c_errors
+    nb = broken + c_broken
+
+    if np > 0 || np == 0 && nf == 0 && ne == 0 && nb == 0
+        # print `0` in warn color instead of "No tests" like in Test module,
+        # which messes up alignments (and am too lazy to fix)
+        printstyled(lpad(string(np), pass_width, " "), "  ",
+                    color = np > 0 ? :green : Base.warn_color())
     elseif pass_width > 0
         # No passes at this level, but some at another level
         print(lpad(" ", pass_width), "  ")
     end
 
-    nf = fails + c_fails
     if nf > 0
         printstyled(lpad(string(nf), fail_width, " "), "  ", color=Base.error_color())
     elseif fail_width > 0
@@ -314,7 +326,6 @@ function print_counts(ts::ReTestSet, fmt::Format, depth, align,
         print(lpad(" ", fail_width), "  ")
     end
 
-    ne = errors + c_errors
     if ne > 0
         printstyled(lpad(string(ne), error_width, " "), "  ", color=Base.error_color())
     elseif error_width > 0
@@ -322,7 +333,6 @@ function print_counts(ts::ReTestSet, fmt::Format, depth, align,
         print(lpad(" ", error_width), "  ")
     end
 
-    nb = broken + c_broken
     if nb > 0
         printstyled(lpad(string(nb), broken_width, " "), "  ", color=Base.warn_color())
     elseif broken_width > 0
@@ -330,9 +340,7 @@ function print_counts(ts::ReTestSet, fmt::Format, depth, align,
         print(lpad(" ", broken_width), "  ")
     end
 
-    if np == 0 && nf == 0 && ne == 0 && nb == 0
-        printstyled("No tests", color=Base.info_color())
-    elseif total_width > 0
+    if total_width > 0
         printstyled(lpad(string(subtotal), total_width, " "), color=Base.info_color())
     end
 
