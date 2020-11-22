@@ -317,7 +317,7 @@ function retest(mod::Module, pattern::Union{AbstractString,Regex} = r"";
 
     tests = filter(ts -> ts.run, tests)
     isempty(tests) && return
-    if length(tests) > 1
+    if length(tests) > 1 || verbose == 0
         descwidth = max(descwidth, textwidth(overall.description))
     end
 
@@ -359,8 +359,12 @@ function retest(mod::Module, pattern::Union{AbstractString,Regex} = r"";
     printer = @async begin
         errored = false
         format = Format(stats, descwidth)
-        print_overall() = length(tests) > 1 ? Testset.print_test_results(overall, format) :
-                                              nothing
+        print_overall() =
+            if length(tests) > 1 || verbose == 0
+                Testset.print_test_results(overall, format)
+            else
+                nothing
+            end
 
         while true
             rts = take!(outchan)
