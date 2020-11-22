@@ -306,7 +306,7 @@ function retest(mod::Module, pattern::Union{AbstractString,Regex} = r"";
     ########## resolve! & description width
     tests = updatetests!(mod)
     overall = Testset.ReTestSet("Overall $mod", true)
-    descwidth = textwidth(overall.description)
+    descwidth = 0
 
     for ts in tests
         run = resolve!(mod, ts, regex, verbose=verbose)
@@ -316,6 +316,9 @@ function retest(mod::Module, pattern::Union{AbstractString,Regex} = r"";
 
     tests = filter(ts -> ts.run, tests)
     isempty(tests) && return
+    if length(tests) > 1
+        descwidth = max(descwidth, textwidth(overall.description))
+    end
 
     shuffle &&
         shuffle!(tests)
@@ -355,11 +358,13 @@ function retest(mod::Module, pattern::Union{AbstractString,Regex} = r"";
     printer = @async begin
         errored = false
         format = Format(stats, descwidth)
+        print_overall() = length(tests) > 1 ? Testset.print_test_results(overall, format) :
+                                              nothing
 
         while true
             rts = take!(outchan)
             if rts === nothing
-                errored || Testset.print_test_results(overall, format)
+                errored || print_overall()
                 break
             end
             errored && continue
@@ -368,7 +373,7 @@ function retest(mod::Module, pattern::Union{AbstractString,Regex} = r"";
                 Testset.print_test_results(rts, format)
             end
             if rts.anynonpass
-                Testset.print_test_results(overall, format)
+                print_overall()
                 println()
                 Testset.print_test_errors(rts)
                 errored = true
