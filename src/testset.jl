@@ -98,7 +98,7 @@ function print_test_errors(ts::ReTestSet)
     end
 end
 
-function print_test_results(ts::ReTestSet, fmt::Format, depth_pad=0)
+function print_test_results(ts::ReTestSet, fmt::Format; depth::Int=0, bold::Bool=false)
     # Calculate the overall number for each type so each of
     # the test result types are aligned
     upd = false
@@ -203,8 +203,9 @@ function print_test_results(ts::ReTestSet, fmt::Format, depth_pad=0)
     end
 
     # Recursively print a summary at every level
-    print_counts(ts, fmt, depth_pad, align,
-                 pass_width, fail_width, error_width, broken_width, total_width)
+    print_counts(ts, fmt, depth, align,
+                 pass_width, fail_width, error_width, broken_width, total_width;
+                 bold=bold)
 end
 
 # Called at the end of a @testset, behaviour depends on whether
@@ -294,15 +295,16 @@ end
 # Recursive function that prints out the results at each level of
 # the tree of test sets
 function print_counts(ts::ReTestSet, fmt::Format, depth, align,
-                      pass_width, fail_width, error_width, broken_width, total_width)
+                      pass_width, fail_width, error_width, broken_width, total_width;
+                      bold)
     # Count results by each type at this level, and recursively
     # through any child test sets
     passes, fails, errors, broken, c_passes, c_fails, c_errors, c_broken = get_test_counts(ts)
     subtotal = passes + fails + errors + broken + c_passes + c_fails + c_errors + c_broken
     # Print test set header, with an alignment that ensures all
     # the test results appear above each other
-    bold = ts.overall
-    style = ts.overall ? (bold=true, color=:white) : NamedTuple()
+
+    style = bold ? (bold=bold, color=:white) : NamedTuple()
     printstyled(rpad(string("  "^depth, ts.description), align, " "); style...)
     printstyled(" | ", bold=true)
 
@@ -382,7 +384,8 @@ function print_counts(ts::ReTestSet, fmt::Format, depth, align,
         for t in ts.results
             if isa(t, ReTestSet)
                 print_counts(t, fmt, depth + 1, align,
-                    pass_width, fail_width, error_width, broken_width, total_width)
+                             pass_width, fail_width, error_width, broken_width, total_width,
+                             bold=false)
             end
         end
     end

@@ -365,7 +365,7 @@ function retest(args::Union{Module,AbstractString,Regex}...;
                 if many || verbose == 0
                     @assert endswith(module_ts.description, ':')
                     module_ts.description = chop(module_ts.description, tail=1)
-                    Testset.print_test_results(module_ts, format)
+                    Testset.print_test_results(module_ts, format, bold=true)
                 else
                     nothing
                 end
@@ -380,8 +380,10 @@ function retest(args::Union{Module,AbstractString,Regex}...;
 
                 if verbose > 0 || rts.anynonpass
                     Testset.print_test_results(
-                        rts, format,
-                        !rts.overall & isindented(verbose, overall, many))
+                        rts, format;
+                        depth = Int(!rts.overall & isindented(verbose, overall, many)),
+                        bold = rts.overall | !many
+                    )
                 end
                 if rts.anynonpass
                     print_overall()
@@ -468,7 +470,7 @@ function retest(args::Union{Module,AbstractString,Regex}...;
             println()
     end
     overall && !dry &&
-        Testset.print_test_results(root, format)
+        Testset.print_test_results(root, format, bold=true)
     nothing
 end
 
