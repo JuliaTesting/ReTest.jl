@@ -192,7 +192,7 @@ function print_test_results(ts::ReTestSet, fmt::Format, depth_pad=0)
             printstyled(lpad("Broken", broken_width, " "), "  "; bold=true, color=Base.warn_color())
         end
         if total_width > 0
-            printstyled(lpad("Total", total_width, " "); bold=true, color=Base.info_color())
+            printstyled(lpad("Total", total_width, " "), fmt.stats ? "  " : ""; bold=true, color=Base.info_color())
         end
         if fmt.stats
             # copied from Julia/test/runtests.jl
@@ -341,7 +341,7 @@ function print_counts(ts::ReTestSet, fmt::Format, depth, align,
     end
 
     if total_width > 0
-        printstyled(lpad(string(subtotal), total_width, " "), color=Base.info_color())
+        printstyled(lpad(string(subtotal), total_width, " "), fmt.stats ? "  " : "", color=Base.info_color())
     end
 
     if fmt.stats # copied from Julia/test/runtests.jl
