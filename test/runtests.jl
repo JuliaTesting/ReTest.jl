@@ -380,6 +380,13 @@ end
     :warn,  r"duplicate description for @testset, overwriting:.*")  Duplicate.runtests()
 @test Duplicate.RUN == [2, 5, 6]
 
+### Uniquify #################################################################
+
+empty!(Duplicate.RUN)
+
+retest(Duplicate, Duplicate, "dupe5")
+@test Duplicate.RUN == [5]
+
 ### Display ##################################################################
 
 # we exercise a bunch of codepaths, and this allows to have an idea whether
