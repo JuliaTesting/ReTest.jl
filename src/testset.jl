@@ -98,7 +98,8 @@ function print_test_errors(ts::ReTestSet)
     end
 end
 
-function print_test_results(ts::ReTestSet, fmt::Format; depth::Int=0, bold::Bool=false)
+function print_test_results(ts::ReTestSet, fmt::Format;
+                            depth::Int=0, bold::Bool=false, hasbroken::Bool=false)
     # Calculate the overall number for each type so each of
     # the test result types are aligned
     upd = false
@@ -114,24 +115,26 @@ function print_test_results(ts::ReTestSet, fmt::Format; depth::Int=0, bold::Bool
     dig_pass   = total_pass   > 0 || total == 0 ? ndigits(total_pass)   : 0
     dig_fail   = total_fail   > 0               ? ndigits(total_fail)   : 0
     dig_error  = total_error  > 0               ? ndigits(total_error)  : 0
-    dig_broken = total_broken > 0               ? ndigits(total_broken) : 0
+    dig_broken = total_broken > 0 || hasbroken  ? ndigits(total_broken) : 0
 
     # max(1, ...) : we always print something at least in "Pass", even when no tests
     nprinted = max(1, (total_pass > 0) + (total_fail > 0) +
                       (total_error > 0) + (total_broken > 0))
-    if nprinted == 1 && total_pass > 0
+    if nprinted == 1 && total_pass > 0 && !hasbroken
         # do not print "Total" when only "Pass" column is printed
         total = 0
     end
-    dig_total = total > 0 ? ndigits(total) : 0
+    dig_total = total > 0 || hasbroken ? ndigits(total) : 0
 
     # For each category, take max of digits and header width if there are
     # tests of that type
-    pass_width   = dig_pass   > 0 ? max(6,   dig_pass) : 0
     fail_width   = dig_fail   > 0 ? max(6,   dig_fail) : 0
     error_width  = dig_error  > 0 ? max(6,  dig_error) : 0
     broken_width = dig_broken > 0 ? max(6, dig_broken) : 0
     total_width  = dig_total  > 0 ? max(6,  dig_total) : 0
+    # heuristic: if we print total because of a broken test, still print "Pass",
+    # as it's likely that later on a passing test will be printed
+    pass_width   = dig_pass   > 0 || total_width > 0 ? max(6,   dig_pass) : 0
 
     if pass_width > fmt.pass_width
         upd = true

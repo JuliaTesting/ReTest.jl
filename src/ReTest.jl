@@ -42,6 +42,8 @@ mutable struct TestsetExpr
     children::Vector{TestsetExpr}
     strings::Vector{String}
     loopvalues::Any
+    hasbroken::Bool
+    hasbrokenrec::Bool # recursive hasbroken, transiently
     run::Bool
     descwidth::Int # max width of self and children shown descriptions
     body::Expr
@@ -57,16 +59,18 @@ isfinal(ts::TestsetExpr) = isempty(ts.children)
 function replace_ts(source, mod, x::Expr, parent)
     if x.head === :macrocall && x.args[1] === Symbol("@testset")
         @assert x.args[2] isa LineNumberNode
-        ts = parse_ts(source, mod, Tuple(x.args[3:end]), parent)
+        ts, hasbroken = parse_ts(source, mod, Tuple(x.args[3:end]), parent)
         parent !== nothing && push!(parent.children, ts)
-        ts
+        ts, false # hasbroken counts only "proper" @test_broken, not recursive ones
+    elseif x.head === :macrocall && x.args[1] === Symbol("@test_broken")
+        x, true
     else
-        body = map(z -> replace_ts(source, mod, z, parent), x.args)
-        Expr(x.head, body...)
+        body_br = map(z -> replace_ts(source, mod, z, parent), x.args)
+        Expr(x.head, first.(body_br)...), any(last.(body_br))
     end
 end
 
-replace_ts(source, mod, x, _) = x
+replace_ts(source, mod, x, _) = x, false
 
 # create a TestsetExpr from @testset's args
 function parse_ts(source, mod, args::Tuple, parent=nothing)
@@ -98,8 +102,8 @@ function parse_ts(source, mod, args::Tuple, parent=nothing)
     end
 
     ts = TestsetExpr(source, mod, desc, options, loops, parent)
-    ts.body = replace_ts(source, mod, tsbody, ts)
-    ts
+    ts.body, ts.hasbroken = replace_ts(source, mod, tsbody, ts)
+    ts, false # hasbroken counts only "proper" @test_broken, not recursive ones
 end
 
 function resolve!(mod::Module, ts::TestsetExpr, rx::Regex;
@@ -175,13 +179,17 @@ function resolve!(mod::Module, ts::TestsetExpr, rx::Regex;
             end
         end
     end
-    run = ts.run
 
+    run = ts.run
+    ts.hasbrokenrec = ts.hasbroken
     for tsc in ts.children
         run |= resolve!(mod, tsc, rx, force=ts.run,
                         shown=shown & ts.options.transient_verbose,
                         depth=depth+1, verbose=verbose-1)
         ts.descwidth = max(ts.descwidth, tsc.descwidth)
+        if tsc.run
+            ts.hasbrokenrec |= tsc.hasbrokenrec
+        end
     end
     if !run || verbose <= 0
         ts.descwidth = 0
@@ -220,7 +228,7 @@ function updatetests!(mod::Module)
     # map: we keep only the latest version of a test at a given location,
     #      to be Revise-friendly (just an imperfect heuristic)
     for (tsargs, source) in news
-        ts = parse_ts(source, string(mod), tsargs)
+        ts, hasbroken = parse_ts(source, string(mod), tsargs)
         idx = get!(map, ts.desc, length(tests) + 1)
         if idx == length(tests) + 1
             push!(tests, ts)
@@ -294,11 +302,12 @@ function retest(args::Union{Module,AbstractString,Regex}...;
     root = Testset.ReTestSet("", "Overall", true)
 
     if overall
-        tests_descs = fetchtests.(modules, regex, verbose, overall)
-        alltests = first.(tests_descs)
+        tests_descs_hasbrokens = fetchtests.(modules, regex, verbose, overall)
+        alltests = first.(tests_descs_hasbrokens)
         descwidth = max(textwidth(root.description),
-                        maximum(last, tests_descs))
+                        maximum(x->x[2], tests_descs_hasbrokens))
         format = Format(stats, descwidth)
+        hasbroken = any(last.(tests_descs_hasbrokens))
     end
 
     for imod in eachindex(modules)
@@ -307,7 +316,7 @@ function retest(args::Union{Module,AbstractString,Regex}...;
         if overall
             tests = alltests[imod]
         else
-            tests, descwidth = fetchtests(mod, regex, verbose, overall)
+            tests, descwidth, hasbroken = fetchtests(mod, regex, verbose, overall)
         end
         isempty(tests) && continue
 
@@ -365,7 +374,8 @@ function retest(args::Union{Module,AbstractString,Regex}...;
                 if many || verbose == 0
                     @assert endswith(module_ts.description, ':')
                     module_ts.description = chop(module_ts.description, tail=1)
-                    Testset.print_test_results(module_ts, format, bold=true)
+                    Testset.print_test_results(module_ts, format,
+                                               bold=true, hasbroken=hasbroken)
                 else
                     nothing
                 end
@@ -382,7 +392,8 @@ function retest(args::Union{Module,AbstractString,Regex}...;
                     Testset.print_test_results(
                         rts, format;
                         depth = Int(!rts.overall & isindented(verbose, overall, many)),
-                        bold = rts.overall | !many
+                        bold = rts.overall | !many,
+                        hasbroken=hasbroken
                     )
                 end
                 if rts.anynonpass
@@ -470,7 +481,7 @@ function retest(args::Union{Module,AbstractString,Regex}...;
             println()
     end
     overall && !dry &&
-        Testset.print_test_results(root, format, bold=true)
+        Testset.print_test_results(root, format, bold=true, hasbroken=hasbroken)
     nothing
 end
 
@@ -546,11 +557,13 @@ end
 function fetchtests(mod, regex, verbose, overall)
     tests = updatetests!(mod)
     descwidth = 0
+    hasbroken = false
 
     for ts in tests
         run = resolve!(mod, ts, regex, verbose=verbose)
         run || continue
         descwidth = max(descwidth, ts.descwidth)
+        hasbroken |= ts.hasbrokenrec
     end
 
     tests = filter(ts -> ts.run, tests)
@@ -561,7 +574,7 @@ function fetchtests(mod, regex, verbose, overall)
         descwidth += 2
     end
     descwidth = max(descwidth, textwidth(string(mod)) + indented)
-    tests, descwidth
+    tests, descwidth, hasbroken
 end
 
 isindented(verbose, overall, many) = (verbose > 0) & (overall | !many)

@@ -406,7 +406,10 @@ module YYYYYYYYYYYYY
 using ReTest
 
 @testset "Y.broken" begin
-    @test_broken false
+    @testset "hidden" begin
+        # we "hide" it to be sure that the .hasbrokenrec field is used and not .hasbroken
+        @test_broken false
+    end
 end
 @testset "Y.loop $('*'^(10-3*i))" for i=1:2
     @test true
@@ -426,7 +429,7 @@ for dry=(true, false),
     regex=(r"inner", r"")
 
     modstr = length(mod) == 1 ? string(mod[1]) : string(mod)
-    println("\n####################### Display: mod=$modstr stats=$stats dry=$dry verbose=$verbose\n")
+    println("\n####################### Display: mod=$modstr stats=$stats dry=$dry verbose=$verbose regex=$regex\n")
     retest(mod..., regex; shuffle=true, verbose=verbose, stats=stats, dry=dry)
 end
 
