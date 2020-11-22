@@ -247,7 +247,8 @@ or within all currently loaded modules otherwise.
 If `dry` is `true`, don't actually run the tests, just print the descriptions
 of the testsets which would (presumably) run.
 If `stats` is `true`, print some time/memory statistics for each testset.
-If `shuffle` is `true`, shuffle the order in which top-level testsets are run.
+If `shuffle` is `true`, shuffle the order in which top-level testsets within
+a given module are run, as well as the list of passed modules.
 If specified, `verbose` must be an integer or `Inf` indicating the nesting level
 of testsets whose results must be printed (this is equivalent to adding the
 `verbose=true` annotation to corresponding testsets); the default behavior
@@ -287,8 +288,7 @@ function retest(args::Union{Module,AbstractString,Regex}...;
                 verbose::Real=true, # should be @nospecialize, but not supported on old Julia
                 )
 
-
-    modules, regex, verbose = process_args(args, verbose)
+    modules, regex, verbose = process_args(args, verbose, shuffle)
 
     overall = length(modules) > 1
     root = Testset.ReTestSet("", "Overall", true)
@@ -472,7 +472,7 @@ function retest(args::Union{Module,AbstractString,Regex}...;
     nothing
 end
 
-function process_args(args, verbose)
+function process_args(args, verbose, shuffle)
     ########## process args
     local pattern
     modules = Module[]
@@ -508,11 +508,12 @@ function process_args(args, verbose)
     end
     verbose = Int(verbose)
 
-    computemodules!(modules), regex, verbose
+    computemodules!(modules, shuffle), regex, verbose
 end
 
-function computemodules!(modules::Vector{Module})
+function computemodules!(modules::Vector{Module}, shuffle)
     unique!(modules)
+    shuffle!(modules)
     if isempty(modules)
         # TESTED_MODULES is not up-to-date w.r.t. package modules which have
         # precompilation, so we have to also look in Base.loaded_modules
