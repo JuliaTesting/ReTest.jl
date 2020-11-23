@@ -3,6 +3,7 @@ module ReTest
 export retest, @testset
 
 using Distributed
+using Base.Threads: nthreads
 using Random: shuffle!
 
 # from Test:
@@ -355,9 +356,10 @@ function retest(args::Union{Module,AbstractString,Regex}...;
 
         outchan = RemoteChannel(() -> Channel{Union{Nothing,Testset.ReTestSet}}(0))
         computechan = nprocs() == 1 ?
-            Channel{Nothing}(0) : # to not interrupt printer task
+            Channel{Nothing}(1) : # to not interrupt printer task
             nothing
 
+        ntests = 0
         nprinted = 0
         allpass = true
         exception = Ref{Exception}()
@@ -367,122 +369,238 @@ function retest(args::Union{Module,AbstractString,Regex}...;
 
         many = length(tests) > 1 || isfor(tests[1]) # FIXME: isfor when only one iteration
 
-        printer = @async begin
-            errored = false
-
-            if !overall
-                format = Format(stats, descwidth)
-            end
-            print_overall() =
-                if many || verbose == 0
-                    @assert endswith(module_ts.description, ':')
-                    module_ts.description = chop(module_ts.description, tail=1)
-                    Testset.print_test_results(module_ts, format,
-                                               bold=true, hasbroken=hasbroken)
-                else
-                    nothing
-                end
-
-            while true
-                rts = take!(outchan)
-                if rts === nothing
-                    errored || print_overall()
-                    break
-                end
-                errored && continue
-
-                if verbose > 0 || rts.anynonpass
-                    Testset.print_test_results(
-                        rts, format;
-                        depth = Int(!rts.overall & isindented(verbose, overall, many)),
-                        bold = rts.overall | !many,
-                        hasbroken=hasbroken
-                    )
-                end
-                if rts.anynonpass
-                    print_overall()
-                    println()
-                    Testset.print_test_errors(rts)
-                    errored = true
-                    allpass = false
-                    ndone = length(tests)
-                end
-                nprinted += 1
-                if rts.exception !== nothing
-                    exception[] = rts.exception
-                end
-                if nprocs() == 1
-                    put!(computechan, nothing)
-                end
-            end
+        if !overall
+            format = Format(stats, descwidth)
         end
 
-        ntests = 0
-        ndone = 0
+        printlock = ReentrantLock()
+        previewchan =
+            if isinteractive() && (nthreads() > 1 || nprocs() > 1)
+                RemoteChannel(() -> Channel{Union{String,Nothing}}(1))
+                # needs to be "remote" in the case nprocs() == 2, as then nworkers() == 1,
+                # which means the one remote worker will put descriptions on previewchan
+                # (if nworkers() > 1, descriptions are not put because we can't predict
+                # the order in which they complete, and then the previewer will
+                # not show the descriptions, just the spinning wheel)
+            else
+                # otherwise, the previewing doesn't work well, because the worker task
+                # keeps the thread busy and doesn't yield enough for previewing to be useful
+                nothing
+            end
 
-        if overall || !many
-            # + if overall, we print the module as a header, to know where the currently
-            #   printed testsets belong
-            # + if !many, we won't print the overall afterwads, which would be redundant
-            #   with the only one printed top-level testset
-            ntests += 1
-            put!(outchan, module_ts) # printer task will take care of feeding computechan
-        else
-            @async put!(computechan, nothing)
-        end
+        gotprinted = false
 
-        @sync for wrkr in workers()
+        previewer = previewchan === nothing ? nothing :
             @async begin
-                if nprocs() == 1
-                    take!(computechan)
-                end
-                file = nothing
-                idx = 0
-                while ndone < length(tests)
-                    ndone += 1
-                    if !@isdefined(groups)
-                        ts = tests[ndone]
-                    else
-                        if file === nothing
-                            if isempty(groups)
-                                idx = findfirst(todo)
+                timer = ['|', '/', '-', '\\']
+                cursor = 0
+                desc = ""
+                finito = false
+
+                while !finito
+                    lock(printlock) do
+                        if isready(previewchan)
+                            # printer can't take! it, as we locked
+                            newdesc = take!(previewchan)
+                            if newdesc === nothing
+                                finito = true
+                                return
+                            end
+                            desc = newdesc
+                            cursor = 0
+                            gotprinted = false
+                        elseif gotprinted
+                            desc = ""
+                            gotprinted = false
+                        elseif desc != ""
+                            align = format.desc_align
+                            if nworkers() > 1
+                                description = align >= 3 ? "..." : ""
+                                style = NamedTuple()
+                            elseif startswith(desc, '\0')
+                                description = chop(desc, head=1, tail=0)
+                                style = (color = :light_black, bold=true)
                             else
-                                idx, file = popfirst!(groups)
+                                description = desc
+                                style = NamedTuple()
+                            end
+                            if isindented(verbose, overall, many)
+                                description = "  " * description
+                            end
+                            cursor += 1
+                            printstyled('\r', rpad("$description", align, " "), ' ',
+                                        timer[mod1(cursor, end)];
+                                        style...)
+                        end
+                    end
+                    sleep(0.13)
+                end
+            end
+
+        # TODO: move printer task out of worker?
+        worker = @task begin
+            printer = @async begin
+                errored = false
+                finito = false
+
+                print_overall() =
+                    if many || verbose == 0
+                        @assert endswith(module_ts.description, ':')
+                        module_ts.description = chop(module_ts.description, tail=1)
+                        Testset.print_test_results(module_ts, format,
+                                                   bold=true, hasbroken=hasbroken)
+                    else
+                        nothing
+                    end
+
+                while !finito
+                    rts = take!(outchan)
+                    lock(printlock) do
+                        if previewchan !== nothing && isready(previewchan)
+                            desc = take!(previewchan)
+                            if desc === nothing
+                                # keep `nothing` in so that the previewer knows to terminate
+                                put!(previewchan, nothing)
                             end
                         end
-                        ts = tests[idx]
-                        todo[idx] = false
-                        if idx == length(tests) || file === nothing ||
-                                tests[idx+1].source.file != file
-                            file = nothing
-                        else
-                            idx += 1
+                        gotprinted = true
+                        print('\r')
+
+                        if rts === nothing
+                            errored || print_overall()
+                            finito = true
+                            return
                         end
-                    end
-                    resp = try
-                        remotecall_fetch(wrkr, mod, ts, regex, (out=outchan, compute=computechan)
-                                         ) do mod, ts, regex, chan
-                            mts = make_ts(ts, regex, chan)
-                            Core.eval(mod, mts)
+                        errored && return
+
+                        if verbose > 0 || rts.anynonpass
+                            Testset.print_test_results(
+                                rts, format;
+                                depth = Int(!rts.overall & isindented(verbose, overall, many)),
+                                bold = rts.overall | !many,
+                                hasbroken=hasbroken
+                            )
                         end
-                    catch e
-                        allpass = false
-                        ndone = length(tests)
-                        isa(e, InterruptException) || rethrow()
-                        return
-                    end
-                    if resp isa Vector
-                        ntests += length(resp)
-                        append!(module_ts.results, resp)
-                    else
-                        ntests += 1
-                        push!(module_ts.results, resp)
+                        if rts.anynonpass
+                            print_overall()
+                            println()
+                            Testset.print_test_errors(rts)
+                            errored = true
+                            allpass = false
+                            ndone = length(tests)
+                        end
+                        nprinted += 1
+                        if rts.exception !== nothing
+                            exception[] = rts.exception
+                        end
+                        if nprocs() == 1
+                            put!(computechan, nothing)
+                        end
                     end
                 end
             end
+
+            ndone = 0
+
+            if overall || !many
+                # + if overall, we print the module as a header, to know where the currently
+                #   printed testsets belong
+                # + if !many, we won't print the overall afterwads, which would be redundant
+                #   with the only one printed top-level testset
+                ntests += 1
+                put!(outchan, module_ts) # printer task will take care of feeding computechan
+            else
+                @async put!(computechan, nothing)
+            end
+
+
+            @sync for wrkr in workers()
+                @async begin
+                    if nprocs() == 1
+                        take!(computechan)
+                    end
+                    file = nothing
+                    idx = 0
+                    while ndone < length(tests)
+                        ndone += 1
+                        if !@isdefined(groups)
+                            ts = tests[ndone]
+                        else
+                            if file === nothing
+                                if isempty(groups)
+                                    idx = findfirst(todo)
+                                else
+                                    idx, file = popfirst!(groups)
+                                end
+                            end
+                            ts = tests[idx]
+                            todo[idx] = false
+                            if idx == length(tests) || file === nothing ||
+                                    tests[idx+1].source.file != file
+                                file = nothing
+                            else
+                                idx += 1
+                            end
+                        end
+
+                        if previewchan !== nothing
+                            desc = ts.desc
+                            desc = desc isa String ?
+                                desc :
+                                join(replace(desc.args) do part
+                                         part isa String ?
+                                             part :
+                                             "?"
+                                     end)
+                            desc = "\0" * desc
+                            # even when nworkers() >= 2, we inform the previewer that
+                            # computation is gonna happen, so the wheel can start spinning
+                            put!(previewchan, desc)
+                        end
+
+                        resp = try
+                            chan = (out=outchan, compute=computechan, preview=previewchan)
+                            remotecall_fetch(wrkr, mod, ts, regex, chan
+                                             ) do mod, ts, regex, chan
+                                mts = make_ts(ts, regex, chan)
+                                Core.eval(mod, mts)
+                            end
+                        catch e
+                            allpass = false
+                            ndone = length(tests)
+                            isa(e, InterruptException) || rethrow()
+                            return
+                        end
+                        if resp isa Vector
+                            ntests += length(resp)
+                            append!(module_ts.results, resp)
+                        else
+                            ntests += 1
+                            push!(module_ts.results, resp)
+                        end
+
+                    end
+                end
+            end
+
+            put!(outchan, nothing)
+            previewchan !== nothing &&
+                put!(previewchan, nothing)
+            wait(printer)
         end
-        put!(outchan, nothing)
-        wait(printer)
+
+        if previewchan !== nothing # then nthreads() > 1
+            # we try to keep thread #1 free of heavy work, so that the previewer stays
+            # responsive
+            tid = rand(2:nthreads())
+            thread_pin(worker, UInt16(tid))
+        else
+            schedule(worker)
+        end
+
+        wait(worker)
+        previewer !== nothing &&
+            wait(previewer)
 
         @assert !allpass || nprinted == ntests
         if isassigned(exception)
@@ -494,6 +612,13 @@ function retest(args::Union{Module,AbstractString,Regex}...;
     overall && !dry &&
         Testset.print_test_results(root, format, bold=true, hasbroken=hasbroken)
     nothing
+end
+
+# cf. https://github.com/JuliaLang/julia/issues/34267#issuecomment-573507670
+function thread_pin(t::Task, tid::UInt16)
+    ccall(:jl_set_task_tid, Cvoid, (Any, Cint), t, tid-1)
+    schedule(t)
+    return t
 end
 
 function process_args(args, verbose, shuffle)

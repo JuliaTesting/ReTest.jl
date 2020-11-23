@@ -10,7 +10,7 @@ import Random
 
 using Printf: @sprintf
 
-using Distributed: myid
+using Distributed: myid, nworkers
 
 import InlineTest: @testset
 
@@ -439,6 +439,9 @@ function testset_beginend(mod::String, isfinal::Bool, rx::Regex, desc::String, o
         if !$isfinal || occursin($rx, current_str)
             local ret
             local ts = ReTestSet($mod, $desc; verbose=$(options.transient_verbose))
+            if nworkers() == 1 && get_testset_depth() == 0 && $(chan.preview) !== nothing
+                put!($(chan.preview), $desc)
+            end
             push_testset(ts)
             # we reproduce the logic of guardseed, but this function
             # cannot be used as it changes slightly the semantic of @testset,
@@ -508,6 +511,9 @@ function testset_forloop(mod::String, isfinal::Bool, rx::Regex, desc::Union{Stri
                 copy!(RNG, tmprng)
             end
             ts = ReTestSet($mod, $(esc(desc)); verbose=$(options.transient_verbose))
+            if nworkers() == 1 && get_testset_depth() == 0 && $(chan.preview) !== nothing
+                put!($(chan.preview), ts.description)
+            end
             push_testset(ts)
             first_iteration = false
             try
