@@ -182,7 +182,7 @@ function print_test_results(ts::ReTestSet, fmt::Format;
 
     # Print the outer test set header once
     if upd
-        printstyled(rpad("", align, " "), " |", " "; bold=true, color=:white)
+        printstyled(rpad("", align, " "), "  ", " "; bold=true, color=:white)
         if pass_width > 0
             printstyled(lpad("Pass", pass_width, " "), "  "; bold=true, color=:green)
         end
@@ -309,7 +309,6 @@ function print_counts(ts::ReTestSet, fmt::Format, depth, align,
 
     style = bold ? (bold=bold, color=:white) : NamedTuple()
     printstyled(rpad(string("  "^depth, ts.description), align, " "); style...)
-    printstyled(" | ", bold=true)
 
     np = passes + c_passes
     nf = fails + c_fails
@@ -321,6 +320,7 @@ function print_counts(ts::ReTestSet, fmt::Format, depth, align,
         # print `0` in warn color instead of "No tests" like in Test module,
         # which messes up alignments (and am too lazy to fix)
         if !(ts.overall && np == 0)
+            printstyled(" | ", bold=true)
             printstyled(lpad(string(np), pass_width, " "), "  ",
                         color = np > 0 ? :green : Base.warn_color(), bold=bold)
         else
@@ -328,6 +328,7 @@ function print_counts(ts::ReTestSet, fmt::Format, depth, align,
         end
     elseif pass_width > 0
         # No passes at this level, but some at another level
+        printstyled(" | ", bold=true)
         print(lpad(" ", pass_width), "  ")
     end
 
