@@ -10,6 +10,8 @@ import Random
 
 using Printf: @sprintf
 
+using Distributed: myid
+
 import InlineTest: @testset
 
 # mostly copied from Test stdlib
@@ -213,7 +215,7 @@ end
 
 # Called at the end of a @testset, behaviour depends on whether
 # this is a child of another testset, or the "root" testset
-function finish(ts::ReTestSet, outchan)
+function finish(ts::ReTestSet, chan)
     # If we are a nested test set, do not print a full summary
     # now - let the parent test set do the printing
     if get_testset_depth() != 0
@@ -237,7 +239,11 @@ function finish(ts::ReTestSet, outchan)
                                         total_broken, efs)
     end
 
-    put!(outchan, ts)
+    put!(chan.out, ts)
+    if myid() == 1
+        take!(chan.compute)
+    end
+
     # return the testset so it is returned from the @testset macro
     ts
 end
@@ -407,20 +413,20 @@ function get_testset_string(remove_last=false)
 end
 
 # non-inline testset with regex filtering support
-macro testset(mod::String, isfinal::Bool, rx::Regex, desc::String, options, outchan, body)
-    Testset.testset_beginend(mod, isfinal, rx, desc, options, outchan,  body, __source__)
+macro testset(mod::String, isfinal::Bool, rx::Regex, desc::String, options, chan, body)
+    Testset.testset_beginend(mod, isfinal, rx, desc, options, chan,  body, __source__)
 end
 
-macro testset(mod::String, isfinal::Bool, rx::Regex, desc::Union{String,Expr}, options, outchan,
+macro testset(mod::String, isfinal::Bool, rx::Regex, desc::Union{String,Expr}, options, chan,
               loopiter, loopvals, body)
-    Testset.testset_forloop(mod, isfinal, rx, desc, options, outchan, loopiter, loopvals, body, __source__)
+    Testset.testset_forloop(mod, isfinal, rx, desc, options, chan, loopiter, loopvals, body, __source__)
 end
 
 """
 Generate the code for a `@testset` with a `begin`/`end` argument
 """
 function testset_beginend(mod::String, isfinal::Bool, rx::Regex, desc::String, options,
-                          outchan, tests, source)
+                          chan, tests, source)
     # Generate a block of code that initializes a new testset, adds
     # it to the task local storage, evaluates the test(s), before
     # finally removing the testset and giving it a chance to take
@@ -460,7 +466,7 @@ function testset_beginend(mod::String, isfinal::Bool, rx::Regex, desc::String, o
                 pop_testset()
                 @isdefined(timed) &&
                     set_timed!(ts, timed, rss)
-                ret = finish(ts, $outchan)
+                ret = finish(ts, $chan)
             end
             ret
         end
@@ -477,7 +483,7 @@ end
 """
 Generate the code for a `@testset` with a `for` loop argument
 """
-function testset_forloop(mod::String, isfinal::Bool, rx::Regex, desc::Union{String,Expr}, options, outchan,
+function testset_forloop(mod::String, isfinal::Bool, rx::Regex, desc::Union{String,Expr}, options, chan,
                          loopiter, loopvals,
                          tests, source)
 
@@ -497,7 +503,7 @@ function testset_forloop(mod::String, isfinal::Bool, rx::Regex, desc::Union{Stri
                 pop_testset()
                 timed !== nothing &&
                     set_timed!(ts, timed, rss)
-                push!(arr, finish(ts, $outchan))
+                push!(arr, finish(ts, $chan))
                 # it's 1000 times faster to copy from tmprng rather than calling Random.seed!
                 copy!(RNG, tmprng)
             end
@@ -539,7 +545,7 @@ function testset_forloop(mod::String, isfinal::Bool, rx::Regex, desc::Union{Stri
                 pop_testset()
                 timed !== nothing &&
                     set_timed!(ts, timed, rss)
-                push!(arr, finish(ts, $outchan))
+                push!(arr, finish(ts, $chan))
             end
             copy!(RNG, oldrng)
         end

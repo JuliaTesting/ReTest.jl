@@ -198,28 +198,28 @@ function resolve!(mod::Module, ts::TestsetExpr, rx::Regex;
 end
 
 # convert a TestsetExpr into an actually runnable testset
-function make_ts(ts::TestsetExpr, rx::Regex, outchan)
+function make_ts(ts::TestsetExpr, rx::Regex, chan)
     ts.run || return nothing
 
     if isfinal(ts)
         body = ts.body
     else
-        body = make_ts(ts.body, rx, outchan)
+        body = make_ts(ts.body, rx, chan)
     end
     if ts.loops === nothing
         quote
-            @testset $(ts.mod) $(isfinal(ts)) $rx $(ts.desc) $(ts.options) $outchan $body
+            @testset $(ts.mod) $(isfinal(ts)) $rx $(ts.desc) $(ts.options) $chan $body
         end
     else
         loopvals = something(ts.loopvalues, ts.loops.args[2])
         quote
-            @testset $(ts.mod) $(isfinal(ts)) $rx $(ts.desc) $(ts.options) $outchan $(ts.loops.args[1]) $loopvals $body
+            @testset $(ts.mod) $(isfinal(ts)) $rx $(ts.desc) $(ts.options) $chan $(ts.loops.args[1]) $loopvals $body
         end
     end
 end
 
 make_ts(x, rx, _) = x
-make_ts(ex::Expr, rx, outchan) = Expr(ex.head, map(x -> make_ts(x, rx, outchan), ex.args)...)
+make_ts(ex::Expr, rx, chan) = Expr(ex.head, map(x -> make_ts(x, rx, chan), ex.args)...)
 
 # convert raw tests from InlineTest into TestsetExpr tests, and handle overwriting
 function updatetests!(mod::Module)
@@ -354,6 +354,9 @@ function retest(args::Union{Module,AbstractString,Regex}...;
         end
 
         outchan = RemoteChannel(() -> Channel{Union{Nothing,Testset.ReTestSet}}(0))
+        computechan = nprocs() == 1 ?
+            Channel{Nothing}(0) : # to not interrupt printer task
+            nothing
 
         nprinted = 0
         allpass = true
@@ -408,6 +411,9 @@ function retest(args::Union{Module,AbstractString,Regex}...;
                 if rts.exception !== nothing
                     exception[] = rts.exception
                 end
+                if nprocs() == 1
+                    put!(computechan, nothing)
+                end
             end
         end
 
@@ -420,11 +426,16 @@ function retest(args::Union{Module,AbstractString,Regex}...;
             # + if !many, we won't print the overall afterwads, which would be redundant
             #   with the only one printed top-level testset
             ntests += 1
-            wait(@async put!(outchan, module_ts))
+            put!(outchan, module_ts) # printer task will take care of feeding computechan
+        else
+            @async put!(computechan, nothing)
         end
 
         @sync for wrkr in workers()
             @async begin
+                if nprocs() == 1
+                    take!(computechan)
+                end
                 file = nothing
                 idx = 0
                 while ndone < length(tests)
@@ -449,9 +460,9 @@ function retest(args::Union{Module,AbstractString,Regex}...;
                         end
                     end
                     resp = try
-                        remotecall_fetch(wrkr, mod, ts, regex, outchan
-                                         ) do mod, ts, regex, outchan
-                            mts = make_ts(ts, regex, outchan)
+                        remotecall_fetch(wrkr, mod, ts, regex, (out=outchan, compute=computechan)
+                                         ) do mod, ts, regex, chan
+                            mts = make_ts(ts, regex, chan)
                             Core.eval(mod, mts)
                         end
                     catch e
