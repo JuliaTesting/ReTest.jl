@@ -458,7 +458,9 @@ function testset_beginend(mod::String, isfinal::Bool, rx::Regex, desc::String, o
             finally
                 copy!(RNG, oldrng)
                 pop_testset()
-                ret = finish(set_timed!(ts, timed, rss), $outchan)
+                @isdefined(timed) &&
+                    set_timed!(ts, timed, rss)
+                ret = finish(ts, $outchan)
             end
             ret
         end
@@ -493,7 +495,9 @@ function testset_forloop(mod::String, isfinal::Bool, rx::Regex, desc::Union{Stri
             # they can be handled properly by `finally` lowering.
             if !first_iteration
                 pop_testset()
-                push!(arr, finish(set_timed!(ts, timed, rss), $outchan))
+                timed !== nothing &&
+                    set_timed!(ts, timed, rss)
+                push!(arr, finish(ts, $outchan))
                 # it's 1000 times faster to copy from tmprng rather than calling Random.seed!
                 copy!(RNG, tmprng)
             end
@@ -502,6 +506,7 @@ function testset_forloop(mod::String, isfinal::Bool, rx::Regex, desc::Union{Stri
             first_iteration = false
             try
                 rss = Sys.maxrss()
+                timed = nothing
                 let
                     timed = @timed $(esc(tests))
                 end
@@ -532,7 +537,9 @@ function testset_forloop(mod::String, isfinal::Bool, rx::Regex, desc::Union{Stri
             # Handle `return` in test body
             if !first_iteration
                 pop_testset()
-                push!(arr, finish(set_timed!(ts, timed, rss), $outchan))
+                timed !== nothing &&
+                    set_timed!(ts, timed, rss)
+                push!(arr, finish(ts, $outchan))
             end
             copy!(RNG, oldrng)
         end
