@@ -470,7 +470,8 @@ function retest(args::Union{Module,AbstractString,Regex}...;
                             end
                         end
                         gotprinted = true
-                        print('\r')
+                        previewchan === nothing ||
+                            print('\r')
 
                         if rts === nothing
                             errored || print_overall()
