@@ -612,10 +612,11 @@ function retest(args::Union{Module,AbstractString,Regex}...;
         if isassigned(exception)
             throw(exception[])
         end
-        overall && verbose > 0 &&
+
+        nmodules > 1 && verbose > 0 &&
             println()
     end
-    overall && !dry &&
+    nmodules > 1 && !dry &&
         Testset.print_test_results(root, format, bold=true, hasbroken=hasbroken)
     nothing
 end
