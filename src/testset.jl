@@ -322,16 +322,17 @@ function print_counts(ts::ReTestSet, fmt::Format, depth, align,
     nb = broken + c_broken
 
     print_total = true
-    if np > 0 || np == 0 && nf == 0 && ne == 0 && nb == 0
+
+    if ts.overall && endswith(ts.description, ':')
+        # header, we don't print the '|' nor anything afterwards
+        @assert np == 0 && nf == 0 && ne == 0 && nb == 0
+        print_total = false
+    elseif np > 0 || np == 0 && nf == 0 && ne == 0 && nb == 0
         # print `0` in warn color instead of "No tests" like in Test module,
         # which messes up alignments (and am too lazy to fix)
-        if !(ts.overall && np == 0)
-            printstyled(" | ", bold=true)
-            printstyled(lpad(string(np), pass_width, " "), "  ",
-                        color = np > 0 ? :green : Base.warn_color(), bold=bold)
-        else
-            print_total = false
-        end
+        printstyled(" | ", bold=true)
+        printstyled(lpad(string(np), pass_width, " "), "  ",
+                    color = np > 0 ? :green : Base.warn_color(), bold=bold)
     elseif pass_width > 0
         # No passes at this level, but some at another level
         printstyled(" | ", bold=true)
