@@ -67,7 +67,13 @@ function check(rx, list)
                 t
             end
         end
-        @test readchomp(io) == join(expected, '\n')
+        expected = join(expected, '\n')
+        actual = readchomp(io)
+        if isempty(expected)
+            @test startswith(actual, "No matching tests for module")
+        else
+            @test actual == expected
+        end
     end
 end
 end

@@ -298,27 +298,33 @@ function retest(args::Union{Module,AbstractString,Regex}...;
                 )
 
     modules, regex, verbose = process_args(args, verbose, shuffle)
-
     overall = length(modules) > 1
     root = Testset.ReTestSet("", "Overall", true)
 
-    if overall
-        tests_descs_hasbrokens = fetchtests.(modules, regex, verbose, overall)
-        alltests = first.(tests_descs_hasbrokens)
-        descwidth = max(textwidth(root.description),
-                        maximum(x->x[2], tests_descs_hasbrokens))
-        format = Format(stats, descwidth)
-        hasbroken = any(last.(tests_descs_hasbrokens))
+    tests_descs_hasbrokens = fetchtests.(modules, regex, verbose, overall)
+    alltests = first.(tests_descs_hasbrokens)
+    descwidth = max(textwidth(root.description),
+                    maximum(x->x[2], tests_descs_hasbrokens))
+    format = Format(stats, descwidth)
+    hasbroken = any(last.(tests_descs_hasbrokens))
+
+    emptymods = findall(isempty, alltests)
+    nmodules = length(modules) - length(emptymods)
+    if !isempty(emptymods)
+        plural = length(emptymods) > 1 ? "s" : ""
+        print("No matching tests for module$plural ")
+        join(stdout, string.(getindex.((modules,), emptymods)), ", ", " and ")
+        println('.')
+        if nmodules > 0
+            println()
+        else
+            return
+        end
     end
 
     for imod in eachindex(modules)
         mod = modules[imod]
-
-        if overall
-            tests = alltests[imod]
-        else
-            tests, descwidth, hasbroken = fetchtests(mod, regex, verbose, overall)
-        end
+        tests = alltests[imod]
         isempty(tests) && continue
 
         shuffle &&
