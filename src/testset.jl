@@ -202,7 +202,8 @@ function print_test_results(ts::ReTestSet, fmt::Format;
         end
         if fmt.stats
             # copied from Julia/test/runtests.jl
-            printstyled("| Time (s) | GC (s) | GC % | Alloc (MB) | ΔRSS (MB)", color=:white)
+            Compile = VERSION >= v"1.6-" ? "| Compile (s) " : ""
+            printstyled("| Time (s) $Compile| GC (s) | GC % | Alloc (MB) | ΔRSS (MB)", color=:white)
         end
         println()
     end
@@ -368,6 +369,7 @@ function print_counts(ts::ReTestSet, fmt::Format, depth, align,
         ts.overall && set_timed!(ts)
         timed = ts.timed
         elapsed_align = textwidth("Time (s)")
+        compile_align = textwidth("Compile (s)")
         gc_align      = textwidth("GC (s)")
         percent_align = textwidth("GC %")
         alloc_align   = textwidth("Alloc (MB)")
@@ -383,6 +385,10 @@ function print_counts(ts::ReTestSet, fmt::Format, depth, align,
 
         time_str = hide_zero(@sprintf("%7.2f", timed.time))
         printstyled("| ", lpad(time_str, elapsed_align, " "), " | ", color=:white)
+        if VERSION >= v"1.6-"
+            compile_str = hide_zero(@sprintf("%7.2f", timed.compile_time / 10^9))
+            printstyled(lpad(compile_str, compile_align, " "), " | ", color=:white)
+        end
         gc_str = hide_zero(@sprintf("%5.2f", timed.gctime))
         printstyled(lpad(gc_str, gc_align, " "), " | ", color=:white)
 
@@ -459,14 +465,17 @@ function testset_beginend(mod::String, isfinal::Bool, rx::Regex, desc::String, o
             local oldrng = copy(RNG)
             local timed
             local rss
+            local compile_time
             try
                 # RNG is re-seeded with its own seed to ease reproduce a failed test
                 Random.seed!(RNG.seed)
                 rss = Sys.maxrss()
+                compile_time = cumulative_compile_time_ns()
                 let
                     timed = @timed $(esc(tests))
                 end
                 rss = Sys.maxrss() - rss
+                compile_time = cumulative_compile_time_ns() - compile_time
             catch err
                 err isa InterruptException && rethrow()
                 # something in the test block threw an error. Count that as an
@@ -477,7 +486,7 @@ function testset_beginend(mod::String, isfinal::Bool, rx::Regex, desc::String, o
                 copy!(RNG, oldrng)
                 pop_testset()
                 @isdefined(timed) &&
-                    set_timed!(ts, timed, rss)
+                    set_timed!(ts, timed, rss, compile_time)
                 ret = finish(ts, $chan)
             end
             ret
@@ -514,7 +523,7 @@ function testset_forloop(mod::String, isfinal::Bool, rx::Regex, desc::Union{Stri
             if !first_iteration
                 pop_testset()
                 timed !== nothing &&
-                    set_timed!(ts, timed, rss)
+                    set_timed!(ts, timed, rss, compile_time)
                 push!(arr, finish(ts, $chan))
                 # it's 1000 times faster to copy from tmprng rather than calling Random.seed!
                 copy!(RNG, tmprng)
@@ -527,11 +536,13 @@ function testset_forloop(mod::String, isfinal::Bool, rx::Regex, desc::Union{Stri
             first_iteration = false
             try
                 rss = Sys.maxrss()
+                compile_time = cumulative_compile_time_ns()
                 timed = nothing
                 let
                     timed = @timed $(esc(tests))
                 end
                 rss = Sys.maxrss() - rss
+                compile_time = cumulative_compile_time_ns() - compile_time
             catch err
                 err isa InterruptException && rethrow()
                 # Something in the test block threw an error. Count that as an
@@ -550,6 +561,7 @@ function testset_forloop(mod::String, isfinal::Bool, rx::Regex, desc::Union{Stri
         local tmprng = copy(RNG)
         local timed
         local rss
+        local compile_time
         try
             let
                 $(Expr(:for, Expr(:block, [esc(v) for v in loopvars]...), blk))
@@ -559,7 +571,7 @@ function testset_forloop(mod::String, isfinal::Bool, rx::Regex, desc::Union{Stri
             if !first_iteration
                 pop_testset()
                 timed !== nothing &&
-                    set_timed!(ts, timed, rss)
+                    set_timed!(ts, timed, rss, compile_time)
                 push!(arr, finish(ts, $chan))
             end
             copy!(RNG, oldrng)
@@ -568,10 +580,11 @@ function testset_forloop(mod::String, isfinal::Bool, rx::Regex, desc::Union{Stri
     end
 end
 
-function set_timed!(ts, timed, rss)
+function set_timed!(ts, timed, rss, compile_time)
     # on Julia < 1.5, @timed returns a Tuple; here we give the names as in
     # Julia 1.5+, but we filter out the `val` field, unused here
-    ts.timed = (time = timed[2], bytes = timed[3], gctime = timed[4], rss = rss)
+    ts.timed = (time = timed[2], bytes = timed[3], gctime = timed[4],
+                rss = rss, compile_time = compile_time)
     # julia/test/runtests.jl uses timed.gcstats.total_time/10^9, which is equal to gctime
     # (timed[5] == timed.gcstats)
     ts
@@ -581,13 +594,18 @@ function set_timed!(ts)
     if ts.overall
         foreach(get_timed!, ts.results)
     end
-    ts.timed = NamedTuple{(:time, :bytes, :gctime, :rss)}(
-        ntuple(Val(4)) do i
+    ts.timed = NamedTuple{(:time, :bytes, :gctime, :rss, :compile_time)}(
+        ntuple(Val(5)) do i
             # init=0.0 kwarg not available on old Julia
             Float64(sum(tsc.timed[i] for tsc in ts.results))
         end)
 end
 
 get_timed!(ts) = isempty(ts.timed) ? set_timed!(ts) : ts
+
+cumulative_compile_time_ns() =
+    isdefined(Base, :cumulative_compile_time_ns) ?
+        Base.cumulative_compile_time_ns() :
+        UInt(0)
 
 end # module
