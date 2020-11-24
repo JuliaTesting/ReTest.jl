@@ -662,7 +662,7 @@ end
 
 function computemodules!(modules::Vector{Module}, shuffle)
     unique!(modules)
-    shuffle!(modules)
+    shuffle && shuffle!(modules)
     if isempty(modules)
         # TESTED_MODULES is not up-to-date w.r.t. package modules which have
         # precompilation, so we have to also look in Base.loaded_modules
