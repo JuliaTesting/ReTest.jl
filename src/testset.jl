@@ -330,12 +330,12 @@ function print_counts(ts::ReTestSet, fmt::Format, depth, align,
     elseif np > 0 || np == 0 && nf == 0 && ne == 0 && nb == 0
         # print `0` in warn color instead of "No tests" like in Test module,
         # which messes up alignments (and am too lazy to fix)
-        printstyled(" | ", bold=true)
+        printstyled(" | ", bold=false)
         printstyled(lpad(string(np), pass_width, " "), "  ",
                     color = np > 0 ? :green : Base.warn_color(), bold=bold)
-    elseif pass_width > 0
+    elseif pass_width > 0 # TODO: isn't this condition always true here?
         # No passes at this level, but some at another level
-        printstyled(" | ", bold=true)
+        printstyled(" | ", bold=false)
         print(lpad(" ", pass_width), "  ")
     end
 
