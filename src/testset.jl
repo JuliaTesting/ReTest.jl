@@ -202,8 +202,8 @@ function print_test_results(ts::ReTestSet, fmt::Format;
         end
         if fmt.stats
             # copied from Julia/test/runtests.jl
-            Compile = VERSION >= v"1.6-" ? "| Compile (s) " : ""
-            printstyled("| Time (s) $Compile| GC (s) | GC % | Alloc (MB) | ΔRSS (MB)", color=:white)
+            compile_header = VERSION >= v"1.6-" ? " Compile /" : ""
+            printstyled("|  Time /$compile_header GC |   Alloc   ΔRSS |", color=:white)
         end
         println()
     end
@@ -368,38 +368,29 @@ function print_counts(ts::ReTestSet, fmt::Format, depth, align,
     if fmt.stats && print_total # copied from Julia/test/runtests.jl
         ts.overall && set_timed!(ts)
         timed = ts.timed
-        elapsed_align = textwidth("Time (s)")
-        compile_align = textwidth("Compile (s)")
-        gc_align      = textwidth("GC (s)")
-        percent_align = textwidth("GC %")
-        alloc_align   = textwidth("Alloc (MB)")
-        rss_align     = textwidth("ΔRSS (MB)")
 
         # we don't want to report zeros, which makes it hard to spot non-zeros
-        function hide_zero(str)
-            len = length(str)
+        function hide_zero(str, unit)
             strip(str, ' ') in ("0.0", "0.00") ?
-                ' '^length(str) :
-                str
+                ' '^(1+length(str)) : # +1 for unit
+                str * unit
         end
 
-        time_str = hide_zero(@sprintf("%7.2f", timed.time))
-        printstyled("| ", lpad(time_str, elapsed_align, " "), " | ", color=:white)
+        time_str = hide_zero(@sprintf("%6.2f", timed.time), "s")
+        printstyled("| ", time_str, " ", color=:white)
         if VERSION >= v"1.6-"
-            compile_str = hide_zero(@sprintf("%7.2f", timed.compile_time / 10^9))
-            printstyled(lpad(compile_str, compile_align, " "), " | ", color=:white)
+            compile_str = hide_zero(@sprintf("%5.1f", timed.compile_time / 10^7 / timed.time), "%")
+            # can be >= 100% !?
+            printstyled(compile_str, " ", color=:white)
         end
-        gc_str = hide_zero(@sprintf("%5.2f", timed.gctime))
-        printstyled(lpad(gc_str, gc_align, " "), " | ", color=:white)
+        gc_str = hide_zero(@sprintf("%4.1f", 100 * timed.gctime / timed.time), "%")
+        printstyled(gc_str, " | ", color=:white)
 
-        # since there may be quite a few digits in the percentage,
-        # the left-padding here is less to make sure everything fits
-        percent_str = hide_zero(@sprintf("%4.1f", 100 * timed.gctime / timed.time))
-        printstyled(lpad(percent_str, percent_align, " "), " | ", color=:white)
-        alloc_str = hide_zero(@sprintf("%5.2f", timed.bytes / 2^20))
-        printstyled(lpad(alloc_str, alloc_align, " "), " | ", color=:white)
-        rss_str = hide_zero(@sprintf("%5.2f", timed.rss / 2^20))
-        printstyled(lpad(rss_str, rss_align, " "), color=:white)
+        alloc_str = hide_zero(@sprintf("%6.1f", timed.bytes / 2^20), "M")
+        printstyled(alloc_str, " ", color=:white)
+
+        rss_str = hide_zero(@sprintf("%5.1f", timed.rss / 2^20), "M")
+        printstyled(rss_str, " |", color=:white)
     end
     println()
 
