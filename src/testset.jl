@@ -373,18 +373,26 @@ function print_counts(ts::ReTestSet, fmt::Format, depth, align,
         alloc_align   = textwidth("Alloc (MB)")
         rss_align     = textwidth("ΔRSS (MB)")
 
-        time_str = @sprintf("%7.2f", timed.time)
+        # we don't want to report zeros, which makes it hard to spot non-zeros
+        function hide_zero(str)
+            len = length(str)
+            strip(str, ' ') in ("0.0", "0.00") ?
+                ' '^length(str) :
+                str
+        end
+
+        time_str = hide_zero(@sprintf("%7.2f", timed.time))
         printstyled("| ", lpad(time_str, elapsed_align, " "), " | ", color=:white)
-        gc_str = @sprintf("%5.2f", timed.gctime)
+        gc_str = hide_zero(@sprintf("%5.2f", timed.gctime))
         printstyled(lpad(gc_str, gc_align, " "), " | ", color=:white)
 
         # since there may be quite a few digits in the percentage,
         # the left-padding here is less to make sure everything fits
-        percent_str = @sprintf("%4.1f", 100 * timed.gctime / timed.time)
+        percent_str = hide_zero(@sprintf("%4.1f", 100 * timed.gctime / timed.time))
         printstyled(lpad(percent_str, percent_align, " "), " | ", color=:white)
-        alloc_str = @sprintf("%5.2f", timed.bytes / 2^20)
+        alloc_str = hide_zero(@sprintf("%5.2f", timed.bytes / 2^20))
         printstyled(lpad(alloc_str, alloc_align, " "), " | ", color=:white)
-        rss_str = @sprintf("%5.2f", timed.rss / 2^20)
+        rss_str = hide_zero(@sprintf("%5.2f", timed.rss / 2^20))
         printstyled(lpad(rss_str, rss_align, " "), color=:white)
     end
     println()
