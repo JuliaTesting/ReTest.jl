@@ -379,11 +379,17 @@ function print_counts(ts::ReTestSet, fmt::Format, depth, align,
         time_str = hide_zero(@sprintf("%6.2f", timed.time), "s")
         printstyled("| ", time_str, " ", color=:white)
         if VERSION >= v"1.6-"
-            compile_str = hide_zero(@sprintf("%5.1f", timed.compile_time / 10^7 / timed.time), "%")
+            compile_str = all(==(' '), time_str) ?
+                ' '^6 : # print percentages only if time itself is shown!
+                        # (also, this can result in weird things, like "30663.3%",
+                        # if e.g. there was no @test in the @testset)
+                hide_zero(@sprintf("%5.1f", timed.compile_time / 10^7 / timed.time), "%")
             # can be >= 100% !?
             printstyled(compile_str, " ", color=:white)
         end
-        gc_str = hide_zero(@sprintf("%4.1f", 100 * timed.gctime / timed.time), "%")
+        gc_str = all(==(' '), time_str) ?
+            ' '^5 :
+            hide_zero(@sprintf("%4.1f", 100 * timed.gctime / timed.time), "%")
         printstyled(gc_str, " | ", color=:white)
 
         alloc_str = hide_zero(@sprintf("%6.1f", timed.bytes / 2^20), "M")
