@@ -381,7 +381,7 @@ function retest(args::Union{Module,AbstractString,Regex}...;
 
         printlock = ReentrantLock()
         previewchan =
-            if isinteractive() && (nthreads() > 1 || nprocs() > 1)
+            if stdout isa Base.TTY && (nthreads() > 1 || nprocs() > 1)
                 RemoteChannel(() -> Channel{Union{String,Nothing}}(1))
                 # needs to be "remote" in the case nprocs() == 2, as then nworkers() == 1,
                 # which means the one remote worker will put descriptions on previewchan
