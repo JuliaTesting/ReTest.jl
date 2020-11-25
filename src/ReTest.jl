@@ -395,6 +395,7 @@ function retest(args::Union{Module,AbstractString,Regex}...;
             end
 
         gotprinted = false
+        align_overflow = 0
 
         previewer = previewchan === nothing ? nothing :
             @async begin
@@ -418,6 +419,7 @@ function retest(args::Union{Module,AbstractString,Regex}...;
                         elseif gotprinted
                             desc = ""
                             gotprinted = false
+                            align_overflow = 0
                         elseif desc != ""
                             align = format.desc_align
                             if nworkers() > 1
@@ -434,7 +436,20 @@ function retest(args::Union{Module,AbstractString,Regex}...;
                                 description = "  " * description
                             end
                             cursor += 1
-                            printstyled('\r', rpad("$description", align, " "), ' ',
+
+                            # when verbose == 0, we still can print the currently run
+                            # testset, but then its description might be larger than
+                            # `align`, because it was not taken into account for computing
+                            # `align`;
+                            # `align_overflow` computes how many characters do overflow,
+                            # so that the printer can "erase" them later on;
+                            # once we overflow, we don't go back (leftwards) until the
+                            # printer prints
+                            align_overflow =
+                                max(align_overflow, textwidth(description) - align)
+                            printstyled('\r',
+                                        rpad("$description", align+align_overflow, " "),
+                                        ' ',
                                         timer[mod1(cursor, end)];
                                         style...)
                         end
@@ -453,11 +468,21 @@ function retest(args::Union{Module,AbstractString,Regex}...;
                     if many || verbose == 0
                         @assert endswith(module_ts.description, ':')
                         module_ts.description = chop(module_ts.description, tail=1)
+                        clear_line()
                         Testset.print_test_results(module_ts, format,
                                                    bold=true, hasbroken=hasbroken)
                     else
                         nothing
                     end
+
+                # if the previewer overflowed, we must clear the line, otherwise, if
+                # what we print now isn't as large, leftovers from the previewer
+                # will be seen
+                clear_line() = if previewchan !== nothing
+                    # +2: for the final space before spinning wheel and the wheel
+                    print('\r' * ' '^(format.desc_align+align_overflow+2) * '\r')
+                    align_overflow = 0
+                end
 
                 while !finito
                     rts = take!(outchan)
@@ -470,8 +495,6 @@ function retest(args::Union{Module,AbstractString,Regex}...;
                             end
                         end
                         gotprinted = true
-                        previewchan === nothing ||
-                            print('\r')
 
                         if rts === nothing
                             errored || print_overall()
@@ -481,6 +504,7 @@ function retest(args::Union{Module,AbstractString,Regex}...;
                         errored && return
 
                         if verbose > 0 || rts.anynonpass
+                            clear_line()
                             Testset.print_test_results(
                                 rts, format;
                                 depth = Int(!rts.overall & isindented(verbose, overall, many)),
