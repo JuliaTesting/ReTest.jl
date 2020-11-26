@@ -425,20 +425,22 @@ function get_testset_string(remove_last=false)
 end
 
 # non-inline testset with regex filtering support
-macro testset(mod::String, isfinal::Bool, rx::Regex, desc::String, options, chan, body)
-    Testset.testset_beginend(mod, isfinal, rx, desc, options, chan,  body, __source__)
+macro testset(mod::String, isfinal::Bool, rx::Regex, desc::String, options,
+              stats::Bool, chan, body)
+    Testset.testset_beginend(mod, isfinal, rx, desc, options, stats, chan,  body, __source__)
 end
 
-macro testset(mod::String, isfinal::Bool, rx::Regex, desc::Union{String,Expr}, options, chan,
-              loopiter, loopvals, body)
-    Testset.testset_forloop(mod, isfinal, rx, desc, options, chan, loopiter, loopvals, body, __source__)
+macro testset(mod::String, isfinal::Bool, rx::Regex, desc::Union{String,Expr}, options,
+              stats::Bool, chan, loopiter, loopvals, body)
+    Testset.testset_forloop(mod, isfinal, rx, desc, options,
+                            stats, chan, loopiter, loopvals, body, __source__)
 end
 
 """
 Generate the code for a `@testset` with a `begin`/`end` argument
 """
 function testset_beginend(mod::String, isfinal::Bool, rx::Regex, desc::String, options,
-                          chan, tests, source)
+                          stats::Bool, chan, tests, source)
     # Generate a block of code that initializes a new testset, adds
     # it to the task local storage, evaluates the test(s), before
     # finally removing the testset and giving it a chance to take
@@ -460,19 +462,12 @@ function testset_beginend(mod::String, isfinal::Bool, rx::Regex, desc::String, o
             # by wrapping the body in a function
             local RNG = default_rng()
             local oldrng = copy(RNG)
-            local timed
-            local rss
-            local compile_time
             try
                 # RNG is re-seeded with its own seed to ease reproduce a failed test
                 Random.seed!(RNG.seed)
-                rss = Sys.maxrss()
-                compile_time = cumulative_compile_time_ns()
                 let
-                    timed = @timed $(esc(tests))
+                    ts.timed = @stats $stats $(esc(tests))
                 end
-                rss = Sys.maxrss() - rss
-                compile_time = cumulative_compile_time_ns() - compile_time
             catch err
                 err isa InterruptException && rethrow()
                 # something in the test block threw an error. Count that as an
@@ -482,8 +477,6 @@ function testset_beginend(mod::String, isfinal::Bool, rx::Regex, desc::String, o
             finally
                 copy!(RNG, oldrng)
                 pop_testset()
-                @isdefined(timed) &&
-                    set_timed!(ts, timed, rss, compile_time)
                 ret = finish(ts, $chan)
             end
             ret
@@ -501,9 +494,8 @@ end
 """
 Generate the code for a `@testset` with a `for` loop argument
 """
-function testset_forloop(mod::String, isfinal::Bool, rx::Regex, desc::Union{String,Expr}, options, chan,
-                         loopiter, loopvals,
-                         tests, source)
+function testset_forloop(mod::String, isfinal::Bool, rx::Regex, desc::Union{String,Expr},
+                         options, stats, chan, loopiter, loopvals, tests, source)
 
     # Pull out the loop variables. We might need them for generating the
     # description and we'll definitely need them for generating the
@@ -519,8 +511,6 @@ function testset_forloop(mod::String, isfinal::Bool, rx::Regex, desc::Union{Stri
             # they can be handled properly by `finally` lowering.
             if !first_iteration
                 pop_testset()
-                timed !== nothing &&
-                    set_timed!(ts, timed, rss, compile_time)
                 push!(arr, finish(ts, $chan))
                 # it's 1000 times faster to copy from tmprng rather than calling Random.seed!
                 copy!(RNG, tmprng)
@@ -532,14 +522,9 @@ function testset_forloop(mod::String, isfinal::Bool, rx::Regex, desc::Union{Stri
             push_testset(ts)
             first_iteration = false
             try
-                rss = Sys.maxrss()
-                compile_time = cumulative_compile_time_ns()
-                timed = nothing
                 let
-                    timed = @timed $(esc(tests))
+                    ts.timed = @stats $stats $(esc(tests))
                 end
-                rss = Sys.maxrss() - rss
-                compile_time = cumulative_compile_time_ns() - compile_time
             catch err
                 err isa InterruptException && rethrow()
                 # Something in the test block threw an error. Count that as an
@@ -556,9 +541,6 @@ function testset_forloop(mod::String, isfinal::Bool, rx::Regex, desc::Union{Stri
         local oldrng = copy(RNG)
         Random.seed!(RNG.seed)
         local tmprng = copy(RNG)
-        local timed
-        local rss
-        local compile_time
         try
             let
                 $(Expr(:for, Expr(:block, [esc(v) for v in loopvars]...), blk))
@@ -567,24 +549,12 @@ function testset_forloop(mod::String, isfinal::Bool, rx::Regex, desc::Union{Stri
             # Handle `return` in test body
             if !first_iteration
                 pop_testset()
-                timed !== nothing &&
-                    set_timed!(ts, timed, rss, compile_time)
                 push!(arr, finish(ts, $chan))
             end
             copy!(RNG, oldrng)
         end
         arr
     end
-end
-
-function set_timed!(ts, timed, rss, compile_time)
-    # on Julia < 1.5, @timed returns a Tuple; here we give the names as in
-    # Julia 1.5+, but we filter out the `val` field, unused here
-    ts.timed = (time = timed[2], bytes = timed[3], gctime = timed[4],
-                rss = rss, compile_time = compile_time)
-    # julia/test/runtests.jl uses timed.gcstats.total_time/10^9, which is equal to gctime
-    # (timed[5] == timed.gcstats)
-    ts
 end
 
 function set_timed!(ts)
@@ -599,6 +569,30 @@ function set_timed!(ts)
 end
 
 get_timed!(ts) = isempty(ts.timed) ? set_timed!(ts) : ts
+
+# adapted from @timed in Julia/base/timing.jl
+# also, @timed inserts a `while false; end` compiler heuristic, which destroys perfs here
+macro stats(yes, ex)
+    quote
+        if $yes
+            local stats = Base.gc_num()
+            local elapsedtime = time_ns()
+            local rss = Sys.maxrss()
+            local compile_time = cumulative_compile_time_ns()
+        end
+        local val = $(esc(ex))
+        if $yes
+            elapsedtime = time_ns() - elapsedtime
+            local diff = Base.GC_Diff(Base.gc_num(), stats)
+            rss = Sys.maxrss() - rss
+            compile_time = cumulative_compile_time_ns() - compile_time
+            (time=elapsedtime/1e9, bytes=diff.allocd, gctime=diff.total_time/1e9,
+             rss = rss, compile_time = compile_time)
+        else
+            NamedTuple()
+        end
+    end
+end
 
 cumulative_compile_time_ns() =
     isdefined(Base, :cumulative_compile_time_ns) ?

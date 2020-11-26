@@ -199,28 +199,29 @@ function resolve!(mod::Module, ts::TestsetExpr, rx::Regex;
 end
 
 # convert a TestsetExpr into an actually runnable testset
-function make_ts(ts::TestsetExpr, rx::Regex, chan)
+function make_ts(ts::TestsetExpr, rx::Regex, stats, chan)
     ts.run || return nothing
 
     if isfinal(ts)
         body = ts.body
     else
-        body = make_ts(ts.body, rx, chan)
+        body = make_ts(ts.body, rx, stats, chan)
     end
     if ts.loops === nothing
         quote
-            @testset $(ts.mod) $(isfinal(ts)) $rx $(ts.desc) $(ts.options) $chan $body
+            @testset $(ts.mod) $(isfinal(ts)) $rx $(ts.desc) $(ts.options) $stats $chan $body
         end
     else
         loopvals = something(ts.loopvalues, ts.loops.args[2])
         quote
-            @testset $(ts.mod) $(isfinal(ts)) $rx $(ts.desc) $(ts.options) $chan $(ts.loops.args[1]) $loopvals $body
+            @testset $(ts.mod) $(isfinal(ts)) $rx $(ts.desc) $(ts.options) $stats $chan $(ts.loops.args[1]) $loopvals $body
         end
     end
 end
 
-make_ts(x, rx, _) = x
-make_ts(ex::Expr, rx, chan) = Expr(ex.head, map(x -> make_ts(x, rx, chan), ex.args)...)
+make_ts(x, rx, _, _) = x
+make_ts(ex::Expr, rx, stats, chan) =
+    Expr(ex.head, map(x -> make_ts(x, rx, stats, chan), ex.args)...)
 
 # convert raw tests from InlineTest into TestsetExpr tests, and handle overwriting
 function updatetests!(mod::Module)
@@ -593,7 +594,7 @@ function retest(args::Union{Module,AbstractString,Regex}...;
                             chan = (out=outchan, compute=computechan, preview=previewchan)
                             remotecall_fetch(wrkr, mod, ts, regex, chan
                                              ) do mod, ts, regex, chan
-                                mts = make_ts(ts, regex, chan)
+                                mts = make_ts(ts, regex, format.stats, chan)
                                 Core.eval(mod, mts)
                             end
                         catch e
