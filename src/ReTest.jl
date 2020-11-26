@@ -376,10 +376,6 @@ function retest(args::Union{Module,AbstractString,Regex}...;
 
         many = length(tests) > 1 || isfor(tests[1]) # FIXME: isfor when only one iteration
 
-        if !overall
-            format = Format(stats, descwidth)
-        end
-
         printlock = ReentrantLock()
         previewchan =
             if stdout isa Base.TTY && (nthreads() > 1 || nprocs() > 1)
