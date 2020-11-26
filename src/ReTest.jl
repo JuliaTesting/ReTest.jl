@@ -404,6 +404,15 @@ function retest(args::Union{Module,AbstractString,Regex}...;
         gotprinted = false
         align_overflow = 0
 
+        function take_latest!(previewchan)
+            local desc
+            while isready(previewchan)
+                # printer/previewer can't take! it, as we locked
+                desc = take!(previewchan)
+            end
+            @isdefined(desc) ? desc : ""
+        end
+
         previewer = previewchan === nothing ? nothing :
             @async begin
                 timer = ['|', '/', '-', '\\']
@@ -413,13 +422,11 @@ function retest(args::Union{Module,AbstractString,Regex}...;
 
                 while !finito
                     lock(printlock) do
-                        if isready(previewchan)
-                            # printer can't take! it, as we locked
-                            newdesc = take!(previewchan)
-                            if newdesc === nothing
-                                finito = true
-                                return
-                            end
+                        newdesc = take_latest!(previewchan)
+                        if newdesc === nothing
+                            finito = true
+                            return # no need to sleep before looping
+                        elseif newdesc != ""
                             desc = newdesc
                             cursor = 0
                             gotprinted = false
@@ -494,8 +501,8 @@ function retest(args::Union{Module,AbstractString,Regex}...;
                 while !finito
                     rts = take!(outchan)
                     lock(printlock) do
-                        if previewchan !== nothing && isready(previewchan)
-                            desc = take!(previewchan)
+                        if previewchan !== nothing
+                            desc = take_latest!(previewchan)
                             if desc === nothing
                                 # keep `nothing` in so that the previewer knows to terminate
                                 put!(previewchan, nothing)
