@@ -383,12 +383,18 @@ function retest(args::Union{Module,AbstractString,Regex}...;
         printlock = ReentrantLock()
         previewchan =
             if stdout isa Base.TTY && (nthreads() > 1 || nprocs() > 1)
-                RemoteChannel(() -> Channel{Union{String,Nothing}}(1))
+                RemoteChannel(() -> Channel{Union{String,Nothing}}(Inf))
                 # needs to be "remote" in the case nprocs() == 2, as then nworkers() == 1,
                 # which means the one remote worker will put descriptions on previewchan
                 # (if nworkers() > 1, descriptions are not put because we can't predict
                 # the order in which they complete, and then the previewer will
                 # not show the descriptions, just the spinning wheel)
+
+                # channel size: if nworkers() == 1, then 2 would suffice (one for
+                # the "compilation step", one for @testset execution step, and then
+                # the printer would empty the channel; but for two workers and more,
+                # this second step is not done, so the buffer needs a size of at least
+                # `nworkers()`
             else
                 # otherwise, the previewing doesn't work well, because the worker task
                 # keeps the thread busy and doesn't yield enough for previewing to be useful
