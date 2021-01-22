@@ -37,7 +37,7 @@ dependency). But `ReTest` still has to be loaded (as a "test" dependency) in
 order to call `retest`.
 
 Finally, for convenience, `@testset` also implicitly defines a `runtests` function
-within the enclosing module, say `M`, such `M.runtests(...)` is equivalent to
+within the enclosing module, say `M`, such that `M.runtests(...)` is equivalent to
 calling `retest(M, ...)`.
 
 ### `retest` docstring
@@ -150,7 +150,27 @@ it can be filtered out.
 When `Revise` is loaded and a testset is updated, `ReTest` will observe that a
 new testset is added with the same description as a previously existing one,
 which is then overwritten. This works only if the description is not modified,
-otherwise both the old and new versions of the testset will co-exist. For
-testsets in a "script" loaded with `includet`, e.g. those in a "test/tests.jl"
-file, you can request `Revise` to "load" the updated testsets by putting
-`__revise_mode__ = :eval` in the enclosing module.
+otherwise both the old and new versions of the testset will co-exist.
+
+For testsets in a "script" loaded with `includet`, e.g. those in a
+"test/tests.jl" file, you can request `Revise` to "load" the updated testsets by
+putting `__revise_mode__ = :eval` in the enclosing module.
+
+When files are included recursively, plain `includet` won't work
+(it is currently documented to be "deliberately non-recursive").
+There are two work-arounds:
+1. rename your "test/tests.jl" file to "test/MyPackageTests.jl" and load it as a module
+   (this might involve updating your `LOAD_PATH` to include "test/" and making sure
+   the required packages are found)
+2. use the [following `recursive_includet`](https://github.com/timholy/Revise.jl/issues/518#issuecomment-667097500)
+   function instead of `includet`:
+```julia
+function recursive_includet(filename)
+    already_included = copy(Revise.included_files)
+    includet(filename)
+    newly_included = setdiff(Revise.included_files, already_included)
+    for (mod, file) in newly_included
+        Revise.track(mod, file)
+    end
+end
+```
