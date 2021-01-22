@@ -303,6 +303,9 @@ function retest(args::Union{Module,AbstractString,Regex}...;
     root = Testset.ReTestSet("", "Overall", true)
 
     tests_descs_hasbrokens = fetchtests.(modules, regex, verbose, overall)
+    isempty(tests_descs_hasbrokens) &&
+        throw(ArgumentError("no modules using ReTest could be found and none were passed"))
+
     alltests = first.(tests_descs_hasbrokens)
     descwidth = max(textwidth(root.description),
                     maximum(x->x[2], tests_descs_hasbrokens))
@@ -311,16 +314,12 @@ function retest(args::Union{Module,AbstractString,Regex}...;
 
     emptymods = findall(isempty, alltests)
     nmodules = length(modules) - length(emptymods)
-    if !isempty(emptymods)
+    if nmodules == 0
         plural = length(emptymods) > 1 ? "s" : ""
         print("No matching tests for module$plural ")
         join(stdout, string.(getindex.((modules,), emptymods)), ", ", " and ")
         println('.')
-        if nmodules > 0
-            println()
-        else
-            return
-        end
+        return
     end
 
     for imod in eachindex(modules)
