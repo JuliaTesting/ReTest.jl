@@ -174,3 +174,13 @@ function recursive_includet(filename)
     end
 end
 ```
+
+### Working with test files which use Test
+
+It's sometimes possible to use `ReTest` features on a test code base which uses `Test`:
+- if you have a package `Package`, you can try `ReTest.hijack(Package)`, which will define
+a `PackageTests` module when successful, on which you can call `retest`.
+- if you have a test file `"testfile.jl"`, try `ReTest.hijack("testfile.jl")`
+(this will define a fresh module like above).
+
+Check out the docstring of `ReTest.hijack` for more details.
