@@ -568,11 +568,13 @@ function retest(args::Union{Module,AbstractString,Regex}...;
                         else
                             if file === nothing
                                 if isempty(groups)
-                                    idx = findfirst(todo)
+                                    idx = 1
                                 else
                                     idx, file = popfirst!(groups)
                                 end
                             end
+                            idx = findnext(todo, idx) # when a wrkr has file==nothing, it might steal an item from group of another
+                                                      # worker, so in any case we must search for a non-done item
                             ts = tests[idx]
                             todo[idx] = false
                             if idx == length(tests) || file === nothing ||
