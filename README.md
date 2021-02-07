@@ -1,6 +1,6 @@
 # ReTest
 
-[![Build Status](https://travis-ci.com/JuliaTesting/ReTest.jl.svg?branch=master)](https://travis-ci.com/JuliaTesting/ReTest.jl)
+[![Tests Status](https://github.com/JuliaTesting/ReTest.jl/workflows/CI/badge.svg)](https://github.com/JuliaTesting/ReTest.jl/actions?query=workflow%3ACI)
 
 This package allows:
 
