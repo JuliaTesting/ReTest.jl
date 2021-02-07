@@ -302,7 +302,8 @@ function retest(args::Union{Module,AbstractString,Regex}...;
     overall = length(modules) > 1
     root = Testset.ReTestSet("", "Overall", true)
 
-    tests_descs_hasbrokens = fetchtests.(modules, regex, verbose, overall)
+    # COMPAT: `Ref` necesssary on Julia 1.0
+    tests_descs_hasbrokens = fetchtests.(modules, Ref(regex), verbose, overall)
     isempty(tests_descs_hasbrokens) &&
         throw(ArgumentError("no modules using ReTest could be found and none were passed"))
 
@@ -733,7 +734,7 @@ function computemodules!(modules::Vector{Module}, shuffle)
                 push!(seen, str)
             end
         end
-        filter!(!=(nothing), TESTED_MODULES)
+        filter!(x -> x !== nothing, TESTED_MODULES)
 
         append!(modules, Iterators.flatten((values(Base.loaded_modules), TESTED_MODULES)))
         unique!(modules)
