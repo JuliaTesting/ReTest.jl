@@ -369,6 +369,7 @@ function retest(args::Union{Module,AbstractString,Regex}...;
         nprinted = 0
         allpass = true
         exception = Ref{Exception}()
+        interrupted = Threads.Atomic{Bool}(false)
 
         module_ts = Testset.ReTestSet("", string(mod) * ':', true)
         push!(root.results, module_ts)
@@ -409,13 +410,13 @@ function retest(args::Union{Module,AbstractString,Regex}...;
         end
 
         previewer = previewchan === nothing ? nothing :
-            @async begin
+            @async try
                 timer = ['|', '/', '-', '\\']
                 cursor = 0
                 desc = ""
                 finito = false
 
-                while !finito
+                while !finito && !interrupted[]
                     lock(printlock) do
                         newdesc = take_latest!(previewchan)
                         if newdesc === nothing
@@ -465,7 +466,17 @@ function retest(args::Union{Module,AbstractString,Regex}...;
                     end
                     sleep(0.13)
                 end
-            end
+            catch ex
+                # TODO: clarify what is the correct thing to do here
+                if ex isa InterruptException
+                    interrupted[] = true
+                    rethrow()
+                else
+                    # then there is probably a bug in the previewer code, but it might be fine
+                    # for the worker/printer to continue?
+                    rethrow()
+                end
+            end # previewer task
 
         # TODO: move printer task out of worker?
         worker = @task begin
@@ -493,7 +504,7 @@ function retest(args::Union{Module,AbstractString,Regex}...;
                     align_overflow = 0
                 end
 
-                while !finito
+                while !finito && !interrupted[]
                     rts = take!(outchan)
                     lock(printlock) do
                         if previewchan !== nothing
@@ -538,7 +549,7 @@ function retest(args::Union{Module,AbstractString,Regex}...;
                         end
                     end
                 end
-            end
+            end # printer task
 
             ndone = 0
 
@@ -553,7 +564,6 @@ function retest(args::Union{Module,AbstractString,Regex}...;
                 @async put!(computechan, nothing)
             end
 
-
             @sync for wrkr in workers()
                 @async begin
                     if nprocs() == 1
@@ -561,7 +571,7 @@ function retest(args::Union{Module,AbstractString,Regex}...;
                     end
                     file = nothing
                     idx = 0
-                    while ndone < length(tests)
+                    while ndone < length(tests) && !interrupted[]
                         ndone += 1
                         if !@isdefined(groups)
                             ts = tests[ndone]
@@ -600,19 +610,12 @@ function retest(args::Union{Module,AbstractString,Regex}...;
                             put!(previewchan, desc)
                         end
 
-                        resp = try
-                            chan = (out=outchan, compute=computechan, preview=previewchan)
-                            remotecall_fetch(wrkr, mod, ts, regex, chan
+                        chan = (out=outchan, compute=computechan, preview=previewchan)
+                        resp = remotecall_fetch(wrkr, mod, ts, regex, chan
                                              ) do mod, ts, regex, chan
                                 mts = make_ts(ts, regex, format.stats, chan)
                                 Core.eval(mod, mts)
                             end
-                        catch e
-                            allpass = false
-                            ndone = length(tests)
-                            isa(e, InterruptException) || rethrow()
-                            return
-                        end
                         if resp isa Vector
                             ntests += length(resp)
                             append!(module_ts.results, resp)
@@ -622,29 +625,38 @@ function retest(args::Union{Module,AbstractString,Regex}...;
                         end
 
                     end
-                end
-            end
+                end # wrkr: @async
+            end # @sync for wrkr...
 
+            # TODO: maybe put the following stuff in a finally clause where we schedule worker
+            # (as part of the mechanism to handle exceptions vs interrupt[])
             put!(outchan, nothing)
             previewchan !== nothing &&
                 put!(previewchan, nothing)
             wait(printer)
+        end # worker = @task begin ...
+
+        try
+            if previewchan !== nothing # then nthreads() > 1
+                # we try to keep thread #1 free of heavy work, so that the previewer stays
+                # responsive
+                tid = rand(2:nthreads())
+                thread_pin(worker, UInt16(tid))
+            else
+                schedule(worker)
+            end
+
+            wait(worker)
+            previewer !== nothing &&
+                wait(previewer)
+
+        catch ex
+            interrupted[] = true
+            ex isa InterruptException ||
+                rethrow()
         end
 
-        if previewchan !== nothing # then nthreads() > 1
-            # we try to keep thread #1 free of heavy work, so that the previewer stays
-            # responsive
-            tid = rand(2:nthreads())
-            thread_pin(worker, UInt16(tid))
-        else
-            schedule(worker)
-        end
-
-        wait(worker)
-        previewer !== nothing &&
-            wait(previewer)
-
-        @assert !allpass || nprinted == ntests
+        @assert interrupted[] || !allpass || nprinted == ntests
         if isassigned(exception)
             throw(exception[])
         end
