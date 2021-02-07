@@ -586,8 +586,10 @@ macro stats(yes, ex)
             local diff = Base.GC_Diff(Base.gc_num(), stats)
             rss = Sys.maxrss() - rss
             compile_time = cumulative_compile_time_ns() - compile_time
-            (time=elapsedtime/1e9, bytes=diff.allocd, gctime=diff.total_time/1e9,
-             rss = rss, compile_time = compile_time)
+            # COMPAT: on Julia 1.1, the form `(time=..., bytes=..., ...)` doesn't work
+            # (macro name mangling with `#`, e.g. (#115#time = ..., ))
+            NamedTuple{(:time, :bytes, :gctime, :rss, :compile_time)}(
+                (elapsedtime/1e9, diff.allocd, diff.total_time/1e9, rss, compile_time))
         else
             NamedTuple()
         end
