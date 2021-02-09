@@ -638,7 +638,7 @@ function retest(args::Union{Module,AbstractString,Regex}...;
         end # worker = @task begin ...
 
         try
-            if previewchan !== nothing # then nthreads() > 1
+            if previewchan !== nothing && nthreads() > 1
                 # we try to keep thread #1 free of heavy work, so that the previewer stays
                 # responsive
                 tid = rand(2:nthreads())
