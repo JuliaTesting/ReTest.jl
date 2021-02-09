@@ -43,11 +43,13 @@ function retest end
 """
     @testset args...
 
-Similar to `Test.@testset args...`, but the contained tests are not run immediately,
-and are instead stored for later execution, triggered by `runtests()`.
+Similar to `Test.@testset args...`, but the contained tests are not run
+immediately, and are instead stored for later execution, triggered by
+`runtests()`.
 Invocations of `@testset` can be nested, but qualified invocations of
 `ReTest.@testset` can't.
-Internally, `@testset` invocations are converted to `Test.@testset` at execution time.
+Internally, `@testset` expressions are converted to an equivalent of
+`Test.@testset` at execution time.
 """
 macro testset(args...)
     if !isdefined(__module__, :runtests)

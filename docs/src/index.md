@@ -34,11 +34,11 @@ possible to use `ReTest` features without changing a line, e.g. on Julia's
 ## Usage
 
 The exported [`ReTest.@testset`](@ref) macro can be used as a direct
-replacement for `Test.@testset` (with limitations, see below), and `retest()`
-has to be called for the tests to be executed. See [`retest`](@ref)'s
-docstrings for more details. Moreover, `ReTest` re-exports (almost) all
-exported symbols from `Test`, so there should not be any need to import `Test`
-together with `ReTest`.
+replacement for `Test.@testset` (with limitations, [see below](@ref Caveats)),
+and `retest()` has to be called for the tests to be executed. See
+[`retest`](@ref)'s docstrings for more details. Moreover, `ReTest` re-exports
+(almost) all exported symbols from `Test`, so there should not be any need to
+import `Test` together with `ReTest`.
 
 When using `@testset` "inline", i.e. within the source-code of a package, one
 can use the `InlineTest` package instead of `ReTest`, which only defines the
@@ -47,9 +47,9 @@ if `ReTest` itself loads fast, it can be desirable to have an even lighter
 dependency). But `ReTest` still has to be loaded (as a "test" dependency) in
 order to call `retest`.
 
-Finally, for convenience, `@testset` also implicitly defines a `runtests`
-function within the enclosing module, say `M`, such that `M.runtests(...)` is
-equivalent to calling `retest(M, ...)`.
+Finally, for convenience, `ReTest.@testset` also implicitly defines a
+`runtests` function within the enclosing module, say `M`, such that
+`M.runtests(...)` is equivalent to calling `retest(M, ...)`.
 
 
 ## `retest` and `@testset`
@@ -66,27 +66,29 @@ retest
 
 ## Caveats
 
-`ReTest.@testset` comes with a couple of caveats/limitations:
+`ReTest.@testset` comes with a couple of caveats/limitations, some of which
+should be fixable:
 
 * Toplevel testsets (which are not nested within other testsets), when run,
   are `eval`ed at the toplevel of their parent module, which means that they
-  can't depend on local variables for example. This is probably the only
-  fundamental limitation compared to `Test.@testset`, and might not be
-  fixable.
+  can't depend on local variables for example.
 
 * "testsets-for" (`@testset "description" for ...`), when run, imply `eval`ing
-  their loop variables at the toplevel of their parent module; moreover,
-  "testsets-for" currently accept only "non-cartesian" looping (e.g. `for i=I,
-  j=J` is not supported, PRs welcome :) ).
+  their loop variables at the toplevel of their parent module; this implies
+  that iteration expressions shouldn't depend on local variables (otherwise,
+  the testset subject usually can't be known statically and the testset can't
+  be filtered out with a `Regex`).
 
-* Testsets can not be "custom testsets" (cf. `Test` documentation; this should
-  be easy to support).
+* "testsets-for" currently accept only "non-cartesian" looping (e.g. `for i=I,
+  j=J` is not supported, PRs welcome!)
+
+* Testsets can not be "custom testsets" (cf. `Test` documentation).
 
 * Nested testsets can't be "qualified" (i.e. written as `ReTest.@testset`).
 
 * Regex filtering logic might improve in future versions, which means that
   with the same regex, less tests might be run (or more!). See
-  [`retest`](@ref)'s docstring to know what testsets are guaranteed to run.
+  [`retest`](@ref)'s docstring to know which testsets are guaranteed to run.
 
 * Descriptions of testsets must be unique within a module, otherwise they are
   overwritten and a warning is issued, unless `Revise` is loaded; the reason
@@ -104,14 +106,16 @@ When used in a package `MyPackage`, the test code can be organized as follows:
    `include("tests.jl"); MyPackageTests.runtests()`
 
 This means that running "runtests.jl" will have the same net effect as before.
-The "tests.jl" file can now be `include`d in your REPL session (`include("tests.jl")`),
-and you can run all or some of its tests
-(e.g. `MyPackageTests.runtests("addition")`).
-Wrapping the tests in `MyPackageTests` allows to not pollute `Main`, it keeps the tests
-of different packages separated, but more importantly, you can modify "tests.jl" and
-re-include it to have the corresponding tests updated (otherwise, without
-a `MyPackageTests` module, including the file a second time would add the new tests
-without removing the old ones).
+The "tests.jl" file can now be `include`d in your REPL session
+(`include("tests.jl")`), and you can run all or some of its tests (e.g.
+`MyPackageTests.runtests("addition")`).
+
+Wrapping the tests in `MyPackageTests` allows to not pollute `Main` and keeps
+the tests of different packages separated. Also, you can
+modify "tests.jl" and re-include it to have the corresponding tests updated
+(the `MyPackageTests` module is replaced in `Main`);
+otherwise, without a `MyPackageTests` module, including the file a second
+time currently triggers a warning for each overwritten toplevel testset.
 
 
 ## Filtering
@@ -133,6 +137,24 @@ Note that if you want to run `@testset "b"`, there is no way to not run
 `@test true` in `@testset "a"`; so if it was an expensive test to run,
 instead of `@test true`, it could be useful to wrap it in its own testset, so that
 it can be filtered out.
+
+
+## Running tests in parallel with `Distributed`
+
+Currently, the tests are automatically run in parallel whenever there are
+multiple workers, which have to be set manually. The workflow looks like:
+```julia
+using Distributed
+addprocs(2)
+@everywhere include("test/tests.jl")
+MyPackageTests.runtests()
+```
+
+It should be relatively easy to support threaded execution of testsets (it was
+actually implemented at one point). But it often happens that compiling
+package code and testset code (which currently is not threaded) takes quite
+more time than actually running the code, in which case using `Distributed`
+has more tangible benefits.
 
 
 ## Working with `Revise`
@@ -169,7 +191,7 @@ end
 ## Working with test files which use `Test`
 
 It's sometimes possible to use `ReTest` features on a test code base which
-uses `Test`:
+uses `Test`, without modifications:
 
 - if you have a package `Package`, you can try `ReTest.hijack(Package)`, which
   will define a `PackageTests` module when successful, on which you can call

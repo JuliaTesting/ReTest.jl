@@ -809,16 +809,23 @@ end
 """
     ReTest.hijack(source, [modname]; parentmodule::Module=Main)
 
-Given test files defined in `source` using the `Test` package,
-try to load them by replacing `Test` with `ReTest`, wrapping them in a module `modname`
-defined withing `parentmodule`. If successful, the newly created module `modname` is
-returned and `modname.runtests()` should be callable.
+Given test files defined in `source` using the `Test` package, try to load
+them by replacing `Test` with `ReTest`, wrapping them in a module `modname`
+defined within `parentmodule`. If successful, the newly created module
+`modname` is returned and `modname.runtests()` should be callable.
 
 If `source::AbstractString`, then it's interpreted as the top level test file
-(possibly including other files).
+(possibly including other files), and `modname` defaults to an arbitrary name.
+
 If `source::Module`, then it's interpreted as the name of a package, and the
 "test/runtests.jl" file from this package is loaded. In this case, `modname`
 defaults to `Symbol(source, :Tests)`.
+
+The current procedure is as follows:
+1. replace toplevel `using Test` occurrences by `using ReTest` (`using` can
+   have multiple arguments);
+2. apply recursively these two rules for all `include`d files, provided
+   the `include` statement is at the toplevel.
 """
 function hijack end
 
