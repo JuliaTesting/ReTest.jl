@@ -150,6 +150,20 @@ addprocs(2)
 MyPackageTests.runtests()
 ```
 
+!!! note
+
+    As was already mentioned, testset-for iterators are evaluated at load time in
+    the enclosing module, but this currently happens only in the main process.
+    This can lead to unexpected errors when the package was written without a
+    `Distributed` use-case in mind.
+
+    For example, say the package defines a constant singleton object `X` which is
+    normally equal to itself (because `X === X`). But if `X` is assigned to a
+    testset-for loop variable `x`, it will be the one from the main process, so
+    within the testset-for, a test like `x == X` might fail because `X` refers to
+    the singleton object defined in another process; a solution in this case could
+    be to define explicitly `==` for objects of the type of `X`.
+
 It should be relatively easy to support threaded execution of testsets (it was
 actually implemented at one point). But it often happens that compiling
 package code and testset code (which currently is not threaded) takes quite
