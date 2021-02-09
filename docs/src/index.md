@@ -142,11 +142,25 @@ it can be filtered out.
 ## Running tests in parallel with `Distributed`
 
 Currently, the tests are automatically run in parallel whenever there are
-multiple workers, which have to be set manually. The workflow looks like:
+multiple workers, which have to be set manually. Running the tests looks like:
 ```julia
 using Distributed
 addprocs(2)
 @everywhere include("test/tests.jl")
+MyPackageTests.runtests()
+```
+
+If the test code doesn't use `ReTest`
+(cf. [Working with test files which use `Test`](@ref)), this can be done as
+follows:
+```julia
+using Distributed
+addprocs(2)
+using ReTest
+@everywhere begin
+    using ReTest, MyPackage
+    ReTest.hijack(MyPackage)
+end
 MyPackageTests.runtests()
 ```
 
