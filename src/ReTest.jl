@@ -309,7 +309,7 @@ function retest(args::Union{Module,AbstractString,Regex}...;
                 recursive::Bool=true,
                 )
 
-    modules, regex, verbose = process_args(args, verbose, shuffle, recursive)
+    implicitmodules, modules, regex, verbose = process_args(args, verbose, shuffle, recursive)
     overall = length(modules) > 1
     root = Testset.ReTestSet("", "Overall", true)
 
@@ -343,9 +343,10 @@ function retest(args::Union{Module,AbstractString,Regex}...;
             shuffle!(tests)
 
         if dry
-            overall &&
+            showmod = overall || implicitmodules
+            showmod &&
                 println(mod)
-            foreach(ts -> dryrun(mod, ts, regex, overall*2), tests)
+            foreach(ts -> dryrun(mod, ts, regex, showmod*2), tests)
             continue
         end
 
@@ -724,7 +725,7 @@ function process_args(args, verbose, shuffle, recursive)
     end
     verbose = Int(verbose)
 
-    computemodules!(modules, shuffle, recursive), regex, verbose
+    isempty(modules), computemodules!(modules, shuffle, recursive), regex, verbose
 end
 
 function computemodules!(modules::Vector{Module}, shuffle, recursive)
