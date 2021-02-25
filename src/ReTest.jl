@@ -251,7 +251,8 @@ end
 
 """
     retest([m::Module...], pattern = r""; dry::Bool=false, stats::Bool=false,
-                                          shuffle::Bool=false, verbose::Real=true)
+                                          shuffle::Bool=false, verbose::Real=true,
+                                          recursive::Bool=true)
 
 Run all the tests declared in `@testset` blocks, within modules `m` if specified,
 or within all currently loaded modules otherwise.
@@ -264,6 +265,8 @@ If specified, `verbose` must be an integer or `Inf` indicating the nesting level
 of testsets whose results must be printed (this is equivalent to adding the
 `verbose=true` annotation to corresponding testsets); the default behavior
 (`true` or `1`) corresponds to printing the result of top-level testsets.
+If `recursive` is `true`, the tests for all the recursive submodules of
+the passed modules `m` are also run.
 
 It's possible to filter run testsets by specifying `pattern`: the "subject" of a
 testset is the concatenation of the subject of its parent `@testset`, if any,
@@ -297,9 +300,10 @@ function retest(args::Union{Module,AbstractString,Regex}...;
                 shuffle::Bool=false,
                 group::Bool=true,
                 verbose::Real=true, # should be @nospecialize, but not supported on old Julia
+                recursive::Bool=true,
                 )
 
-    modules, regex, verbose = process_args(args, verbose, shuffle)
+    modules, regex, verbose = process_args(args, verbose, shuffle, recursive)
     overall = length(modules) > 1
     root = Testset.ReTestSet("", "Overall", true)
 
@@ -678,7 +682,7 @@ function thread_pin(t::Task, tid::UInt16)
     return t
 end
 
-function process_args(args, verbose, shuffle)
+function process_args(args, verbose, shuffle, recursive)
     ########## process args
     local pattern
     modules = Module[]
@@ -714,11 +718,11 @@ function process_args(args, verbose, shuffle)
     end
     verbose = Int(verbose)
 
-    computemodules!(modules, shuffle), regex, verbose
+    computemodules!(modules, shuffle, recursive), regex, verbose
 end
 
-function computemodules!(modules::Vector{Module}, shuffle)
-    if isempty(modules)
+function computemodules!(modules::Vector{Module}, shuffle, recursive)
+    if isempty(modules) || recursive # update TESTED_MODULES
         # TESTED_MODULES might have "duplicate" entries, i.e. modules with the same
         # name, when one overwrites itself by being redefined; in this case,
         # let's just delete older entries:
@@ -736,12 +740,16 @@ function computemodules!(modules::Vector{Module}, shuffle)
         # TESTED_MODULES is not up-to-date w.r.t. package modules which have
         # precompilation, so we have to also look in Base.loaded_modules
         for mod in values(Base.loaded_modules)
-            mod ∈ (ReTest, Base) && continue # TODO: should exclude stdlibs too
+            # exclude modules from Main, which presumably already had a chance to get
+            # registered in TESTED_MODULES at runtime
+            mod ∈ (ReTest, Main, Base) && continue # TODO: should exclude stdlibs too
             str = string(mod)
             if str ∉ seen
                 push!(seen, str) # probably unnecessary, if str are all unique in this loop
                 for sub in recsubmodules(mod)
                     if isdefined(sub, INLINE_TEST[]) && sub ∉ TESTED_MODULES
+                        # sub might be a submodule of a Main-like module mod (e.g. via a
+                        # REPL "contextual module"), in which case it already got registered
                         push!(TESTED_MODULES, sub)
                     end
                 end
@@ -750,9 +758,27 @@ function computemodules!(modules::Vector{Module}, shuffle)
 
         @assert all(m -> m isa Module, TESTED_MODULES)
         @assert allunique(TESTED_MODULES)
+    end
+    if isempty(modules)
+        # recursive doesn't change anything here
         append!(modules, TESTED_MODULES) # copy! not working on Julia 1.0
     else
         unique!(modules)
+        if recursive
+            for mod in TESTED_MODULES
+                mod ∈ modules && continue
+                par = mod
+                while true
+                    newpar = parentmodule(par)
+                    newpar == par && break
+                    par = newpar
+                    if par ∈ modules
+                        push!(modules, mod)
+                        break
+                    end
+                end
+            end
+        end
     end
     shuffle && shuffle!(modules)
     modules
