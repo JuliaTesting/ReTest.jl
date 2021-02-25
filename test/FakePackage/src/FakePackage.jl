@@ -19,14 +19,32 @@ end
     push!(RUN, 2)
 end
 
-module Submodule
+module Sub1
 
 using InlineTest
+using ..FakePackage: RUN
 
-@testset "check that Submodule is noticed by ReTest" begin
+@testset "check that Sub1 is noticed by ReTest" begin
+    push!(RUN, 3)
     @test true
 end
 
-end # Submodule
+end # Sub1
 
+module Sub2
+# Sub2 itself doesn't have any @testset, but has a submodule which has some
+
+module SubSub
+
+using InlineTest
+using ...FakePackage: RUN
+
+@testset "check that Sub2.SubSub is noticed by ReTest" begin
+    push!(RUN, 4)
+    @test true
 end
+
+end # SubSub
+end # Sub2
+
+end # FakePackage
