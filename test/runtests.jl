@@ -459,5 +459,5 @@ end
 using Pkg
 Pkg.activate("./FakePackage")
 Pkg.develop(PackageSpec(path="../InlineTest"))
-Pkg.develop("ReTest")
+Pkg.develop(PackageSpec(path="..")) # ReTest
 Pkg.test("FakePackage")
