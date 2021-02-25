@@ -19,4 +19,14 @@ end
     push!(RUN, 2)
 end
 
+module Submodule
+
+using InlineTest
+
+@testset "check that Submodule is noticed by ReTest" begin
+    @test true
+end
+
+end # Submodule
+
 end

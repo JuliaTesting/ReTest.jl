@@ -24,6 +24,7 @@ using Test: Test,
 using InlineTest: @testset, InlineTest, TESTED_MODULES, INLINE_TEST
 import InlineTest: retest
 
+include("utils.jl")
 include("testset.jl")
 
 using .Testset: Testset, Format
@@ -718,11 +719,7 @@ end
 
 function computemodules!(modules::Vector{Module}, shuffle)
     if isempty(modules)
-        # TESTED_MODULES is not up-to-date w.r.t. package modules which have
-        # precompilation, so we have to also look in Base.loaded_modules
-        # TODO: look recursively in "loaded modules" which use ReTest for sub-modules
-
-        # ALSO: TESTED_MODULES might have "duplicate" entries, i.e. modules with the same
+        # TESTED_MODULES might have "duplicate" entries, i.e. modules with the same
         # name, when one overwrites itself by being redefined; in this case,
         # let's just delete older entries:
         seen = Set{String}()
@@ -736,10 +733,24 @@ function computemodules!(modules::Vector{Module}, shuffle)
         end
         filter!(x -> x !== nothing, TESTED_MODULES)
 
-        append!(modules, Iterators.flatten((values(Base.loaded_modules), TESTED_MODULES)))
-        unique!(modules)
-        # will automatically skip ReTest and ReTest.ReTestTest
-        filter!(m -> isdefined(m, INLINE_TEST[]) && m ∉ (ReTest, ReTestTest),  modules)
+        # TESTED_MODULES is not up-to-date w.r.t. package modules which have
+        # precompilation, so we have to also look in Base.loaded_modules
+        for mod in values(Base.loaded_modules)
+            mod ∈ (ReTest, Base) && continue # TODO: should exclude stdlibs too
+            str = string(mod)
+            if str ∉ seen
+                push!(seen, str) # probably unnecessary, if str are all unique in this loop
+                for sub in recsubmodules(mod)
+                    if isdefined(sub, INLINE_TEST[])
+                        push!(TESTED_MODULES, sub)
+                    end
+                end
+            end
+        end
+
+        @assert all(m -> m isa Module, TESTED_MODULES)
+        @assert allunique(TESTED_MODULES)
+        append!(modules, TESTED_MODULES) # copy! not working on Julia 1.0
     else
         unique!(modules)
     end
