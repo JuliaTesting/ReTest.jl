@@ -12,14 +12,20 @@ export Test,
     @test_warn, @test_nowarn,
     @test_logs, @test_deprecated,
     @inferred,
-    detect_ambiguities, detect_unbound_args
+    detect_ambiguities, detect_unbound_args,
+    GenericString, GenericSet, GenericDict, GenericArray, GenericOrder
 
 using Test: Test,
     @test, @test_throws, @test_broken, @test_skip,
     @test_warn, @test_nowarn,
     @test_logs, @test_deprecated,
     @inferred,
-    detect_ambiguities, detect_unbound_args
+    detect_ambiguities, detect_unbound_args,
+    GenericString, GenericSet, GenericDict, GenericArray
+
+if isdefined(Test, :GenericOrder)
+    using Test: GenericOrder
+end
 
 using InlineTest: @testset, InlineTest, TESTED_MODULES, INLINE_TEST
 import InlineTest: retest
