@@ -741,7 +741,7 @@ function computemodules!(modules::Vector{Module}, shuffle)
             if str ∉ seen
                 push!(seen, str) # probably unnecessary, if str are all unique in this loop
                 for sub in recsubmodules(mod)
-                    if isdefined(sub, INLINE_TEST[])
+                    if isdefined(sub, INLINE_TEST[]) && sub ∉ TESTED_MODULES
                         push!(TESTED_MODULES, sub)
                     end
                 end

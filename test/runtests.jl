@@ -204,7 +204,15 @@ P.check("d&E", ["D&E"])
 P.check(r"d&E", [])
 P.check(r"d&E"i, ["D&E"])
 
+
 ### toplevel #################################################################
+
+# The following test is just to exert `@assert allunique(TESTED_MODULES)` in
+# computemodules!, and must be run before any toplevel @testset in declared,
+# so that `Main` is not yet in TESTED_MODULES; we check that previous
+# tested modules, which are in submodules of Main, are not re-added to
+# TESTED_MODULES while going through submodules of Base.loaded_modules ∋ Main
+retest(dry=true)
 
 RUN = []
 @testset "toplevel" begin
