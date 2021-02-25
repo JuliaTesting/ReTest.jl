@@ -256,17 +256,22 @@ end
 
 Run all the tests declared in `@testset` blocks, within modules `m` if specified,
 or within all currently loaded modules otherwise.
-If `dry` is `true`, don't actually run the tests, just print the descriptions
-of the testsets which would (presumably) run.
-If `stats` is `true`, print some time/memory statistics for each testset.
-If `shuffle` is `true`, shuffle the order in which top-level testsets within
-a given module are run, as well as the list of passed modules.
-If specified, `verbose` must be an integer or `Inf` indicating the nesting level
-of testsets whose results must be printed (this is equivalent to adding the
-`verbose=true` annotation to corresponding testsets); the default behavior
-(`true` or `1`) corresponds to printing the result of top-level testsets.
-If `recursive` is `true`, the tests for all the recursive submodules of
-the passed modules `m` are also run.
+
+### Keywords
+
+* If `dry` is `true`, don't actually run the tests, just print the descriptions
+  of the testsets which would (presumably) run.
+* If `stats` is `true`, print some time/memory statistics for each testset.
+* If `shuffle` is `true`, shuffle the order in which top-level testsets within
+  a given module are run, as well as the list of passed modules.
+* If specified, `verbose` must be an integer or `Inf` indicating the nesting level
+  of testsets whose results must be printed (this is equivalent to adding the
+  `verbose=true` annotation to corresponding testsets); the default behavior
+  (`true` or `1`) corresponds to printing the result of top-level testsets.
+* If `recursive` is `true`, the tests for all the recursive submodules of
+  the passed modules `m` are also run.
+
+### `Regex` filtering
 
 It's possible to filter run testsets by specifying `pattern`: the "subject" of a
 testset is the concatenation of the subject of its parent `@testset`, if any,
@@ -291,8 +296,9 @@ This means for example that `"a|b"` will match a subject like `"a|b"` or `"A|B"`
 but not like `"a"` (only in Julia versions >= 1.3; in older versions,
 the regex is simply created as `Regex(pattern, "i")`).
 
-Note: this function executes each (top-level) `@testset` block using `eval` *within* the
-module in which it was written (e.g. `m`, when specified).
+!!! note
+    this function executes each (top-level) `@testset` block using `eval` *within* the
+    module in which it was written (e.g. `m`, when specified).
 """
 function retest(args::Union{Module,AbstractString,Regex}...;
                 dry::Bool=false,
