@@ -875,7 +875,8 @@ The current procedure is as follows:
 1. replace toplevel `using Test` occurrences by `using ReTest` (`using` can
    have multiple arguments);
 2. apply recursively these two rules for all `include`d files, provided
-   the `include` statement is at the toplevel.
+   the `include` statement is at the toplevel, and on the content of
+   all modules.
 """
 function hijack end
 
@@ -920,6 +921,9 @@ function substitue_retest!(ex)
         else
             insert!(ex.args, 2, substitue_retest!)
         end
+    elseif Meta.isexpr(ex, :module)
+        @assert Meta.isexpr(ex.args[3], :block)
+        substitue_retest!.(ex.args[3].args)
     end
     ex
 end
