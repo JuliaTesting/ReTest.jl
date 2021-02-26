@@ -69,3 +69,104 @@ function substitue_retest!(ex)
     end
     ex
 end
+
+const BASETESTS_BLACKLIST = ["backtrace", "misc", "threads", "cmdlineargs","boundscheck",
+                             "SharedArrays", "Test"]
+# SharedArrays: problem with workers (should be sortable out)
+
+"""
+    hijack_base(tests; parentmodule::Module=Main)
+
+Similar to `ReTest.hijack`, but specifically for `Base` and stdlib tests.
+`tests` speficies which test files should be loaded, in the exact same format
+as `Base.runtests` (i.e. it uses the same `choosetests` function to
+select the tests).
+
+Tests corresponding to a "test/[somedir/]sometest.jl" file are loaded in the
+`BaseTests.[somedir.]sometest` module (if `sometest` is defined in `Base`,
+then `sometest_` is used instead).
+
+Tests corresponding to a standard library `Lib` are loaded in the
+`StdLibTests.Lib_` module. When there are "testgroups", submodules
+are created accordingly.
+"""
+function hijack_base(tests; parentmodule::Module=Main)
+    if isa(tests, AbstractString)
+        tests = split(tests)
+    end
+
+    tests, = ChooseTests.call_choosetests(tests) # TODO: handle other return values?
+
+    for test in tests
+        if test ∈ BASETESTS_BLACKLIST
+            @warn "skipping \"$test\" test (incompatible with ReTest)"
+            continue
+        end
+        if test ∈ ["show"] && !isdefined(Main, :Distributed)
+            @eval Main using Distributed
+        end
+
+        components = Symbol.(split(test, '/'))
+        if string(components[1]) in ChooseTests.STDLIBS
+            # it's an stdlib Lib, make toplevel modules StdLibTests/Lib_
+            components[1] = Symbol(components[1], :_)
+            pushfirst!(components, :StdLibTests)
+        else
+            # it's a Base test, use BaseTests as toplevel module
+            pushfirst!(components, :BaseTests)
+        end
+
+        mod = parentmodule
+        for (ith, comp) in enumerate(components)
+            if isdefined(Base, comp)
+                # e.g. `tuple`, collision betwen the tuple function and test/tuple.jl
+                comp = Symbol(comp, :_)
+            end
+
+            if isdefined(mod, comp) && ith != length(components)
+                mod = getfield(mod, comp)
+            else
+                # we always re-eval leaf-modules
+                mod = @eval mod module $comp end
+            end
+        end
+
+        @eval mod begin
+                      using ReTest, Random
+                      include($substitue_retest!, $(ChooseTests.test_path(test)))
+                  end
+    end
+end
+
+
+module ChooseTests
+# choosetests.jl requires the Sockets package, which is why it's a ReTest dependency
+
+const BASETESTPATH = joinpath(Sys.BINDIR, "..", "share", "julia", "test")
+
+# we include "choosetests.jl" on the fly, because the computation of the
+# STDLIBS constant in this file currently doubles the load time of ReTest
+# (quite negligible though, takes about 0.005s)
+
+function call_choosetests(choices)
+    isdefined(ChooseTests, :STDLIBS) ||
+        include(joinpath(BASETESTPATH, "choosetests.jl"))
+    Base.invokelatest(choosetests, choices)
+end
+
+# adapted from julia/tests/runtests.jl
+function test_path(test)
+    t = split(test, '/')
+
+    if t[1] in STDLIBS
+        if length(t) == 2
+            return joinpath(STDLIB_DIR, t[1], "test", "$(t[2]).jl")
+        else
+            return joinpath(STDLIB_DIR, t[1], "test", "runtests.jl")
+        end
+    else
+        return joinpath(BASETESTPATH, "$test.jl")
+    end
+end
+
+end # ChooseTests
