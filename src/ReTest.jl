@@ -205,8 +205,7 @@ function resolve!(mod::Module, ts::TestsetExpr, rx::Regex;
             end
         end
         for x in xs # empty loop if eval above threw
-            Core.eval(mod, Expr(:(=), loopiters, x))
-            descx = Core.eval(mod, desc)::String
+            descx = eval_desc(mod, ts, x)
             if shown
                 ts.descwidth = max(ts.descwidth, textwidth(descx) + 2*depth)
             end
@@ -245,6 +244,17 @@ function resolve!(mod::Module, ts::TestsetExpr, rx::Regex;
     end
     ts.run = run
 end
+
+eval_desc(mod, ts, x) =
+    if ts.desc isa String
+        ts.desc
+    else
+        Core.eval(mod, quote
+                  let $(ts.loopiters) = $x
+                      $(ts.desc)
+                  end
+                  end)::String
+    end
 
 # convert a TestsetExpr into an actually runnable testset
 function make_ts(ts::TestsetExpr, rx::Regex, stats, chan)
@@ -890,8 +900,7 @@ function dryrun(mod::Module, ts::TestsetExpr, rx::Regex, align::Int=0, parentsub
             return
         end
         for x in loopvalues
-            Core.eval(mod, Expr(:(=), ts.loopiters, x))
-            descx = Core.eval(mod, desc)::String
+            descx = eval_desc(mod, ts, x)
             # avoid repeating ourselves, transform this iteration into a "begin/end" testset
             beginend = TestsetExpr(ts.source, ts.mod, descx, ts.options, nothing,
                                    ts.parent, ts.children)
