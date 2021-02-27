@@ -389,6 +389,33 @@ end
 retest(Anonym)
 @test Anonym.RUN == [1, 2]
 
+### loop variable collision ##################################################
+
+module LoopCollision
+using ReTest
+
+RUN = []
+
+@assert isdefined(LoopCollision, :sincos)
+@assert isdefined(LoopCollision, :sinpi)
+
+@testset "collision $sincos" for sincos in (sin, cos)
+    @test sincos(1.0) isa Float64
+    push!(RUN, sincos)
+end
+
+@testset "collision $sincos sinpi $sinpi" for sincos = (sin, cos), sinpi = (1,)
+    @test true
+    push!(RUN, (sincos, sinpi))
+end
+
+end # LoopCollision
+
+retest(LoopCollision, dry=true)
+retest(LoopCollision, dry=false)
+@test LoopCollision.RUN == [sin, cos, (sin, 1), (cos, 1)]
+
+
 ### Failing ##################################################################
 
 module Failing
