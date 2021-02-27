@@ -4,7 +4,7 @@ export retest, @testset
 
 using Distributed
 using Base.Threads: nthreads
-using Random: shuffle!
+using Random: shuffle!, randstring
 
 # from Test:
 export Test,
@@ -103,7 +103,6 @@ function parse_ts(source, mod, args::Tuple, parent=nothing)
             error("unsupported @testset")
         end
     end
-    @isdefined(desc) || error("@testset requires a description")
 
     body = args[end]
     isa(body, Expr) || error("Expected begin/end block or for loop as argument to @testset")
@@ -117,10 +116,20 @@ function parse_ts(source, mod, args::Tuple, parent=nothing)
             @assert all(arg -> Meta.isexpr(arg, :(=)), loops.args)
             loops = loops.args
         end
-
+        if !@isdefined(desc)
+            v = loops[1].args[1]
+            desc = Expr(:string, "anonym $(randstring('0':'9')): $v = ", v)
+            for l = loops[2:end]
+                v = l.args[1]
+                push!(desc.args, ", $v = ", v)
+            end
+        end
     elseif body.head === :block
         loops = nothing
         tsbody = body
+        if !@isdefined(desc)
+            desc = "anonym $(randstring('0':'9'))"
+        end
     else
         error("Expected begin/end block or for loop as argument to @testset")
     end
