@@ -16,3 +16,15 @@ function recsubmodules(m::Module)
     pushfirst!(recs, m)
     recs
 end
+
+function allequal(xs)
+    local val
+    for x in xs
+        if !@isdefined(val)
+            val = x
+        else
+            isequal(val, x) || return false
+        end
+    end
+    true
+end
