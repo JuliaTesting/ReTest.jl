@@ -152,7 +152,11 @@ function resolve!(mod::Module, ts::TestsetExpr, rx::Regex;
     ts.descwidth = 0
     ts.options.transient_verbose = shown & ((verbose > 1) | ts.options.verbose)
 
-    if desc isa String
+    loops = ts.loops
+    if loops === nothing || desc isa String
+        if !(desc isa String)
+            desc = Core.eval(mod, desc)
+        end
         if shown
             ts.descwidth = textwidth(desc) + 2*depth
         end
@@ -166,8 +170,6 @@ function resolve!(mod::Module, ts::TestsetExpr, rx::Regex;
             end
         end
     else
-        loops = ts.loops
-        @assert loops !== nothing
         xs = ()
         loopiters = Expr(:tuple, (arg.args[1] for arg in loops)...)
 
@@ -265,6 +267,7 @@ function make_ts(ts::TestsetExpr, rx::Regex, stats, chan)
     else
         body = make_ts(ts.body, rx, stats, chan)
     end
+
     if ts.loops === nothing
         quote
             @testset $(ts.mod) $(isfinal(ts)) $rx $(ts.desc) $(ts.options) $stats $chan $body
@@ -883,7 +886,10 @@ function dryrun(mod::Module, ts::TestsetExpr, rx::Regex, align::Int=0, parentsub
     ts.run || return
     desc = ts.desc
 
-    if desc isa String
+    if ts.loops === nothing || desc isa String
+        if !(desc isa String)
+            desc = Core.eval(mod, desc)
+        end
         subject = parentsubj * '/' * desc
         if isfinal(ts)
             occursin(rx, subject) || return

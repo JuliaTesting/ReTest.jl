@@ -425,7 +425,7 @@ function get_testset_string(remove_last=false)
 end
 
 # non-inline testset with regex filtering support
-macro testset(mod::String, isfinal::Bool, rx::Regex, desc::String, options,
+macro testset(mod::String, isfinal::Bool, rx::Regex, desc::Union{String,Expr}, options,
               stats::Bool, chan, body)
     Testset.testset_beginend(mod, isfinal, rx, desc, options, stats, chan,  body, __source__)
 end
@@ -439,12 +439,13 @@ end
 """
 Generate the code for a `@testset` with a `begin`/`end` argument
 """
-function testset_beginend(mod::String, isfinal::Bool, rx::Regex, desc::String, options,
+function testset_beginend(mod::String, isfinal::Bool, rx::Regex, desc, options,
                           stats::Bool, chan, tests, source)
     # Generate a block of code that initializes a new testset, adds
     # it to the task local storage, evaluates the test(s), before
     # finally removing the testset and giving it a chance to take
     # action (such as reporting the results)
+    desc = esc(desc)
     ex = quote
         local current_str
         if $isfinal
@@ -497,10 +498,11 @@ Generate the code for a `@testset` with a `for` loop argument
 function testset_forloop(mod::String, isfinal::Bool, rx::Regex, desc::Union{String,Expr},
                          options, stats, chan, loops, tests, source)
 
+    desc = esc(desc)
     blk = quote
         local current_str
         if $isfinal
-            current_str = string(get_testset_string(!first_iteration), '/', $(esc(desc)))
+            current_str = string(get_testset_string(!first_iteration), '/', $desc)
         end
         if !$isfinal || occursin($rx, current_str)
             # Trick to handle `break` and `continue` in the test code before
@@ -511,7 +513,7 @@ function testset_forloop(mod::String, isfinal::Bool, rx::Regex, desc::Union{Stri
                 # it's 1000 times faster to copy from tmprng rather than calling Random.seed!
                 copy!(RNG, tmprng)
             end
-            ts = ReTestSet($mod, $(esc(desc)); verbose=$(options.transient_verbose))
+            ts = ReTestSet($mod, $desc; verbose=$(options.transient_verbose))
             if nworkers() == 1 && get_testset_depth() == 0 && $(chan.preview) !== nothing
                 put!($(chan.preview), ts.description)
             end
