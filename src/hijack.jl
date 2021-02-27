@@ -1,5 +1,5 @@
 """
-    ReTest.hijack(source, [modname]; parentmodule::Module=Main)
+    ReTest.hijack(source, [modname]; parentmodule::Module=Main, lazy=false)
 
 Given test files defined in `source` using the `Test` package, try to load
 them by replacing `Test` with `ReTest`, wrapping them in a module `modname`
@@ -23,10 +23,18 @@ The current procedure is as follows:
 When `source` is `Base` or a standard library module, a slightly different
 mechanism is used to find test files (which can contain e.g. non-toplevel
 `include`s), i.e. `ReTest.hijack_base` is used underneath.
+
+The `lazy` keyword specifies whether some toplevel expressions should be skipped:
+* `false` means nothing is skipped;
+* `true` means toplevel `@test*` macros are removed, as well as those defined
+  within these toplevel (but possible nested) blocks: `begin`, `let`, `for`, `if`;
+* `:brutal` means toplevel `@test*` macros are removed, as well as toplevel
+  `begin`, `let`, `for` or `if` blocks.
 """
 function hijack end
 
-function hijack(path::AbstractString, modname=nothing; parentmodule::Module=Main)
+function hijack(path::AbstractString, modname=nothing; parentmodule::Module=Main,
+                                                       lazy=false)
     if modname === nothing
         modname = :TestMod
         i = 1
@@ -37,14 +45,16 @@ function hijack(path::AbstractString, modname=nothing; parentmodule::Module=Main
     end
     modname = Symbol(modname)
 
+    substitue!(x) = substitue_retest!(x, lazy)
     newmod = @eval parentmodule module $modname
                                     using ReTest # for files which don't have `using Test`
-                                    include($substitue_retest!, $path)
+                                    include($substitue!, $path)
                                 end
     newmod
 end
 
-function hijack(packagemod::Module, modname=nothing; parentmodule::Module=Main)
+function hijack(packagemod::Module, modname=nothing; parentmodule::Module=Main,
+                                                     lazy=false)
     packagepath = pathof(packagemod)
     packagepath === nothing && packagemod !== Base &&
         throw(ArgumentError("$packagemod is not a package"))
@@ -54,16 +64,18 @@ function hijack(packagemod::Module, modname=nothing; parentmodule::Module=Main)
     end
 
     if packagemod === Base
-        hijack_base(ChooseTests.BASETESTS, base=modname)
+        hijack_base(ChooseTests.BASETESTS, base=modname, lazy=lazy)
     elseif startswith(packagepath, Sys.STDLIB) # packagemod is an STDLIB
-        hijack_base(string(packagemod), modname, parentmodule=parentmodule)
+        hijack_base(string(packagemod), modname, parentmodule=parentmodule, lazy=lazy)
     else
         path = joinpath(dirname(dirname(packagepath)), "test", "runtests.jl")
-        hijack(path, modname, parentmodule=parentmodule)
+        hijack(path, modname, parentmodule=parentmodule, lazy=lazy)
     end
 end
 
-function substitue_retest!(ex)
+function substitue_retest!(ex, lazy)
+    substitue!(x) = substitue_retest!(x, lazy)
+
     if Meta.isexpr(ex, :using)
         for used in ex.args
             if Meta.isexpr(used, :., 1) && used.args[1] == :ReTest
@@ -76,17 +88,48 @@ function substitue_retest!(ex)
         if length(ex.args) > 2
             throw(ArgumentError("cannot handle include with two arguments"))
         else
-            insert!(ex.args, 2, substitue_retest!)
+            insert!(ex.args, 2, substitue!)
         end
     elseif Meta.isexpr(ex, :module)
         @assert Meta.isexpr(ex.args[3], :block)
-        substitue_retest!.(ex.args[3].args)
+        substitue!.(ex.args[3].args)
+    else
+        filter_toplevel!(ex, lazy)
+    end
+    ex
+end
+
+function empty_expr!(ex)
+    ex.head = :block
+    empty!(ex.args)
+    ex
+end
+
+const TEST_MACROS = Symbol.(["@test", "@test_throws", "@test_broken", "@test_skip",
+                             "@test_warn", "@test_nowarn", "@test_logs",
+                             "@test_deprecated", "@inferred"])
+
+function filter_toplevel!(ex, lazy)
+    lazy != false && ex isa Expr || return ex
+
+    if ex.head == :macrocall &&
+        ex.args[1] ∈ TEST_MACROS
+        empty_expr!(ex)
+    elseif ex.head ∈ (:block, :let, :for, :if)
+        if lazy == :brutal
+            empty_expr!(ex)
+        else
+            beg = ex.head == :block ? 1 : 2
+            for x in ex.args[beg:end]
+                filter_toplevel!(x, lazy)
+            end
+        end
     end
     ex
 end
 
 """
-    hijack_base(tests, [modname]; parentmodule::Module=Main)
+    hijack_base(tests, [modname]; parentmodule::Module=Main, lazy=false)
 
 Similar to `ReTest.hijack`, but specifically for `Base` and stdlib tests.
 `tests` speficies which test files should be loaded, in the exact same format
@@ -106,9 +149,13 @@ in which testsets are defined; passing `modname` is allowed only when all
 the loaded tests would otherwise be defined in the same second top-most
 module, the one under `BaseTests` or `StdLibTests` (e.g. `somedir` if any,
 or `sometest` otherwise, or `Lib_`). This unique module is then named `modname`,
-and not enclosed withing `BaseTests` or `StdLibTests`.
+and not enclosed within `BaseTests` or `StdLibTests`.
+
+The `lazy` keyword has the same meaning as in [`ReTest.hijack`](@ref).
+Depending on the value of `lazy`, some test files are skipped when they
+are known to fail.
 """
-function hijack_base(tests, modname=nothing; parentmodule::Module=Main,
+function hijack_base(tests, modname=nothing; parentmodule::Module=Main, lazy=false,
                      base=:BaseTests, stdlib=:StdLibTests)
     if isa(tests, AbstractString)
         tests = split(tests)
@@ -127,8 +174,12 @@ function hijack_base(tests, modname=nothing; parentmodule::Module=Main,
         @eval parentmodule module $modname end
     end
 
+    substitue!(ex) = substitue_retest!(ex, lazy)
+
     for (test, components) in zip(tests, allcomponents)
-        if test ∈ ChooseTests.BLACKLIST
+        if test ∈ ChooseTests.BLACKLIST ||
+            lazy == true && test ∈ ChooseTests.BLACKLIST_SOFT ||
+            lazy == :brutal && test ∈ ChooseTests.BLACKLIST_BRUTAL
             @warn "skipping \"$test\" test (incompatible with ReTest)"
             continue
         end
@@ -166,7 +217,7 @@ function hijack_base(tests, modname=nothing; parentmodule::Module=Main,
 
         @eval mod begin
                       using ReTest, Random
-                      include($substitue_retest!, $(ChooseTests.test_path(test)))
+                      include($substitue!, $(ChooseTests.test_path(test)))
                   end
     end
 end
@@ -238,6 +289,11 @@ const BLACKLIST = [
     # failing at runtime (in retest)
     "precompile", # no toplevel testset, just one with interpolated subject
 ]
+
+const BLACKLIST_BRUTAL = split("core worlds bitarray file reflection errorshow asyncmap
+                                opaque_closure") # llvmcall: doesn't work if loaded twice
+
+const BLACKLIST_SOFT = split("core worlds offsetarray spawn file errorshow")
 
 # file names which define a global variable of the same name as the file
 const EPONYM_TESTS = [:worlds, :file]
