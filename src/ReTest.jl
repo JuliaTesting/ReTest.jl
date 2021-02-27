@@ -159,8 +159,13 @@ function resolve!(mod::Module, ts::TestsetExpr, rx::Regex;
         ts.run = true
         if shown
             # set ts.descwidth to a lower bound to reduce misalignment
-            ts.descwidth = 2*depth + mapreduce(textwidth, +,
-                                               filter(x -> x isa String, desc.args))
+            ts.descwidth = 2*depth + mapreduce(+, desc.args) do part
+                                         if part isa String
+                                             textwidth(part)
+                                         else
+                                             4 # give 4 spaces for unknown string part
+                                         end
+                                     end
         end
     end
 

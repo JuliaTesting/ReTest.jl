@@ -481,20 +481,24 @@ end
         @test true
         push!(RUN, 5)
     end
+    @testset "$i" begin # must work even "$i" is made only of Expr (no String parts)
+        @test true
+        push!(RUN, 6)
+    end
 end
 end # InterpolateImpossible
 
 retest(InterpolateImpossible, dry=true)
 retest(InterpolateImpossible)
-@test InterpolateImpossible.RUN == 1:5
+@test InterpolateImpossible.RUN == 1:6
 empty!(InterpolateImpossible.RUN)
 
 retest(InterpolateImpossible, "0")
-@test InterpolateImpossible.RUN == 1:5
+@test InterpolateImpossible.RUN == 1:6
 empty!(InterpolateImpossible.RUN)
 
 retest(InterpolateImpossible, "4") # should have a warning or two
-@test InterpolateImpossible.RUN == 4:5
+@test InterpolateImpossible.RUN == 4:6
 
 
 ### Failing ##################################################################
