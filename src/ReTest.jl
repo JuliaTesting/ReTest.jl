@@ -46,11 +46,18 @@ mutable struct TestsetExpr
     mod::String # enclosing module
     desc::Union{String,Expr}
     options::Options
-    loops::Union{Expr,Nothing}
+    # loops: the original loop expression, if any, but where each `x=...` is
+    # pulled out into a vector
+    loops::Union{Vector{Expr},Nothing}
     parent::Union{TestsetExpr,Nothing}
     children::Vector{TestsetExpr}
     strings::Vector{String}
-    loopvalues::Any
+    # loopvalues & loopiters: when successful in evaluating loop values in resolve!,
+    # we "flatten" the nested for loops into a single loop, with loopvalues
+    # containing tuples of values, and loopiters the tuples of variables to which the
+    # values are assigned
+    loopvalues::Union{Nothing,Vector{Any}}
+    loopiters::Union{Nothing,Expr}
     hasbroken::Bool
     hasbrokenrec::Bool # recursive hasbroken, transiently
     run::Bool
@@ -101,8 +108,16 @@ function parse_ts(source, mod, args::Tuple, parent=nothing)
     body = args[end]
     isa(body, Expr) || error("Expected begin/end block or for loop as argument to @testset")
     if body.head === :for
-        loops = body.args[1]
         tsbody = body.args[2]
+        loops = body.args[1]
+        if loops.head == :(=)
+            loops = Expr[loops]
+        else
+            @assert loops.head == :block
+            @assert all(arg -> Meta.isexpr(arg, :(=)), loops.args)
+            loops = loops.args
+        end
+
     elseif body.head === :block
         loops = nothing
         tsbody = body
@@ -122,6 +137,7 @@ function resolve!(mod::Module, ts::TestsetExpr, rx::Regex;
     desc = ts.desc
     ts.run = force || isempty(rx.pattern)
     ts.loopvalues = nothing # unnecessary ?
+    ts.loopiters = nothing
 
     parentstrs = ts.parent === nothing ? [""] : ts.parent.strings
     ts.descwidth = 0
@@ -144,16 +160,31 @@ function resolve!(mod::Module, ts::TestsetExpr, rx::Regex;
         loops = ts.loops
         @assert loops !== nothing
         xs = ()
+        loopiters = Expr(:tuple, (arg.args[1] for arg in loops)...)
+
         try
-            xs = Core.eval(mod, loops.args[2])
-            if !(xs isa Union{Array,Tuple}) # being conservative on target type
-                # this catches e.g. the case where xs is a generator, then collect
-                # fails because of a world-age problem (the function in xs is too "new")
-                xs = collect(xs)
+            # we need to evaluate roughly the following:
+            # xsgen = Expr(:comprehension, Expr(:generator, loopiters, loops...))
+            # but a comprehension expression returns an array, i.e. loop variables
+            # can't depend on previous ones; the correct way is therefore to
+            # construct nested generators flattened with a :flatten Expr, or to
+            # simply construct directly a for-loop as below
+            xssym = gensym() # to not risk to shadow a global variable on which
+                             # the iteration expression depends
+            xsgen = quote
+                let $xssym = []
+                    $(Expr(:for, Expr(:block, loops...),
+                           Expr(:call, Expr(:., :Base, QuoteNode(:push!)),
+                                xssym, loopiters)))
+                    $xssym
+                end
             end
+            xs = Core.eval(mod, xsgen)
+            @assert xs isa Vector
             ts.loopvalues = xs
+            ts.loopiters = loopiters
         catch
-            xs = () # xs might have been assigned before the collect call
+            @assert xs == ()
             if !ts.run
                 @warn "could not evaluate testset-for iterator, default to inclusion"
             end
@@ -165,7 +196,7 @@ function resolve!(mod::Module, ts::TestsetExpr, rx::Regex;
             end
         end
         for x in xs # empty loop if eval above threw
-            Core.eval(mod, Expr(:(=), loops.args[1], x))
+            Core.eval(mod, Expr(:(=), loopiters, x))
             descx = Core.eval(mod, desc)::String
             if shown
                 ts.descwidth = max(ts.descwidth, textwidth(descx) + 2*depth)
@@ -220,9 +251,15 @@ function make_ts(ts::TestsetExpr, rx::Regex, stats, chan)
             @testset $(ts.mod) $(isfinal(ts)) $rx $(ts.desc) $(ts.options) $stats $chan $body
         end
     else
-        loopvals = something(ts.loopvalues, ts.loops.args[2])
+        c = count(x -> x === nothing, (ts.loopvalues, ts.loopiters))
+        @assert c == 0 || c == 2
+        if c == 0
+            loops = [Expr(:(=), ts.loopiters, ts.loopvalues)]
+        else
+            loops = ts.loops
+        end
         quote
-            @testset $(ts.mod) $(isfinal(ts)) $rx $(ts.desc) $(ts.options) $stats $chan $(ts.loops.args[1]) $loopvals $body
+            @testset $(ts.mod) $(isfinal(ts)) $rx $(ts.desc) $(ts.options) $stats $chan $loops $body
         end
     end
 end
@@ -837,14 +874,14 @@ function dryrun(mod::Module, ts::TestsetExpr, rx::Regex, align::Int=0, parentsub
             dryrun(mod, tsc, rx, align + 2, subject)
         end
     else
-        loopvals = ts.loopvalues
-        if loopvals === nothing
+        loopvalues = ts.loopvalues
+        if loopvalues === nothing
             println(' '^align, desc)
             @warn "could not evaluate testset-for iterator, default to inclusion"
             return
         end
-        for x in loopvals
-            Core.eval(mod, Expr(:(=), ts.loops.args[1], x))
+        for x in loopvalues
+            Core.eval(mod, Expr(:(=), ts.loopiters, x))
             descx = Core.eval(mod, desc)::String
             # avoid repeating ourselves, transform this iteration into a "begin/end" testset
             beginend = TestsetExpr(ts.source, ts.mod, descx, ts.options, nothing,

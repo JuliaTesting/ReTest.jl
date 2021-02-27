@@ -79,9 +79,6 @@ should be fixable:
   the testset subject usually can't be known statically and the testset can't
   be filtered out with a `Regex`).
 
-* "testsets-for" currently accept only "non-cartesian" looping (e.g. `for i=I,
-  j=J` is not supported, PRs welcome!)
-
 * Testsets can not be "custom testsets" (cf. `Test` documentation).
 
 * Nested testsets can't be "qualified" (i.e. written as `ReTest.@testset`).

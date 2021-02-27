@@ -431,9 +431,9 @@ macro testset(mod::String, isfinal::Bool, rx::Regex, desc::String, options,
 end
 
 macro testset(mod::String, isfinal::Bool, rx::Regex, desc::Union{String,Expr}, options,
-              stats::Bool, chan, loopiter, loopvals, body)
+              stats::Bool, chan, loops, body)
     Testset.testset_forloop(mod, isfinal, rx, desc, options,
-                            stats, chan, loopiter, loopvals, body, __source__)
+                            stats, chan, loops, body, __source__)
 end
 
 """
@@ -495,12 +495,8 @@ end
 Generate the code for a `@testset` with a `for` loop argument
 """
 function testset_forloop(mod::String, isfinal::Bool, rx::Regex, desc::Union{String,Expr},
-                         options, stats, chan, loopiter, loopvals, tests, source)
+                         options, stats, chan, loops, tests, source)
 
-    # Pull out the loop variables. We might need them for generating the
-    # description and we'll definitely need them for generating the
-    # comprehension expression at the end
-    loopvars = Expr[Expr(:(=), loopiter, loopvals)]
     blk = quote
         local current_str
         if $isfinal
@@ -543,7 +539,7 @@ function testset_forloop(mod::String, isfinal::Bool, rx::Regex, desc::Union{Stri
         local tmprng = copy(RNG)
         try
             let
-                $(Expr(:for, Expr(:block, [esc(v) for v in loopvars]...), blk))
+                $(Expr(:for, Expr(:block, [esc(v) for v in loops]...), blk))
             end
         finally
             # Handle `return` in test body

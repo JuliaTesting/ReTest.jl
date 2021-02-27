@@ -317,9 +317,13 @@ RUN = []
 end
 end
 
-@test_logs (:warn, r"could not evaluate testset-for iterator.*") retest(Loops2, r"asd")
-@test Loops2.RUN == [1, 0, 2, 0]
-empty!(Loops2.RUN)
+# the test below has been solved
+# TODO: check whether another run could lead to the same result, i.e. RUN == [1, 0, 2, 0] ?
+# @test_logs (:warn, r"could not evaluate testset-for iterator.*") retest(Loops2, r"asd")
+# @test Loops2.RUN == [1, 0, 2, 0]
+# empty!(Loops2.RUN)
+@test isempty(Loops2.RUN)
+
 retest(Loops2)
 @test Loops2.RUN == [1, 0, -1, 2, 0, -1]
 
@@ -350,6 +354,24 @@ retest(Loops3, r"asd")
 empty!(Loops3.RUN)
 retest(Loops3)
 @test Loops3.RUN == [1, 0, -1, 2, 0, -1]
+
+module MultiLoops
+using ReTest
+
+RUN = []
+C1, C2 = 1:2 # check that iteration has access to these values
+
+@testset "multiloops $x $y $z" for (x, y) in zip(1:C2, 1:2), z in C1:x
+    push!(RUN, (x, z))
+    @test true
+end
+end
+
+retest(MultiLoops)
+@test MultiLoops.RUN == [(1, 1), (2, 1), (2, 2)]
+empty!(MultiLoops.RUN)
+retest(MultiLoops, "1 1")
+@test MultiLoops.RUN == [(1, 1)]
 
 ### Failing ##################################################################
 
