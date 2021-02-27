@@ -415,6 +415,47 @@ retest(LoopCollision, dry=true)
 retest(LoopCollision, dry=false)
 @test LoopCollision.RUN == [sin, cos, (sin, 1), (cos, 1)]
 
+### interpolated description #################################################
+
+module Interpolate
+using ReTest
+
+RUN = []
+X = 0
+
+@testset "a $X" verbose=true begin
+    @testset "b $X" begin
+        @test true
+        push!(RUN, 1)
+    end
+    @testset "c $X $i" for i=2:3
+        @test true
+        push!(RUN, i)
+    end
+end
+
+@testset "d $X $i" verbose=true for i=4:4
+    @test true
+    push!(RUN, i)
+    @testset "e $X" begin
+        @test true
+        push!(RUN, 5)
+    end
+end
+end # Interpolate
+
+retest(Interpolate, dry=true)
+retest(Interpolate)
+@test Interpolate.RUN == 1:5
+empty!(Interpolate.RUN)
+
+retest(Interpolate, "0")
+@test Interpolate.RUN == 1:5
+empty!(Interpolate.RUN)
+
+retest(Interpolate, "4")
+@test Interpolate.RUN == 4:5
+
 
 ### Failing ##################################################################
 
