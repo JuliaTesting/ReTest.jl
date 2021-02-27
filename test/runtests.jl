@@ -373,6 +373,22 @@ empty!(MultiLoops.RUN)
 retest(MultiLoops, "1 1")
 @test MultiLoops.RUN == [(1, 1)]
 
+module Anonym
+using ReTest
+
+RUN = []
+
+@testset for x=1:2
+    @testset begin
+        @test true
+        push!(RUN, x)
+    end
+end
+end
+
+retest(Anonym)
+@test Anonym.RUN == [1, 2]
+
 ### Failing ##################################################################
 
 module Failing
