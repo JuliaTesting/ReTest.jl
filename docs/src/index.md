@@ -226,8 +226,9 @@ uses `Test`, without modifications:
   `retest`.
 - if you have a test file `"testfile.jl"`, try `ReTest.hijack("testfile.jl")`
   (this will define a fresh module like above).
-- `Base` and standard libraries tests can be loaded via the [`ReTest.hijack_base`](@ref)
-  function.
+- `Base` and standard library modules can also be passed to `ReTest.hijack`
+  (corresponding tests are loaded via the lower level [`ReTest.hijack_base`](@ref)
+  function).
 
 ```@docs
 ReTest.hijack

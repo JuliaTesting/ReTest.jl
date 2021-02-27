@@ -20,9 +20,9 @@ The current procedure is as follows:
    the `include` statement is at the toplevel, and on the content of
    all modules.
 
-For standard libraries, a slightly different mechanism is used to find test
-files (which can contain e.g. non-toplevel `include`s), i.e.
-`ReTest.hijack_base` is used underneath.
+When `source` is `Base` or a standard library module, a slightly different
+mechanism is used to find test files (which can contain e.g. non-toplevel
+`include`s), i.e. `ReTest.hijack_base` is used underneath.
 """
 function hijack end
 
@@ -46,14 +46,16 @@ end
 
 function hijack(packagemod::Module, modname=nothing; parentmodule::Module=Main)
     packagepath = pathof(packagemod)
-    packagepath === nothing &&
+    packagepath === nothing && packagemod !== Base &&
         throw(ArgumentError("$packagemod is not a package"))
 
     if modname === nothing
         modname = Symbol(packagemod, :Tests)
     end
 
-    if startswith(packagepath, Sys.STDLIB) # packagemod is an STDLIB
+    if packagemod === Base
+        hijack_base(ChooseTests.BASETESTS, base=modname)
+    elseif startswith(packagepath, Sys.STDLIB) # packagemod is an STDLIB
         hijack_base(string(packagemod), modname, parentmodule=parentmodule)
     else
         path = joinpath(dirname(dirname(packagepath)), "test", "runtests.jl")
@@ -83,10 +85,6 @@ function substitue_retest!(ex)
     ex
 end
 
-const BASETESTS_BLACKLIST = ["backtrace", "misc", "threads", "cmdlineargs","boundscheck",
-                             "SharedArrays", "Test"]
-# SharedArrays: problem with workers (should be sortable out)
-
 """
     hijack_base(tests, [modname]; parentmodule::Module=Main)
 
@@ -110,7 +108,8 @@ module, the one under `BaseTests` or `StdLibTests` (e.g. `somedir` if any,
 or `sometest` otherwise, or `Lib_`). This unique module is then named `modname`,
 and not enclosed withing `BaseTests` or `StdLibTests`.
 """
-function hijack_base(tests, modname=nothing; parentmodule::Module=Main)
+function hijack_base(tests, modname=nothing; parentmodule::Module=Main,
+                     base=:BaseTests, stdlib=:StdLibTests)
     if isa(tests, AbstractString)
         tests = split(tests)
     end
@@ -129,7 +128,7 @@ function hijack_base(tests, modname=nothing; parentmodule::Module=Main)
     end
 
     for (test, components) in zip(tests, allcomponents)
-        if test ∈ BASETESTS_BLACKLIST
+        if test ∈ ChooseTests.BLACKLIST
             @warn "skipping \"$test\" test (incompatible with ReTest)"
             continue
         end
@@ -141,10 +140,10 @@ function hijack_base(tests, modname=nothing; parentmodule::Module=Main)
             if string(components[1]) in ChooseTests.STDLIBS
                 # it's an stdlib Lib, make toplevel modules StdLibTests/Lib_
                 components[1] = Symbol(components[1], :_)
-                pushfirst!(components, :StdLibTests)
+                pushfirst!(components, Symbol(stdlib))
             else
                 # it's a Base test, use BaseTests as toplevel module
-                pushfirst!(components, :BaseTests)
+                pushfirst!(components, Symbol(base))
             end
         else
             components[1] = modname
@@ -152,7 +151,7 @@ function hijack_base(tests, modname=nothing; parentmodule::Module=Main)
 
         mod = parentmodule
         for (ith, comp) in enumerate(components)
-            if isdefined(Base, comp)
+            if isdefined(Base, comp) || comp ∈ ChooseTests.EPONYM_TESTS
                 # e.g. `tuple`, collision betwen the tuple function and test/tuple.jl
                 comp = Symbol(comp, :_)
             end
@@ -202,5 +201,45 @@ function test_path(test)
         return joinpath(BASETESTPATH, "$test.jl")
     end
 end
+
+const TESTNAMES = [
+        "subarray", "core", "compiler", "worlds",
+        "keywordargs", "numbers", "subtype",
+        "char", "strings", "triplequote", "unicode", "intrinsics",
+        "dict", "hashing", "iobuffer", "staged", "offsetarray",
+        "arrayops", "tuple", "reduce", "reducedim", "abstractarray",
+        "intfuncs", "simdloop", "vecelement", "rational",
+        "bitarray", "copy", "math", "fastmath", "functional", "iterators",
+        "operators", "ordering", "path", "ccall", "parse", "loading", "gmp",
+        "sorting", "spawn", "backtrace", "exceptions",
+        "file", "read", "version", "namedtuple",
+        "mpfr", "broadcast", "complex",
+        "floatapprox", "stdlib", "reflection", "regex", "float16",
+        "combinatorics", "sysinfo", "env", "rounding", "ranges", "mod2pi",
+        "euler", "show", "client",
+        "errorshow", "sets", "goto", "llvmcall", "llvmcall2", "ryu",
+        "some", "meta", "stacktraces", "docs",
+        "misc", "threads", "stress", "binaryplatforms", "atexit",
+        "enums", "cmdlineargs", "int", "interpreter",
+        "checked", "bitset", "floatfuncs", "precompile",
+        "boundscheck", "error", "ambiguous", "cartesian", "osutils",
+        "channels", "iostream", "secretbuffer", "specificity",
+        "reinterpretarray", "syntax", "corelogging", "missing", "asyncmap",
+        "smallarrayshrink", "opaque_closure"
+]
+
+const BASETESTS = filter(x -> x != "stdlib", TESTNAMES)
+
+const BLACKLIST = [
+    # failing at load time (in hijack_base)
+    "backtrace", "misc", "threads", "cmdlineargs","boundscheck",
+    "SharedArrays", # problem with workers (should be sortable out)
+    "Test",
+    # failing at runtime (in retest)
+    "precompile", # no toplevel testset, just one with interpolated subject
+]
+
+# file names which define a global variable of the same name as the file
+const EPONYM_TESTS = [:worlds, :file]
 
 end # ChooseTests
