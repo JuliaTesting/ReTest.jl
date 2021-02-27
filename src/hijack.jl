@@ -19,6 +19,10 @@ The current procedure is as follows:
 2. apply recursively these two rules for all `include`d files, provided
    the `include` statement is at the toplevel, and on the content of
    all modules.
+
+For standard libraries, a slightly different mechanism is used to find test
+files (which can contain e.g. non-toplevel `include`s), i.e.
+`ReTest.hijack_base` is used underneath.
 """
 function hijack end
 
@@ -41,11 +45,20 @@ function hijack(path::AbstractString, modname=nothing; parentmodule::Module=Main
 end
 
 function hijack(packagemod::Module, modname=nothing; parentmodule::Module=Main)
-    path = joinpath(dirname(dirname(pathof(packagemod))), "test", "runtests.jl")
+    packagepath = pathof(packagemod)
+    packagepath === nothing &&
+        throw(ArgumentError("$packagemod is not a package"))
+
     if modname === nothing
         modname = Symbol(packagemod, :Tests)
     end
-    hijack(path, modname, parentmodule=parentmodule)
+
+    if startswith(packagepath, Sys.STDLIB) # packagemod is an STDLIB
+        hijack_base(string(packagemod), modname, parentmodule=parentmodule)
+    else
+        path = joinpath(dirname(dirname(packagepath)), "test", "runtests.jl")
+        hijack(path, modname, parentmodule=parentmodule)
+    end
 end
 
 function substitue_retest!(ex)
@@ -75,7 +88,7 @@ const BASETESTS_BLACKLIST = ["backtrace", "misc", "threads", "cmdlineargs","boun
 # SharedArrays: problem with workers (should be sortable out)
 
 """
-    hijack_base(tests; parentmodule::Module=Main)
+    hijack_base(tests, [modname]; parentmodule::Module=Main)
 
 Similar to `ReTest.hijack`, but specifically for `Base` and stdlib tests.
 `tests` speficies which test files should be loaded, in the exact same format
@@ -89,15 +102,33 @@ then `sometest_` is used instead).
 Tests corresponding to a standard library `Lib` are loaded in the
 `StdLibTests.Lib_` module. When there are "testgroups", submodules
 are created accordingly.
+
+If `modname` is specified (experimental), this will be the name of the module
+in which testsets are defined; passing `modname` is allowed only when all
+the loaded tests would otherwise be defined in the same second top-most
+module, the one under `BaseTests` or `StdLibTests` (e.g. `somedir` if any,
+or `sometest` otherwise, or `Lib_`). This unique module is then named `modname`,
+and not enclosed withing `BaseTests` or `StdLibTests`.
 """
-function hijack_base(tests; parentmodule::Module=Main)
+function hijack_base(tests, modname=nothing; parentmodule::Module=Main)
     if isa(tests, AbstractString)
         tests = split(tests)
     end
 
     tests, = ChooseTests.call_choosetests(tests) # TODO: handle other return values?
+    allcomponents = (components -> Symbol.(components)).(split.(tests, '/'))
 
-    for test in tests
+    if modname !== nothing
+        modname = Symbol(modname)
+        allequal(components[1] for components in allcomponents) ||
+            throw(ArgumentError("can't specify `modname` for multiple test roots"))
+        # if modname was passed, it seems nicer to have it fresh, otherwise it might
+        # contain left-overs from previous incantations (and potentially lead to
+        # a series of "WARNING: replacing module submodule_i")
+        @eval parentmodule module $modname end
+    end
+
+    for (test, components) in zip(tests, allcomponents)
         if test ∈ BASETESTS_BLACKLIST
             @warn "skipping \"$test\" test (incompatible with ReTest)"
             continue
@@ -106,14 +137,17 @@ function hijack_base(tests; parentmodule::Module=Main)
             @eval Main using Distributed
         end
 
-        components = Symbol.(split(test, '/'))
-        if string(components[1]) in ChooseTests.STDLIBS
-            # it's an stdlib Lib, make toplevel modules StdLibTests/Lib_
-            components[1] = Symbol(components[1], :_)
-            pushfirst!(components, :StdLibTests)
+        if modname === nothing
+            if string(components[1]) in ChooseTests.STDLIBS
+                # it's an stdlib Lib, make toplevel modules StdLibTests/Lib_
+                components[1] = Symbol(components[1], :_)
+                pushfirst!(components, :StdLibTests)
+            else
+                # it's a Base test, use BaseTests as toplevel module
+                pushfirst!(components, :BaseTests)
+            end
         else
-            # it's a Base test, use BaseTests as toplevel module
-            pushfirst!(components, :BaseTests)
+            components[1] = modname
         end
 
         mod = parentmodule
@@ -122,8 +156,8 @@ function hijack_base(tests; parentmodule::Module=Main)
                 # e.g. `tuple`, collision betwen the tuple function and test/tuple.jl
                 comp = Symbol(comp, :_)
             end
-
-            if isdefined(mod, comp) && ith != length(components)
+            if isdefined(mod, comp) && ith != length(components) ||
+                    modname !== nothing && ith == 1 # module already freshly created
                 mod = getfield(mod, comp)
             else
                 # we always re-eval leaf-modules
