@@ -289,7 +289,7 @@ RUN = []
 end
 end
 
-@test_logs (:warn, r"could not evaluate testset-for iterator.*") retest(Loops1, r"asd")
+@test_logs (:warn, r"could not evaluate testset description.*") retest(Loops1, r"asd")
 @test Loops1.RUN == [1, 0, 2, 0]
 empty!(Loops1.RUN)
 retest(Loops1) # should not log
@@ -455,6 +455,46 @@ empty!(Interpolate.RUN)
 
 retest(Interpolate, "4")
 @test Interpolate.RUN == 4:5
+
+module InterpolateImpossible
+using ReTest
+
+RUN = []
+X = 0
+
+@testset "a $X" verbose=true begin
+    j = 9
+    @testset "b $X $j" begin
+        @test true
+        push!(RUN, 1)
+    end
+    @testset "c $X $j $i" for i=2:3
+        @test true
+        push!(RUN, i)
+    end
+end
+
+@testset "d $X $i" verbose=true for i=4:4
+    @test true
+    push!(RUN, i)
+    @testset "e $X $i" begin
+        @test true
+        push!(RUN, 5)
+    end
+end
+end # InterpolateImpossible
+
+retest(InterpolateImpossible, dry=true)
+retest(InterpolateImpossible)
+@test InterpolateImpossible.RUN == 1:5
+empty!(InterpolateImpossible.RUN)
+
+retest(InterpolateImpossible, "0")
+@test InterpolateImpossible.RUN == 1:5
+empty!(InterpolateImpossible.RUN)
+
+retest(InterpolateImpossible, "4") # should have a warning or two
+@test InterpolateImpossible.RUN == 4:5
 
 
 ### Failing ##################################################################

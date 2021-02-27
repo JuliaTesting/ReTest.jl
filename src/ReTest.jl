@@ -152,21 +152,44 @@ function resolve!(mod::Module, ts::TestsetExpr, rx::Regex;
     ts.descwidth = 0
     ts.options.transient_verbose = shown & ((verbose > 1) | ts.options.verbose)
 
+    function giveup()
+        if !ts.run
+            @warn "could not evaluate testset description, default to inclusion"
+        end
+        ts.run = true
+        if shown
+            # set ts.descwidth to a lower bound to reduce misalignment
+            ts.descwidth = 2*depth + mapreduce(textwidth, +,
+                                               filter(x -> x isa String, desc.args))
+        end
+    end
+
     loops = ts.loops
     if loops === nothing || desc isa String
+        # TODO: maybe, for testset-for and !(desc isa String), still try this branch
+        # in case the the interpolation can be resolved thanks to a global binding
+        # (i.e. the description doesn't depend on loop variables)
+        gaveup = false
         if !(desc isa String)
-            desc = Core.eval(mod, desc)
+            try
+                desc = Core.eval(mod, desc)
+            catch
+                giveup()
+                gaveup = true
+            end
         end
-        if shown
-            ts.descwidth = textwidth(desc) + 2*depth
-        end
-        for str in parentstrs
-            ts.run && break
-            new = str * '/' * desc
-            if occursin(rx, new)
-                ts.run = true
-            else
-                push!(strings, new)
+        if !gaveup
+            if shown
+                ts.descwidth = textwidth(desc) + 2*depth
+            end
+            for str in parentstrs
+                ts.run && break
+                new = str * '/' * desc
+                if occursin(rx, new)
+                    ts.run = true
+                else
+                    push!(strings, new)
+                end
             end
         end
     else
@@ -196,18 +219,14 @@ function resolve!(mod::Module, ts::TestsetExpr, rx::Regex;
             ts.loopiters = loopiters
         catch
             @assert xs == ()
-            if !ts.run
-                @warn "could not evaluate testset-for iterator, default to inclusion"
-            end
-            ts.run = true
-            if shown
-                # set ts.descwidth to a lower bound to reduce misalignment
-                ts.descwidth = 2*depth + mapreduce(textwidth, +,
-                                                   filter(x -> x isa String, desc.args))
-            end
+            giveup()
         end
         for x in xs # empty loop if eval above threw
             descx = eval_desc(mod, ts, x)
+            if descx === nothing
+                giveup()
+                break
+            end
             if shown
                 ts.descwidth = max(ts.descwidth, textwidth(descx) + 2*depth)
             end
@@ -251,11 +270,15 @@ eval_desc(mod, ts, x) =
     if ts.desc isa String
         ts.desc
     else
-        Core.eval(mod, quote
-                  let $(ts.loopiters) = $x
-                      $(ts.desc)
-                  end
-                  end)::String
+        try
+            Core.eval(mod, quote
+                      let $(ts.loopiters) = $x
+                          $(ts.desc)
+                      end
+                      end)::String
+        catch
+            nothing
+        end
     end
 
 # convert a TestsetExpr into an actually runnable testset
@@ -886,9 +909,15 @@ function dryrun(mod::Module, ts::TestsetExpr, rx::Regex, align::Int=0, parentsub
     ts.run || return
     desc = ts.desc
 
+    giveup() = println(' '^align, desc)
+
     if ts.loops === nothing || desc isa String
         if !(desc isa String)
-            desc = Core.eval(mod, desc)
+            try
+                desc = Core.eval(mod, desc)
+            catch
+                return giveup()
+            end
         end
         subject = parentsubj * '/' * desc
         if isfinal(ts)
@@ -900,13 +929,10 @@ function dryrun(mod::Module, ts::TestsetExpr, rx::Regex, align::Int=0, parentsub
         end
     else
         loopvalues = ts.loopvalues
-        if loopvalues === nothing
-            println(' '^align, desc)
-            @warn "could not evaluate testset-for iterator, default to inclusion"
-            return
-        end
+        loopvalues === nothing && return giveup()
         for x in loopvalues
             descx = eval_desc(mod, ts, x)
+            descx === nothing && return giveup()
             # avoid repeating ourselves, transform this iteration into a "begin/end" testset
             beginend = TestsetExpr(ts.source, ts.mod, descx, ts.options, nothing,
                                    ts.parent, ts.children)
