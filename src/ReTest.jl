@@ -80,6 +80,13 @@ function replace_ts(source, mod, x::Expr, parent)
         ts, false # hasbroken counts only "proper" @test_broken, not recursive ones
     elseif x.head === :macrocall && x.args[1] === Symbol("@test_broken")
         x, true
+    elseif x.head == :call && x.args[1] == :include
+        path = x.args[end]
+        sourcepath = dirname(string(source.file))
+        x.args[end] = path isa AbstractString ?
+            joinpath(sourcepath, path) :
+            :(joinpath($sourcepath, $path))
+        x, false
     else
         body_br = map(z -> replace_ts(source, mod, z, parent), x.args)
         Expr(x.head, first.(body_br)...), any(last.(body_br))
