@@ -146,9 +146,27 @@ function parse_ts(source, mod, args::Tuple, parent=nothing)
     ts, false # hasbroken counts only "proper" @test_broken, not recursive ones
 end
 
+
+# this function does 3 things by going recursively through nested testsets:
+# - update ts.hasbrokenrec to know whether we print the "broken" column
+# - compute ts.descwidth, to know the overall alignment of the first vertical bar
+#   (only needed when verbose is large enough)
+# - the most important: sorting out which testsets must be run
+#
+# Concerning the last point, we make the following compromise: as it's probably
+# rare that a Regex matches a given testset but not its children
+# (as in r"a$" for the subjects "/a" and "/a/b"), and in order to reduce the
+# computational load of resolve!, once a testset is found to have to run,
+# its children are automatically assumed to have to run; the correct filtering
+# will then happen only for final testsets. The drawback is a risk for
+# more compilation than necessary, and wasted runtime while executing
+# children testsets.
+# TODO: implement the alternative to make a real comparison
+
 function resolve!(mod::Module, ts::TestsetExpr, rx::Regex;
                   force::Bool=false, shown::Bool=true, depth::Int=0,
                   verbose::Int)
+
     strings = empty!(ts.strings)
     desc = ts.desc
     ts.run = force || isempty(rx.pattern)
@@ -158,6 +176,9 @@ function resolve!(mod::Module, ts::TestsetExpr, rx::Regex;
     parentstrs = ts.parent === nothing ? [""] : ts.parent.strings
     ts.descwidth = 0
     ts.options.transient_verbose = shown & ((verbose > 1) | ts.options.verbose)
+
+    # TODO: probably no need to eval the descriptions when they won't be shown
+    # and ts.run == true
 
     function giveup()
         if !ts.run
@@ -204,7 +225,7 @@ function resolve!(mod::Module, ts::TestsetExpr, rx::Regex;
                 end
             end
         end
-    else
+    else # we have a testset-for with description which needs interpolation
         xs = ()
         loopiters = Expr(:tuple, (arg.args[1] for arg in loops)...)
 
@@ -386,10 +407,13 @@ For example:
     end
 end
 ```
+
 A testset is guaranteed to run only when its subject matches `pattern`.
 Moreover if a testset is run, its enclosing testset, if any, also has to run
 (although not necessarily exhaustively, i.e. other nested testsets
-might be filtered out).
+might be filtered out). Moreover, even if a testset matches (e.g. "/a" above
+with `pattern == r"a\$"`), its nested testsets might be filtered out if they
+don't also match (e.g. "a/b" doesn't match `pattern`).
 
 If the passed `pattern` is a string, then it is wrapped in a `Regex` with the
 "case-insensitive" flag, and must match literally the subjects.
