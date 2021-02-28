@@ -941,39 +941,73 @@ end
 
 isindented(verbose, overall, many) = (verbose > 0) & (overall | !many)
 
-function dryrun(mod::Module, ts::TestsetExpr, rx::Regex, align::Int=0, parentsubj="", )
+function dryrun(mod::Module, ts::TestsetExpr, rx::Regex, align::Int=0, parentsubj=""
+                ; evaldesc=true, repeated=nothing)
     ts.run || return
     desc = ts.desc
 
-    giveup() = println(' '^align, desc)
-
-    if ts.loops === nothing || desc isa String
-        if !(desc isa String)
+    if ts.loops === nothing
+        if evaldesc && !(desc isa String)
             try
                 desc = Core.eval(mod, desc)
             catch
-                return giveup()
             end
         end
-        subject = parentsubj * '/' * desc
-        if isfinal(ts)
-            occursin(rx, subject) || return
+
+        subject = nothing
+        if parentsubj isa String && desc isa String
+            subject = parentsubj * '/' * desc
+            if isfinal(ts)
+                occursin(rx, subject) || return
+            end
         end
-        println(' '^align, desc)
+        print(' '^align, desc)
+        if repeated !== nothing
+            printstyled(" (repeated",
+                        repeated == -1 ? ")" : " $repeated times)", '\n',
+                        color=:light_black)
+        else
+            println()
+        end
         for tsc in ts.children
             dryrun(mod, tsc, rx, align + 2, subject)
         end
     else
-        loopvalues = ts.loopvalues
-        loopvalues === nothing && return giveup()
-        for x in loopvalues
-            descx = eval_desc(mod, ts, x)
-            descx === nothing && return giveup()
+        function dryrun_beginend(descx, repeated=nothing)
             # avoid repeating ourselves, transform this iteration into a "begin/end" testset
             beginend = TestsetExpr(ts.source, ts.mod, descx, ts.options, nothing,
                                    ts.parent, ts.children)
             beginend.run = true
-            dryrun(mod, beginend, rx, align, parentsubj)
+            dryrun(mod, beginend, rx, align, parentsubj; evaldesc=false, repeated=repeated)
+        end
+
+        loopvalues = ts.loopvalues
+        if loopvalues === nothing
+            # ts.desc is probably a String (cf. resolve!); if so, don't print repeated
+            # identitical lines (caveat: if subjects of children would change randomly)
+            # but still try simply to evaluate the length of the iterator
+            repeated = -1
+            if ts.desc isa String
+                local iterlen
+                try
+                    iterlen = 1
+                    for loop in ts.loops
+                        iterlen *= Core.eval(mod, :(length($(loop.args[2]))))
+                    end
+                    repeated = iterlen
+                catch
+                end
+            end
+            dryrun_beginend(ts.desc, repeated)
+        else
+            for (i, x) in enumerate(loopvalues)
+                descx = eval_desc(mod, ts, x)
+                if descx === nothing
+                    @assert i == 1
+                    return dryrun_beginend(ts.desc, length(loopvalues))
+                end
+                dryrun_beginend(descx === nothing ? ts.desc : descx)
+            end
         end
     end
 end

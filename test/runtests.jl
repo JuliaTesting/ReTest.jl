@@ -612,6 +612,36 @@ for dry=(true, false),
     retest(mod..., regex; shuffle=true, verbose=verbose, stats=stats, dry=dry)
 end
 
+### dry-run
+
+module DryRun
+using ReTest
+
+X = 'a'
+
+@testset "a" for i=1:2
+    @testset "b" begin end
+end
+@testset "a$X" for i=1:2
+    @testset "b" begin end
+end
+@testset "x$i" for i=1:2
+    @testset "b$i" begin
+        @testset "c" begin end
+    end
+    @testset "d$i$j" for j=1:2
+    end
+end
+@testset "y$i" for i=1:1
+    @testset "b" for j=1:i
+        @testset "c" begin end
+    end
+end
+
+end # DryRun
+
+retest(DryRun, dry=true)
+
 ### InlineTest ###############################################################
 
 using Pkg
