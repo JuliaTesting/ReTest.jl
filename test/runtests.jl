@@ -641,6 +641,8 @@ end
 end # DryRun
 
 retest(DryRun, dry=true)
+retest(DryRun, dry=true, verbose=0)
+retest(DryRun, dry=true, verbose=5)
 
 ### InlineTest ###############################################################
 

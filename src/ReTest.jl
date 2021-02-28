@@ -468,7 +468,7 @@ function retest(args::Union{Module,AbstractString,Regex}...;
             showmod = overall || implicitmodules
             showmod &&
                 println(mod)
-            foreach(ts -> dryrun(mod, ts, regex, showmod*2), tests)
+            foreach(ts -> dryrun(mod, ts, regex, showmod*2, verbose=verbose>0), tests)
             continue
         end
 
@@ -939,8 +939,8 @@ end
 isindented(verbose, overall, many) = (verbose > 0) & (overall | !many)
 
 function dryrun(mod::Module, ts::TestsetExpr, rx::Regex, align::Int=0, parentsubj=""
-                ; evaldesc=true, repeated=nothing)
-    ts.run || return
+                ; evaldesc=true, repeated=nothing, verbose)
+    ts.run && verbose || return
     desc = ts.desc
 
     if ts.loops === nothing
@@ -968,7 +968,7 @@ function dryrun(mod::Module, ts::TestsetExpr, rx::Regex, align::Int=0, parentsub
             println()
         end
         for tsc in ts.children
-            dryrun(mod, tsc, rx, align + 2, subject)
+            dryrun(mod, tsc, rx, align + 2, subject, verbose=ts.options.transient_verbose)
         end
     else
         function dryrun_beginend(descx, repeated=nothing)
@@ -976,7 +976,8 @@ function dryrun(mod::Module, ts::TestsetExpr, rx::Regex, align::Int=0, parentsub
             beginend = TestsetExpr(ts.source, ts.mod, descx, ts.options, nothing,
                                    ts.parent, ts.children)
             beginend.run = true
-            dryrun(mod, beginend, rx, align, parentsubj; evaldesc=false, repeated=repeated)
+            dryrun(mod, beginend, rx, align, parentsubj; evaldesc=false,
+                   repeated=repeated, verbose=verbose)
         end
 
         loopvalues = ts.loopvalues
