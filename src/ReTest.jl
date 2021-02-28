@@ -181,9 +181,6 @@ function resolve!(mod::Module, ts::TestsetExpr, rx::Regex;
     # and ts.run == true
 
     function giveup()
-        if !ts.run
-            @warn "could not evaluate testset description, default to inclusion"
-        end
         ts.run = true
         if shown
             # set ts.descwidth to a lower bound to reduce misalignment
@@ -961,7 +958,8 @@ function dryrun(mod::Module, ts::TestsetExpr, rx::Regex, align::Int=0, parentsub
                 occursin(rx, subject) || return
             end
         end
-        print(' '^align, desc)
+        printstyled(' '^align, desc, color = desc isa String ? :normal : Base.warn_color())
+
         if repeated !== nothing
             printstyled(" (repeated",
                         repeated == -1 ? ")" : " $repeated times)", '\n',

@@ -289,9 +289,9 @@ RUN = []
 end
 end
 
-@test_logs (:warn, r"could not evaluate testset description.*") retest(Loops1, r"asd")
-@test Loops1.RUN == [1, 0, 2, 0]
-empty!(Loops1.RUN)
+# @test_logs (:warn, r"could not evaluate testset description.*") retest(Loops1, r"asd")
+# @test Loops1.RUN == [1, 0, 2, 0]
+# empty!(Loops1.RUN)
 retest(Loops1) # should not log
 @test Loops1.RUN == [1, 0, -1, 2, 0, -1]
 
