@@ -92,6 +92,29 @@ should be fixable:
   is the current implemented heuristic to allow `Revise` do its magic.
 
 
+#### Including files from within testsets
+
+TLDR: don't use `include(file)` within testsets when `file` defines
+other testsets.
+
+There is limited support for `include(path)` expressions within testsets: all
+what `ReTest` does is to adjust the `path` according to the location of the
+containing file `parentfile`. This is necessary, because `include` is not run
+immediately when that file is evaluated; when the given testset is triggered
+(via a `retest` call), `include` doesn't have the same "context" as
+`parentfile`, which would lead to `path` being interpreted as non-existing
+(unless `path` is an absolute path). So when parsing testsets, `ReTest`
+prepends the directory name of `parentfile` to `path`.
+
+The important point is that `include` is executed at `retest`-time; if the
+included file defines other `@testset` expressions, this will define new
+testsets in the enclosing module, but these won't be run immediately; upon a
+new `retest()` invocation, these new testsets will be run, but the old one too
+(the one containing `include`), which will redefine included testsets. This is
+brittle, and it's recommended to not include, within testsets, files defining
+other testsets.
+
+
 ## Switching from `Test` to `ReTest`
 
 When used in a package `MyPackage`, the test code can be organized as follows:
