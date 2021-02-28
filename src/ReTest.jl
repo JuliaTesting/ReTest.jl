@@ -466,8 +466,11 @@ function retest(args::Union{Module,AbstractString,Regex}...;
 
         if dry
             showmod = overall || implicitmodules
-            showmod &&
-                println(mod)
+            if showmod
+                imod > 1 && verbose > 0 &&
+                    println()
+                printstyled(mod, '\n', bold=true)
+            end
             foreach(ts -> dryrun(mod, ts, regex, showmod*2, verbose=verbose>0), tests)
             continue
         end

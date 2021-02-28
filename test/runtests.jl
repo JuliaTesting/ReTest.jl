@@ -644,6 +644,15 @@ retest(DryRun, dry=true)
 retest(DryRun, dry=true, verbose=0)
 retest(DryRun, dry=true, verbose=5)
 
+module DryRun2
+using ReTest
+
+@testset "just a dummy module" begin end
+end # DryRun2
+
+retest(DryRun, DryRun2, dry=true, verbose=0)
+retest(DryRun, DryRun2, dry=true, verbose=1)
+
 ### InlineTest ###############################################################
 
 using Pkg
