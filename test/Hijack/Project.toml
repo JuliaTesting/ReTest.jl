@@ -1,0 +1,6 @@
+name = "Hijack"
+uuid = "7dd69a16-8aa1-4e4a-bd48-85a06400df7b"
+version = "0.1.0"
+
+[deps]
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"

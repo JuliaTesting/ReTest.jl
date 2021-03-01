@@ -243,7 +243,8 @@ uses `Test`, without modifications:
 
 - if you have a package `Package`, you can try `ReTest.hijack(Package)`, which
   will define a `PackageTests` module when successful, on which you can call
-  `retest`.
+  `retest`. To have `Revise` track changes to test files, use
+  `ReTest.hijack(Package, revise=true)`.
 - if you have a test file `"testfile.jl"`, try `ReTest.hijack("testfile.jl")`
   (this will define a fresh module like above).
 - `Base` and standard library modules can also be passed to `ReTest.hijack`

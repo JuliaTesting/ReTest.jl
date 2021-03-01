@@ -660,3 +660,48 @@ Pkg.activate("./FakePackage")
 Pkg.develop(PackageSpec(path="../InlineTest"))
 Pkg.develop(PackageSpec(path="..")) # ReTest
 Pkg.test("FakePackage")
+
+### Hijack ###################################################################
+
+Pkg.activate("./Hijack")
+Pkg.develop(PackageSpec(path="..")) # ReTest
+Pkg.test("Hijack")
+
+if VERSION >= v"1.5"
+
+    using Hijack
+    ReTest.hijack(Hijack)
+    retest(HijackTests)
+    @test Hijack.RUN == [1]
+    empty!(Hijack.RUN)
+
+    @test_throws ErrorException ReTest.hijack(Hijack, :HijackTests2, revise=true)
+
+    using Revise
+    ReTest.hijack(Hijack, :HijackTests2, revise=true)
+    retest(HijackTests2)
+    @test Hijack.RUN == [1]
+    empty!(Hijack.RUN)
+
+    cp("./Hijack/test/subdir/sub.jl",
+       "./Hijack/test/subdir/sub.orig.jl", force=true)
+
+    write("./Hijack/test/subdir/sub.jl",
+          """
+@test true
+
+@testset "sub" begin
+    @test true
+    @test true
+    push!(Hijack.RUN, 2)
+end
+""")
+    Revise.revise()
+    try
+        retest(HijackTests2)
+        @test Hijack.RUN == [2]
+    finally
+        mv("./Hijack/test/subdir/sub.orig.jl",
+           "./Hijack/test/subdir/sub.jl", force=true)
+    end
+end
