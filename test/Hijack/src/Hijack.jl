@@ -1,0 +1,4 @@
+module Hijack
+RUN = [ ]
+
+end

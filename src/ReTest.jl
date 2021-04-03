@@ -355,8 +355,7 @@ function updatetests!(mod::Module)
         if idx == length(tests) + 1
             push!(tests, ts)
         else
-            revise = Base.PkgId(Base.UUID("295af30f-e4ad-537b-8983-00126c2a3abe"), "Revise")
-            if !(revise in keys(Base.loaded_modules))
+            if !(revise_pkgid() in keys(Base.loaded_modules))
                 desc = ts.desc isa String ? string('"', ts.desc, '"') : ts.desc
                 source = string(ts.source.file, ':', ts.source.line)
                 @warn "duplicate description for @testset, overwriting: $desc at $source"
@@ -367,6 +366,8 @@ function updatetests!(mod::Module)
     empty!(news)
     tests
 end
+
+revise_pkgid() = Base.PkgId(Base.UUID("295af30f-e4ad-537b-8983-00126c2a3abe"), "Revise")
 
 """
     retest([m::Module...], pattern = r""; dry::Bool=false, stats::Bool=false,

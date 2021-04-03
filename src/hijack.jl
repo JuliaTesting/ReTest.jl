@@ -1,5 +1,6 @@
 """
-    ReTest.hijack(source, [modname]; parentmodule::Module=Main, lazy=false)
+    ReTest.hijack(source, [modname];
+                  parentmodule::Module=Main, lazy=false, revise::Bool=false)
 
 Given test files defined in `source` using the `Test` package, try to load
 them by replacing `Test` with `ReTest`, wrapping them in a module `modname`
@@ -30,11 +31,21 @@ The `lazy` keyword specifies whether some toplevel expressions should be skipped
   within these toplevel (but possible nested) blocks: `begin`, `let`, `for`, `if`;
 * `:brutal` means toplevel `@test*` macros are removed, as well as toplevel
   `begin`, `let`, `for` or `if` blocks.
+
+The `revise` keyword specifies whether `Revise` should be used to track
+the test files (in particular the testsets). If `true`, `Revise` must
+be loaded beforehand in your Julia session.
+
+!!! compat "Julia 1.5"
+    This function requires at least Julia 1.5.
 """
 function hijack end
 
 function hijack(path::AbstractString, modname=nothing; parentmodule::Module=Main,
-                                                       lazy=false)
+                                                       lazy=false, revise::Bool=false)
+    # do first, to error early if necessary
+    Revise = get_revise(revise)
+
     if modname === nothing
         modname = :TestMod
         i = 1
@@ -45,16 +56,33 @@ function hijack(path::AbstractString, modname=nothing; parentmodule::Module=Main
     end
     modname = Symbol(modname)
 
-    substitue!(x) = substitue_retest!(x, lazy)
-    newmod = @eval parentmodule module $modname
-                                    using ReTest # for files which don't have `using Test`
-                                    include($substitue!, $path)
-                                end
+    newmod = @eval parentmodule module $modname end
+    populate_mod!(newmod, path; lazy=lazy, Revise=Revise)
     newmod
 end
 
+function populate_mod!(mod, path; lazy, Revise)
+    files = Any[path]
+    substitue!(x) = substitue_retest!(x, lazy, files, dirname(path))
+
+    @eval mod begin
+        using ReTest # for files which don't have `using Test`
+        include($substitue!, $path)
+    end
+
+    if Revise !== nothing
+        filepaths = @eval mod begin
+            __revise_mode__ = :eval
+            [$(files...)]
+        end
+        for filepath in filepaths
+            Revise.track(mod, filepath)
+        end
+    end
+end
+
 function hijack(packagemod::Module, modname=nothing; parentmodule::Module=Main,
-                                                     lazy=false)
+                                                     lazy=false, revise::Bool=false)
     packagepath = pathof(packagemod)
     packagepath === nothing && packagemod !== Base &&
         throw(ArgumentError("$packagemod is not a package"))
@@ -64,17 +92,19 @@ function hijack(packagemod::Module, modname=nothing; parentmodule::Module=Main,
     end
 
     if packagemod === Base
-        hijack_base(ChooseTests.BASETESTS, base=modname, lazy=lazy)
+        hijack_base(ChooseTests.BASETESTS,
+                    base=modname, parentmodule=parentmodule, lazy=lazy, revise=revise)
     elseif startswith(packagepath, Sys.STDLIB) # packagemod is an STDLIB
-        hijack_base(string(packagemod), modname, parentmodule=parentmodule, lazy=lazy)
+        hijack_base(string(packagemod), modname,
+                    parentmodule=parentmodule, lazy=lazy, revise=revise)
     else
         path = joinpath(dirname(dirname(packagepath)), "test", "runtests.jl")
-        hijack(path, modname, parentmodule=parentmodule, lazy=lazy)
+        hijack(path, modname, parentmodule=parentmodule, lazy=lazy, revise=revise)
     end
 end
 
-function substitue_retest!(ex, lazy)
-    substitue!(x) = substitue_retest!(x, lazy)
+function substitue_retest!(ex, lazy, files=nothing, root=nothing)
+    substitue!(x) = substitue_retest!(x, lazy, files, root)
 
     if Meta.isexpr(ex, :using)
         for used in ex.args
@@ -88,6 +118,11 @@ function substitue_retest!(ex, lazy)
         if length(ex.args) > 2
             throw(ArgumentError("cannot handle include with two arguments"))
         else
+            if files !== nothing
+                newfile = :(joinpath($root, $(ex.args[2])))
+                push!(files, newfile)
+                root = :(dirname($newfile))
+            end
             insert!(ex.args, 2, substitue!)
         end
     elseif Meta.isexpr(ex, :module)
@@ -129,7 +164,8 @@ function filter_toplevel!(ex, lazy)
 end
 
 """
-    hijack_base(tests, [modname]; parentmodule::Module=Main, lazy=false)
+    hijack_base(tests, [modname];
+                parentmodule::Module=Main, lazy=false, revise::Bool=false)
 
 Similar to `ReTest.hijack`, but specifically for `Base` and stdlib tests.
 `tests` speficies which test files should be loaded, in the exact same format
@@ -151,12 +187,17 @@ module, the one under `BaseTests` or `StdLibTests` (e.g. `somedir` if any,
 or `sometest` otherwise, or `Lib_`). This unique module is then named `modname`,
 and not enclosed within `BaseTests` or `StdLibTests`.
 
-The `lazy` keyword has the same meaning as in [`ReTest.hijack`](@ref).
+The `lazy` and `revise` keywords have the same meaning as in [`ReTest.hijack`](@ref).
 Depending on the value of `lazy`, some test files are skipped when they
 are known to fail.
+
+!!! compat "Julia 1.5"
+    This function requires at least Julia 1.5.
 """
 function hijack_base(tests, modname=nothing; parentmodule::Module=Main, lazy=false,
-                     base=:BaseTests, stdlib=:StdLibTests)
+                     base=:BaseTests, stdlib=:StdLibTests, revise::Bool=false)
+
+    Revise = get_revise(revise)
     if isa(tests, AbstractString)
         tests = split(tests)
     end
@@ -173,8 +214,6 @@ function hijack_base(tests, modname=nothing; parentmodule::Module=Main, lazy=fal
         # a series of "WARNING: replacing module submodule_i")
         @eval parentmodule module $modname end
     end
-
-    substitue!(ex) = substitue_retest!(ex, lazy)
 
     for (test, components) in zip(tests, allcomponents)
         if test ∈ ChooseTests.BLACKLIST ||
@@ -216,11 +255,20 @@ function hijack_base(tests, modname=nothing; parentmodule::Module=Main, lazy=fal
         end
 
         @eval mod begin
-                      using ReTest, Random
-                      include($substitue!, $(ChooseTests.test_path(test)))
-                  end
+            using Random
+        end
+        populate_mod!(mod, ChooseTests.test_path(test), lazy=lazy, Revise=Revise)
     end
 end
+
+get_revise(revise) =
+    if revise
+        Revise = get(Base.loaded_modules, revise_pkgid(), nothing)
+        Revise === nothing &&
+            error("Revise is not loaded")
+        Revise
+    end
+
 
 
 module ChooseTests
