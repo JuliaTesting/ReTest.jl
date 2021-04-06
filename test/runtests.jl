@@ -227,8 +227,8 @@ end
     push!(RUN, "c")
 end
 
-@testset "d" begin
-    push!(RUN, "d")
+@testset "d$i" for i=1:2
+    push!(RUN, "d$i")
 end
 
 end # MultiPat
@@ -245,6 +245,10 @@ check(MultiPat, ["a", "b"], "a", "b")
 check(MultiPat, ["a", "b"], "b", r"a")
 check(MultiPat, [], "b", "d")
 check(MultiPat, [], "a", "e")
+check(MultiPat, ["aa", "d2"], ["aa", "2"])
+check(MultiPat, ["d1", "d2"], ["1", "2"])
+check(MultiPat, ["d2"], ["aa", "2"], "d")
+check(MultiPat, ["d1", "d2"], ["aa", "2", ["2", "1"]], "d")
 
 
 ### toplevel #################################################################
