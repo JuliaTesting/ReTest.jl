@@ -53,11 +53,23 @@ struct And <: Pattern
     xs::AbstractArray
 end
 
+struct Or <: Pattern
+    xs::AbstractArray
+end
+
 alwaysmatches(pat::And) = all(alwaysmatches, pat.xs)
+alwaysmatches(pat::Or) = any(alwaysmatches, pat.xs)
 alwaysmatches(rx::Regex) = isempty(rx.pattern)
 
 matches(pat::And, x) = all(p -> matches(p, x), pat.xs)
+matches(pat::Or, x) = any(p -> matches(p, x), pat.xs)
 matches(rx::Regex, x) = occursin(rx, x)
+
+make_pattern(rx::Regex) = rx
+make_pattern(str::AbstractString) = VERSION >= v"1.3" ? r""i * str :
+                                                        Regex(str, "i")
+
+make_pattern(pat::AbstractArray) = Or(make_pattern.(pat))
 
 
 # * TestsetExpr
@@ -420,10 +432,13 @@ or within all currently loaded modules otherwise.
 ### Filtering
 
 It's possible to filter run testsets by specifying one or multiple `pattern`s.
-A testset is guaranteed to run only if it "matches" all passed patterns.
+A testset is guaranteed to run only if it "matches" all passed patterns (conjunction).
 Moreover if a testset is run, its enclosing testset, if any, also has to run
 (although not necessarily exhaustively, i.e. other nested testsets
 might be filtered out).
+
+A `pattern` can be a string, a `Regex`, or an array.
+For a testset to "match" an array, it must match at least one of its elements (disjunction).
 
 ### `Regex` filtering
 
@@ -455,7 +470,7 @@ the regex is simply created as `Regex(pattern, "i")`).
     this function executes each (top-level) `@testset` block using `eval` *within* the
     module in which it was written (e.g. `m`, when specified).
 """
-function retest(args::Union{Module,AbstractString,Regex}...;
+function retest(args::Union{Module,AbstractString,Regex,AbstractArray}...;
                 dry::Bool=false,
                 stats::Bool=false,
                 shuffle::Bool=false,
@@ -851,13 +866,10 @@ function process_args(args, verbose, shuffle, recursive)
     patterns = []
     modules = Module[]
     for arg in args
-        if arg isa Regex
-            push!(patterns, arg)
-        elseif arg isa AbstractString
-            push!(patterns, VERSION >= v"1.3" ? r""i * arg :
-                                                Regex(arg, "i"))
-        else
+        if arg isa Module
             push!(modules, arg)
+        else
+            push!(patterns, make_pattern(arg))
         end
     end
 
