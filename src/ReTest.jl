@@ -30,11 +30,37 @@ end
 using InlineTest: @testset, InlineTest, TESTED_MODULES, INLINE_TEST
 import InlineTest: retest
 
+# * Pattern (pre)
+
+# pre-declaration for use in testset.jl
+
+abstract type Pattern end
+function matches end
+
+
+# * includes
+
 include("utils.jl")
 include("testset.jl")
 include("hijack.jl")
 
 using .Testset: Testset, Format
+
+
+# * Pattern
+
+struct And <: Pattern
+    xs::AbstractArray
+end
+
+alwaysmatches(pat::And) = all(alwaysmatches, pat.xs)
+alwaysmatches(rx::Regex) = isempty(rx.pattern)
+
+matches(pat::And, x) = all(p -> matches(p, x), pat.xs)
+matches(rx::Regex, x) = occursin(rx, x)
+
+
+# * TestsetExpr
 
 Base.@kwdef mutable struct Options
     verbose::Bool = false # annotated verbosity
@@ -163,13 +189,13 @@ end
 # children testsets.
 # TODO: implement the alternative to make a real comparison
 
-function resolve!(mod::Module, ts::TestsetExpr, rx::Regex;
+function resolve!(mod::Module, ts::TestsetExpr, pat::Pattern;
                   force::Bool=false, shown::Bool=true, depth::Int=0,
                   verbose::Int)
 
     strings = empty!(ts.strings)
     desc = ts.desc
-    ts.run = force || isempty(rx.pattern)
+    ts.run = force || alwaysmatches(pat)
     ts.loopvalues = nothing # unnecessary ?
     ts.loopiters = nothing
 
@@ -215,7 +241,7 @@ function resolve!(mod::Module, ts::TestsetExpr, rx::Regex;
             for str in parentstrs
                 ts.run && break
                 new = str * '/' * desc
-                if occursin(rx, new)
+                if matches(pat, new)
                     ts.run = true
                 else
                     push!(strings, new)
@@ -269,7 +295,7 @@ function resolve!(mod::Module, ts::TestsetExpr, rx::Regex;
             end
             for str in parentstrs
                 new = str * '/' * descx
-                if occursin(rx, new)
+                if matches(pat, new)
                     ts.run = true
                     break
                 else
@@ -282,7 +308,7 @@ function resolve!(mod::Module, ts::TestsetExpr, rx::Regex;
     run = ts.run
     ts.hasbrokenrec = ts.hasbroken
     for tsc in ts.children
-        run |= resolve!(mod, tsc, rx, force=ts.run,
+        run |= resolve!(mod, tsc, pat, force=ts.run,
                         shown=shown & ts.options.transient_verbose,
                         depth=depth+1, verbose=verbose-1)
         ts.descwidth = max(ts.descwidth, tsc.descwidth)
@@ -312,18 +338,18 @@ eval_desc(mod, ts, x) =
     end
 
 # convert a TestsetExpr into an actually runnable testset
-function make_ts(ts::TestsetExpr, rx::Regex, stats, chan)
+function make_ts(ts::TestsetExpr, pat::Pattern, stats, chan)
     ts.run || return nothing
 
     if isfinal(ts)
         body = ts.body
     else
-        body = make_ts(ts.body, rx, stats, chan)
+        body = make_ts(ts.body, pat, stats, chan)
     end
 
     if ts.loops === nothing
         quote
-            @testset $(ts.mod) $(isfinal(ts)) $rx $(ts.desc) $(ts.options) $stats $chan $body
+            @testset $(ts.mod) $(isfinal(ts)) $pat $(ts.desc) $(ts.options) $stats $chan $body
         end
     else
         c = count(x -> x === nothing, (ts.loopvalues, ts.loopiters))
@@ -334,14 +360,14 @@ function make_ts(ts::TestsetExpr, rx::Regex, stats, chan)
             loops = ts.loops
         end
         quote
-            @testset $(ts.mod) $(isfinal(ts)) $rx $(ts.desc) $(ts.options) $stats $chan $loops $body
+            @testset $(ts.mod) $(isfinal(ts)) $pat $(ts.desc) $(ts.options) $stats $chan $loops $body
         end
     end
 end
 
-make_ts(x, rx, _, _) = x
-make_ts(ex::Expr, rx, stats, chan) =
-    Expr(ex.head, map(x -> make_ts(x, rx, stats, chan), ex.args)...)
+make_ts(x, pat, _, _) = x
+make_ts(ex::Expr, pat, stats, chan) =
+    Expr(ex.head, map(x -> make_ts(x, pat, stats, chan), ex.args)...)
 
 # convert raw tests from InlineTest into TestsetExpr tests, and handle overwriting
 function updatetests!(mod::Module)
@@ -370,9 +396,9 @@ end
 revise_pkgid() = Base.PkgId(Base.UUID("295af30f-e4ad-537b-8983-00126c2a3abe"), "Revise")
 
 """
-    retest([m::Module...], pattern = r""; dry::Bool=false, stats::Bool=false,
-                                          shuffle::Bool=false, verbose::Real=true,
-                                          recursive::Bool=true)
+    retest(m::Module..., pattern...; dry::Bool=false, stats::Bool=false,
+                                     shuffle::Bool=false, verbose::Real=true,
+                                     recursive::Bool=true)
 
 Run all the tests declared in `@testset` blocks, within modules `m` if specified,
 or within all currently loaded modules otherwise.
@@ -391,11 +417,18 @@ or within all currently loaded modules otherwise.
 * If `recursive` is `true`, the tests for all the recursive submodules of
   the passed modules `m` are also run.
 
+### Filtering
+
+It's possible to filter run testsets by specifying one or multiple `pattern`s.
+A testset is guaranteed to run only if it "matches" all passed patterns.
+Moreover if a testset is run, its enclosing testset, if any, also has to run
+(although not necessarily exhaustively, i.e. other nested testsets
+might be filtered out).
+
 ### `Regex` filtering
 
-It's possible to filter run testsets by specifying `pattern`: the "subject" of a
-testset is the concatenation of the subject of its parent `@testset`, if any,
-with `"/\$description"` where `description` is the testset's description.
+The "subject" of a testset is the concatenation of the subject of its parent `@testset`,
+if any, with `"/\$description"` where `description` is the testset's description.
 For example:
 ```julia
 @testset "a" begin # subject == "/a"
@@ -406,14 +439,13 @@ For example:
 end
 ```
 
-A testset is guaranteed to run only when its subject matches `pattern`.
-Moreover if a testset is run, its enclosing testset, if any, also has to run
-(although not necessarily exhaustively, i.e. other nested testsets
-might be filtered out). Moreover, even if a testset matches (e.g. "/a" above
-with `pattern == r"a\$"`), its nested testsets might be filtered out if they
-don't also match (e.g. "a/b" doesn't match `pattern`).
+When `pattern` isa a `Regex`, a testset is guaranteed to run only when its subject
+ matches `pattern`.
+Moreover, even if a testset matches (e.g. "/a" above with `pattern == r"a\$"`),
+its nested testsets might be filtered out if they don't also match
+(e.g. "a/b" doesn't match `pattern`).
 
-If the passed `pattern` is a string, then it is wrapped in a `Regex` with the
+If a passed `pattern` is a string, then it is wrapped in a `Regex` with the
 "case-insensitive" flag, and must match literally the subjects.
 This means for example that `"a|b"` will match a subject like `"a|b"` or `"A|B"`,
 but not like `"a"` (only in Julia versions >= 1.3; in older versions,
@@ -432,12 +464,11 @@ function retest(args::Union{Module,AbstractString,Regex}...;
                 recursive::Bool=true,
                 )
 
-    implicitmodules, modules, regex, verbose = process_args(args, verbose, shuffle, recursive)
+    implicitmodules, modules, pat, verbose = process_args(args, verbose, shuffle, recursive)
     overall = length(modules) > 1
     root = Testset.ReTestSet("", "Overall", true)
 
-    # COMPAT: `Ref` necesssary on Julia 1.0
-    tests_descs_hasbrokens = fetchtests.(modules, Ref(regex), verbose, overall)
+    tests_descs_hasbrokens = fetchtests.(modules, Ref(pat), verbose, overall)
     isempty(tests_descs_hasbrokens) &&
         throw(ArgumentError("no modules using ReTest could be found and none were passed"))
 
@@ -472,7 +503,7 @@ function retest(args::Union{Module,AbstractString,Regex}...;
                     println()
                 printstyled(mod, '\n', bold=true)
             end
-            foreach(ts -> dryrun(mod, ts, regex, showmod*2, verbose=verbose>0), tests)
+            foreach(ts -> dryrun(mod, ts, pat, showmod*2, verbose=verbose>0), tests)
             continue
         end
 
@@ -750,9 +781,9 @@ function retest(args::Union{Module,AbstractString,Regex}...;
                         end
 
                         chan = (out=outchan, compute=computechan, preview=previewchan)
-                        resp = remotecall_fetch(wrkr, mod, ts, regex, chan
-                                             ) do mod, ts, regex, chan
-                                mts = make_ts(ts, regex, format.stats, chan)
+                        resp = remotecall_fetch(wrkr, mod, ts, pat, chan
+                                             ) do mod, ts, pat, chan
+                                mts = make_ts(ts, pat, format.stats, chan)
                                 Core.eval(mod, mts)
                             end
                         if resp isa Vector
@@ -817,30 +848,18 @@ end
 
 function process_args(args, verbose, shuffle, recursive)
     ########## process args
-    local pattern
+    patterns = []
     modules = Module[]
     for arg in args
-        if arg isa Union{AbstractString,Regex}
-            @isdefined(pattern) && throw(ArgumentError("cannot pass multiple patterns"))
-            pattern = arg
+        if arg isa Regex
+            push!(patterns, arg)
+        elseif arg isa AbstractString
+            push!(patterns, VERSION >= v"1.3" ? r""i * arg :
+                                                Regex(arg, "i"))
         else
             push!(modules, arg)
         end
     end
-
-    ########## process pattern
-    regex =
-        if !@isdefined(pattern)
-            r""
-        elseif pattern isa Regex
-            pattern
-        else
-            if VERSION >= v"1.3"
-                r""i * pattern
-            else
-                Regex(pattern, "i")
-            end
-        end
 
     ########## process verbose
     if !isinteger(verbose) && !isinf(verbose) || signbit(verbose)
@@ -851,7 +870,7 @@ function process_args(args, verbose, shuffle, recursive)
     end
     verbose = Int(verbose)
 
-    isempty(modules), computemodules!(modules, shuffle, recursive), regex, verbose
+    isempty(modules), computemodules!(modules, shuffle, recursive), And(patterns), verbose
 end
 
 function computemodules!(modules::Vector{Module}, shuffle, recursive)
@@ -917,13 +936,13 @@ function computemodules!(modules::Vector{Module}, shuffle, recursive)
     modules
 end
 
-function fetchtests(mod, regex, verbose, overall)
+function fetchtests(mod, pat, verbose, overall)
     tests = updatetests!(mod)
     descwidth = 0
     hasbroken = false
 
     for ts in tests
-        run = resolve!(mod, ts, regex, verbose=verbose)
+        run = resolve!(mod, ts, pat, verbose=verbose)
         run || continue
         descwidth = max(descwidth, ts.descwidth)
         hasbroken |= ts.hasbrokenrec
@@ -942,7 +961,7 @@ end
 
 isindented(verbose, overall, many) = (verbose > 0) & (overall | !many)
 
-function dryrun(mod::Module, ts::TestsetExpr, rx::Regex, align::Int=0, parentsubj=""
+function dryrun(mod::Module, ts::TestsetExpr, pat::Pattern, align::Int=0, parentsubj=""
                 ; evaldesc=true, repeated=nothing, verbose)
     ts.run && verbose || return
     desc = ts.desc
@@ -959,7 +978,7 @@ function dryrun(mod::Module, ts::TestsetExpr, rx::Regex, align::Int=0, parentsub
         if parentsubj isa String && desc isa String
             subject = parentsubj * '/' * desc
             if isfinal(ts)
-                occursin(rx, subject) || return
+                matches(pat, subject) || return
             end
         end
         printstyled(' '^align, desc, color = desc isa String ? :normal : Base.warn_color())
@@ -972,7 +991,7 @@ function dryrun(mod::Module, ts::TestsetExpr, rx::Regex, align::Int=0, parentsub
             println()
         end
         for tsc in ts.children
-            dryrun(mod, tsc, rx, align + 2, subject, verbose=ts.options.transient_verbose)
+            dryrun(mod, tsc, pat, align + 2, subject, verbose=ts.options.transient_verbose)
         end
     else
         function dryrun_beginend(descx, repeated=nothing)
@@ -980,7 +999,7 @@ function dryrun(mod::Module, ts::TestsetExpr, rx::Regex, align::Int=0, parentsub
             beginend = TestsetExpr(ts.source, ts.mod, descx, ts.options, nothing,
                                    ts.parent, ts.children)
             beginend.run = true
-            dryrun(mod, beginend, rx, align, parentsubj; evaldesc=false,
+            dryrun(mod, beginend, pat, align, parentsubj; evaldesc=false,
                    repeated=repeated, verbose=verbose)
         end
 

@@ -80,28 +80,27 @@ end
 
 # we don't put these checks in a @testset, as this would modify filtering logic
 # (e.g. with `@testset "filtering" ...`, testset subjects would start with "/filtering/...")
-using .M: check
-check("a", ["a"])
-check("a1", []) # testset is "final", so we do a full match
-check("b", ["b1", "b2"])
-check("/b", ["b1", "b2"])
-check("b1", ["b1"])
-check("c1", []) # "c1" is *not* partially matched against "/c/"
-check("c/1", []) # "c" is partially matched, but nothing fully matches afterwards
-check("c/d1", [])
-check("c/d", ["c", "d"])
-check("/c", ["c", "d", "e1", "e2"])
-check(".*d", ["c", "d"])
-check(".*(e1|e2)", ["c", "e1", "e2"])
-check("f1", ["f1", "g", "h1", "h2"])
-check("f",  ["f1", "g", "h1", "h2"])
-check(".*g", ["f1", "g"])
-check(".*h", ["f1", "h1", "h2"])
-check(".*h1", ["f1", "h1"])
-check(".*h\$", [])
+M.check("a", ["a"])
+M.check("a1", []) # testset is "final", so we do a full match
+M.check("b", ["b1", "b2"])
+M.check("/b", ["b1", "b2"])
+M.check("b1", ["b1"])
+M.check("c1", []) # "c1" is *not* partially matched against "/c/"
+M.check("c/1", []) # "c" is partially matched, but nothing fully matches afterwards
+M.check("c/d1", [])
+M.check("c/d", ["c", "d"])
+M.check("/c", ["c", "d", "e1", "e2"])
+M.check(".*d", ["c", "d"])
+M.check(".*(e1|e2)", ["c", "e1", "e2"])
+M.check("f1", ["f1", "g", "h1", "h2"])
+M.check("f",  ["f1", "g", "h1", "h2"])
+M.check(".*g", ["f1", "g"])
+M.check(".*h", ["f1", "h1", "h2"])
+M.check(".*h1", ["f1", "h1"])
+M.check(".*h\$", [])
 
 # by default, respect order of tests:
-check("", ["a", "b1", "b2", "c", "d", "e1", "e2", "f1", "g", "h1", "h2"])
+M.check("", ["a", "b1", "b2", "c", "d", "e1", "e2", "f1", "g", "h1", "h2"])
 retest(M)
 
 module N
@@ -205,6 +204,49 @@ P.check(r"d&E", [])
 P.check(r"d&E"i, ["D&E"])
 
 
+### multiple patterns ########################################################
+
+module MultiPat
+using ReTest
+
+RUN = []
+
+@testset "a" begin
+    push!(RUN, "a")
+
+    @testset "b" begin
+        push!(RUN, "b")
+    end
+end
+
+@testset "aa" begin
+    push!(RUN, "aa")
+end
+
+@testset "b" begin
+    push!(RUN, "c")
+end
+
+@testset "d" begin
+    push!(RUN, "d")
+end
+
+end # MultiPat
+
+function check(mod, res, pats...)
+    empty!(mod.RUN)
+    retest(mod, pats...)
+    @test sort(mod.RUN) == sort(res)
+end
+
+check(MultiPat, ["a", "b", "aa"], "a")
+check(MultiPat, ["a", "b", "c"], "b")
+check(MultiPat, ["a", "b"], "a", "b")
+check(MultiPat, ["a", "b"], "b", r"a")
+check(MultiPat, [], "b", "d")
+check(MultiPat, [], "a", "e")
+
+
 ### toplevel #################################################################
 
 # The following test is just to exert `@assert allunique(TESTED_MODULES)` in
@@ -226,7 +268,6 @@ end
 retest(verbose=Inf)
 retest("a", shuffle=true, stats=true)
 retest(M, N, P, "b", dry=true)
-@test_throws ArgumentError retest("A", r"b")
 
 for v in (-rand(1:9), 4.2, -Inf)
     @test_throws ArgumentError retest(verbose=v)
