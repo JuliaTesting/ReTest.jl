@@ -60,16 +60,21 @@ end
 alwaysmatches(pat::And) = all(alwaysmatches, pat.xs)
 alwaysmatches(pat::Or) = any(alwaysmatches, pat.xs)
 alwaysmatches(rx::Regex) = isempty(rx.pattern)
+alwaysmatches(id::Integer) = false
 
-matches(pat::And, x) = all(p -> matches(p, x), pat.xs)
-matches(pat::Or, x) = any(p -> matches(p, x), pat.xs)
-matches(rx::Regex, x) = occursin(rx, x)
+matches(pat::And, x, id) = all(p -> matches(p, x, id), pat.xs)
+matches(pat::Or, x, id) = any(p -> matches(p, x, id), pat.xs)
+matches(rx::Regex, x, _) = occursin(rx, x)
+matches(pat::Integer, _, id) = pat == id
 
 make_pattern(rx::Regex) = rx
+make_pattern(id::Integer) = id
 make_pattern(str::AbstractString) = VERSION >= v"1.3" ? r""i * str :
                                                         Regex(str, "i")
 
 make_pattern(pat::AbstractArray) = Or(make_pattern.(pat))
+# special case for optimizing unit-ranges:
+make_pattern(pat::AbstractArray{<:Integer}) = Or(pat)
 
 
 # * TestsetExpr
@@ -80,6 +85,7 @@ Base.@kwdef mutable struct Options
 end
 
 mutable struct TestsetExpr
+    id::Int64 # unique ID per module (64 bits to be on the safe side)
     source::LineNumberNode
     mod::String # enclosing module
     desc::Union{String,Expr}
@@ -103,7 +109,7 @@ mutable struct TestsetExpr
     body::Expr
 
     TestsetExpr(source, mod, desc, options, loops, parent, children=TestsetExpr[]) =
-        new(source, mod, desc, options, loops, parent, children, String[])
+        new(0, source, mod, desc, options, loops, parent, children, String[])
 end
 
 isfor(ts::TestsetExpr) = ts.loops !== nothing
@@ -190,6 +196,7 @@ end
 # - compute ts.descwidth, to know the overall alignment of the first vertical bar
 #   (only needed when verbose is large enough)
 # - the most important: sorting out which testsets must be run
+#   (and in the process, precompute descriptions when possible, and IDs)
 #
 # Concerning the last point, we make the following compromise: as it's probably
 # rare that a Regex matches a given testset but not its children
@@ -202,14 +209,16 @@ end
 # TODO: implement the alternative to make a real comparison
 
 function resolve!(mod::Module, ts::TestsetExpr, pat::Pattern;
-                  force::Bool=false, shown::Bool=true, depth::Int=0,
-                  verbose::Int)
+                  verbose::Int, id::Int64, # external calls
+                  force::Bool=false, shown::Bool=true, depth::Int=0) # only recursive calls
 
     strings = empty!(ts.strings)
     desc = ts.desc
     ts.run = force || alwaysmatches(pat)
     ts.loopvalues = nothing # unnecessary ?
     ts.loopiters = nothing
+    ts.id = id
+    id += 1
 
     parentstrs = ts.parent === nothing ? [""] : ts.parent.strings
     ts.descwidth = 0
@@ -239,6 +248,7 @@ function resolve!(mod::Module, ts::TestsetExpr, pat::Pattern;
         # (i.e. the description doesn't depend on loop variables)
         gaveup = false
         if !(desc isa String)
+            # TODO: compute desc only when !ts.run (i.e. it wasn't forced) ?
             try
                 desc = Core.eval(mod, desc)
             catch
@@ -253,7 +263,7 @@ function resolve!(mod::Module, ts::TestsetExpr, pat::Pattern;
             for str in parentstrs
                 ts.run && break
                 new = str * '/' * desc
-                if matches(pat, new)
+                if matches(pat, new, ts.id)
                     ts.run = true
                 else
                     push!(strings, new)
@@ -307,7 +317,7 @@ function resolve!(mod::Module, ts::TestsetExpr, pat::Pattern;
             end
             for str in parentstrs
                 new = str * '/' * descx
-                if matches(pat, new)
+                if matches(pat, new, ts.id)
                     ts.run = true
                     break
                 else
@@ -319,10 +329,12 @@ function resolve!(mod::Module, ts::TestsetExpr, pat::Pattern;
 
     run = ts.run
     ts.hasbrokenrec = ts.hasbroken
+
     for tsc in ts.children
-        run |= resolve!(mod, tsc, pat, force=ts.run,
-                        shown=shown & ts.options.transient_verbose,
-                        depth=depth+1, verbose=verbose-1)
+        runc, id = resolve!(mod, tsc, pat, force=ts.run,
+                            shown=shown & ts.options.transient_verbose,
+                            depth=depth+1, verbose=verbose-1, id=id)
+        run |= runc
         ts.descwidth = max(ts.descwidth, tsc.descwidth)
         if tsc.run
             ts.hasbrokenrec |= tsc.hasbrokenrec
@@ -332,6 +344,7 @@ function resolve!(mod::Module, ts::TestsetExpr, pat::Pattern;
         ts.descwidth = 0
     end
     ts.run = run
+    run, id
 end
 
 eval_desc(mod, ts, x) =
@@ -361,7 +374,7 @@ function make_ts(ts::TestsetExpr, pat::Pattern, stats, chan)
 
     if ts.loops === nothing
         quote
-            @testset $(ts.mod) $(isfinal(ts)) $pat $(ts.desc) $(ts.options) $stats $chan $body
+            @testset $(ts.mod) $(isfinal(ts)) $pat $(ts.id) $(ts.desc) $(ts.options) $stats $chan $body
         end
     else
         c = count(x -> x === nothing, (ts.loopvalues, ts.loopiters))
@@ -372,7 +385,7 @@ function make_ts(ts::TestsetExpr, pat::Pattern, stats, chan)
             loops = ts.loops
         end
         quote
-            @testset $(ts.mod) $(isfinal(ts)) $pat $(ts.desc) $(ts.options) $stats $chan $loops $body
+            @testset $(ts.mod) $(isfinal(ts)) $pat $(ts.id) $(ts.desc) $(ts.options) $stats $chan $loops $body
         end
     end
 end
@@ -408,9 +421,9 @@ end
 revise_pkgid() = Base.PkgId(Base.UUID("295af30f-e4ad-537b-8983-00126c2a3abe"), "Revise")
 
 """
-    retest(m::Module..., pattern...; dry::Bool=false, stats::Bool=false,
-                                     shuffle::Bool=false, verbose::Real=true,
-                                     recursive::Bool=true)
+    retest(m::Module..., pattern...; dry::Bool=false,
+                                     stats::Bool=false, verbose::Real=true, id::Bool=true,
+                                     shuffle::Bool=false, recursive::Bool=true)
 
 Run all the tests declared in `@testset` blocks, within modules `m` if specified,
 or within all currently loaded modules otherwise.
@@ -420,12 +433,14 @@ or within all currently loaded modules otherwise.
 * If `dry` is `true`, don't actually run the tests, just print the descriptions
   of the testsets which would (presumably) run.
 * If `stats` is `true`, print some time/memory statistics for each testset.
-* If `shuffle` is `true`, shuffle the order in which top-level testsets within
-  a given module are run, as well as the list of passed modules.
 * If specified, `verbose` must be an integer or `Inf` indicating the nesting level
   of testsets whose results must be printed (this is equivalent to adding the
   `verbose=true` annotation to corresponding testsets); the default behavior
   (`true` or `1`) corresponds to printing the result of top-level testsets.
+* If `id` is `true`, a unique (per module) integer ID is printed next to each testset,
+  which can be used for filtering.
+* If `shuffle` is `true`, shuffle the order in which top-level testsets within
+  a given module are run, as well as the list of passed modules.
 * If `recursive` is `true`, the tests for all the recursive submodules of
   the passed modules `m` are also run.
 
@@ -437,8 +452,9 @@ Moreover if a testset is run, its enclosing testset, if any, also has to run
 (although not necessarily exhaustively, i.e. other nested testsets
 might be filtered out).
 
-A `pattern` can be a string, a `Regex`, or an array.
+A `pattern` can be a string, a `Regex`, an integer or an array.
 For a testset to "match" an array, it must match at least one of its elements (disjunction).
+To match an integer, its ID must be equal to this integer (cf. the `id` keyword).
 
 ### `Regex` filtering
 
@@ -470,20 +486,22 @@ the regex is simply created as `Regex(pattern, "i")`).
     this function executes each (top-level) `@testset` block using `eval` *within* the
     module in which it was written (e.g. `m`, when specified).
 """
-function retest(args::Union{Module,AbstractString,Regex,AbstractArray}...;
+function retest(args::Union{Module,AbstractString,Regex,Integer,AbstractArray}...;
                 dry::Bool=false,
                 stats::Bool=false,
                 shuffle::Bool=false,
                 group::Bool=true,
                 verbose::Real=true, # should be @nospecialize, but not supported on old Julia
                 recursive::Bool=true,
+                id=nothing,
                 )
 
     implicitmodules, modules, pat, verbose = process_args(args, verbose, shuffle, recursive)
     overall = length(modules) > 1
     root = Testset.ReTestSet("", "Overall", true)
 
-    tests_descs_hasbrokens = fetchtests.(modules, Ref(pat), verbose, overall)
+    maxidw = Ref{Int}(0) # visual width for showing IDs (Ref for mutability in hack below)
+    tests_descs_hasbrokens = fetchtests.(modules, Ref(pat), verbose, overall, Ref(maxidw))
     isempty(tests_descs_hasbrokens) &&
         throw(ArgumentError("no modules using ReTest could be found and none were passed"))
 
@@ -512,13 +530,15 @@ function retest(args::Union{Module,AbstractString,Regex,AbstractArray}...;
             shuffle!(tests)
 
         if dry
+            id = something(id, true)
             showmod = overall || implicitmodules
             if showmod
                 imod > 1 && verbose > 0 &&
                     println()
                 printstyled(mod, '\n', bold=true)
             end
-            foreach(ts -> dryrun(mod, ts, pat, showmod*2, verbose=verbose>0), tests)
+            foreach(ts -> dryrun(mod, ts, pat, id ? 0 : showmod*2,
+                                 verbose=verbose>0, maxidw = id ? maxidw[] : 0), tests)
             continue
         end
 
@@ -948,17 +968,19 @@ function computemodules!(modules::Vector{Module}, shuffle, recursive)
     modules
 end
 
-function fetchtests(mod, pat, verbose, overall)
+function fetchtests(mod, pat, verbose, overall, maxidw)
     tests = updatetests!(mod)
     descwidth = 0
     hasbroken = false
 
+    id = 1
     for ts in tests
-        run = resolve!(mod, ts, pat, verbose=verbose)
+        run, id = resolve!(mod, ts, pat, verbose=verbose, id=id)
         run || continue
         descwidth = max(descwidth, ts.descwidth)
         hasbroken |= ts.hasbrokenrec
     end
+    maxidw[] = max(maxidw[], ndigits(id-1))
 
     tests = filter(ts -> ts.run, tests)
     many = length(tests) > 1
@@ -974,7 +996,7 @@ end
 isindented(verbose, overall, many) = (verbose > 0) & (overall | !many)
 
 function dryrun(mod::Module, ts::TestsetExpr, pat::Pattern, align::Int=0, parentsubj=""
-                ; evaldesc=true, repeated=nothing, verbose)
+                ; evaldesc=true, repeated=nothing, verbose, maxidw::Int)
     ts.run && verbose || return
     desc = ts.desc
 
@@ -990,8 +1012,12 @@ function dryrun(mod::Module, ts::TestsetExpr, pat::Pattern, align::Int=0, parent
         if parentsubj isa String && desc isa String
             subject = parentsubj * '/' * desc
             if isfinal(ts)
-                matches(pat, subject) || return
+                matches(pat, subject, ts.id) || return
             end
+        end
+
+        if maxidw > 0 # width (ndigits) of max id; <= 0 means ids not printed
+            printstyled(lpad(ts.id, maxidw), "| ", color = :light_black, bold=true)
         end
         printstyled(' '^align, desc, color = desc isa String ? :normal : Base.warn_color())
 
@@ -1003,7 +1029,8 @@ function dryrun(mod::Module, ts::TestsetExpr, pat::Pattern, align::Int=0, parent
             println()
         end
         for tsc in ts.children
-            dryrun(mod, tsc, pat, align + 2, subject, verbose=ts.options.transient_verbose)
+            dryrun(mod, tsc, pat, align + 2, subject, verbose=ts.options.transient_verbose,
+                   maxidw=maxidw)
         end
     else
         function dryrun_beginend(descx, repeated=nothing)
@@ -1011,8 +1038,9 @@ function dryrun(mod::Module, ts::TestsetExpr, pat::Pattern, align::Int=0, parent
             beginend = TestsetExpr(ts.source, ts.mod, descx, ts.options, nothing,
                                    ts.parent, ts.children)
             beginend.run = true
+            beginend.id = ts.id
             dryrun(mod, beginend, pat, align, parentsubj; evaldesc=false,
-                   repeated=repeated, verbose=verbose)
+                   repeated=repeated, verbose=verbose, maxidw=maxidw)
         end
 
         loopvalues = ts.loopvalues

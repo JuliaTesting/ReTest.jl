@@ -427,21 +427,21 @@ function get_testset_string(remove_last=false)
 end
 
 # non-inline testset with regex filtering support
-macro testset(mod::String, isfinal::Bool, pat::Pattern, desc::Union{String,Expr}, options,
+macro testset(mod::String, isfinal::Bool, pat::Pattern, id::Int64, desc::Union{String,Expr}, options,
               stats::Bool, chan, body)
-    Testset.testset_beginend(mod, isfinal, pat, desc, options, stats, chan,  body, __source__)
+    Testset.testset_beginend(mod, isfinal, pat, id, desc, options, stats, chan,  body, __source__)
 end
 
-macro testset(mod::String, isfinal::Bool, pat::Pattern, desc::Union{String,Expr}, options,
+macro testset(mod::String, isfinal::Bool, pat::Pattern, id::Int64, desc::Union{String,Expr}, options,
               stats::Bool, chan, loops, body)
-    Testset.testset_forloop(mod, isfinal, pat, desc, options,
+    Testset.testset_forloop(mod, isfinal, pat, id, desc, options,
                             stats, chan, loops, body, __source__)
 end
 
 """
 Generate the code for a `@testset` with a `begin`/`end` argument
 """
-function testset_beginend(mod::String, isfinal::Bool, pat::Pattern, desc, options,
+function testset_beginend(mod::String, isfinal::Bool, pat::Pattern, id::Int64, desc, options,
                           stats::Bool, chan, tests, source)
     # Generate a block of code that initializes a new testset, adds
     # it to the task local storage, evaluates the test(s), before
@@ -453,7 +453,7 @@ function testset_beginend(mod::String, isfinal::Bool, pat::Pattern, desc, option
         if $isfinal
             current_str = string(get_testset_string(), '/', $desc)
         end
-        if !$isfinal || matches($pat, current_str)
+        if !$isfinal || matches($pat, current_str, $id)
             local ret
             local ts = ReTestSet($mod, $desc; verbose=$(options.transient_verbose))
             if nworkers() == 1 && get_testset_depth() == 0 && $(chan.preview) !== nothing
@@ -497,8 +497,8 @@ end
 """
 Generate the code for a `@testset` with a `for` loop argument
 """
-function testset_forloop(mod::String, isfinal::Bool, pat::Pattern, desc::Union{String,Expr},
-                         options, stats, chan, loops, tests, source)
+function testset_forloop(mod::String, isfinal::Bool, pat::Pattern, id::Int64,
+                         desc::Union{String,Expr}, options, stats, chan, loops, tests, source)
 
     desc = esc(desc)
     blk = quote
@@ -506,7 +506,7 @@ function testset_forloop(mod::String, isfinal::Bool, pat::Pattern, desc::Union{S
         if $isfinal
             current_str = string(get_testset_string(!first_iteration), '/', $desc)
         end
-        if !$isfinal || matches($pat, current_str)
+        if !$isfinal || matches($pat, current_str, $id)
             # Trick to handle `break` and `continue` in the test code before
             # they can be handled properly by `finally` lowering.
             if !first_iteration

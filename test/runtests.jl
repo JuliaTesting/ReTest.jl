@@ -57,7 +57,7 @@ function check(rx, list)
     @test RUN == list
     mktemp() do path, io
         redirect_stdout(io) do
-            retest(M, Regex(rx), dry=true)
+            retest(M, Regex(rx), dry=true, id=false) # TODO: test with id=true
         end
         seekstart(io)
         expected = map(list) do t
@@ -249,6 +249,15 @@ check(MultiPat, ["aa", "d2"], ["aa", "2"])
 check(MultiPat, ["d1", "d2"], ["1", "2"])
 check(MultiPat, ["d2"], ["aa", "2"], "d")
 check(MultiPat, ["d1", "d2"], ["aa", "2", ["2", "1"]], "d")
+
+# with integers
+# check we don't collect the range:
+check(MultiPat, ["a", "b", "aa", "c", "d1", "d2"], 1:Int64(10)^2)
+check(MultiPat, ["d1", "d2"], 5)
+check(MultiPat, ["a", "b", "aa"], "a", 2:3)
+check(MultiPat, ["a", "b"], "a", 1:2)
+check(MultiPat, ["a", "aa"], "a", [1, 3])
+check(MultiPat, ["aa", "c"], ["aa", 4])
 
 
 ### toplevel #################################################################
