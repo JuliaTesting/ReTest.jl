@@ -88,6 +88,13 @@ make_pattern(pat::AbstractArray) = Or(make_pattern.(pat))
 # special case for optimizing unit-ranges:
 make_pattern(pat::AbstractArray{<:Integer}) = Or(pat)
 
+hasregex(::Regex) = true
+hasregex(::Integer) = false
+hasregex(pat::Union{And,Or}) =
+    pat.xs isa AbstractArray{<:Integer} ?
+        false :
+        any(hasregex, pat.xs)
+
 
 # * TestsetExpr
 
@@ -222,7 +229,8 @@ end
 
 function resolve!(mod::Module, ts::TestsetExpr, pat::Pattern;
                   verbose::Int, id::Int64, # external calls
-                  force::Bool=false, shown::Bool=true, depth::Int=0) # only recursive calls
+                  force::Bool=false, shown::Bool=true, depth::Int=0, # only recursive calls
+                  hasrx=hasregex(pat))
 
     strings = empty!(ts.strings)
     desc = ts.desc
@@ -240,7 +248,9 @@ function resolve!(mod::Module, ts::TestsetExpr, pat::Pattern;
     # and ts.run == true
 
     function giveup()
-        ts.run = true
+        ts.run = hasrx ? true : # conservative, we don't really know at this point
+                         matches(pat, "", ts.id)
+
         if shown
             # set ts.descwidth to a lower bound to reduce misalignment
             ts.descwidth = 2*depth + mapreduce(+, desc.args) do part

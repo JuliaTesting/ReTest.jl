@@ -324,6 +324,7 @@ using ReTest
 RUN = []
 
 @testset "loops 1" begin
+    push!(RUN, 9)
     a = 1
     b = 2
 
@@ -346,8 +347,12 @@ end
 # @test_logs (:warn, r"could not evaluate testset description.*") retest(Loops1, r"asd")
 # @test Loops1.RUN == [1, 0, 2, 0]
 # empty!(Loops1.RUN)
-retest(Loops1) # should not log
-@test Loops1.RUN == [1, 0, -1, 2, 0, -1]
+# retest(Loops1) # should not log
+check(Loops1, [9, 1, 0, -1, 2, 0, -1])
+check(Loops1, [], 9:9) # when no regex is passed, even with the presence of statically
+                       # unresolvable descriptions, we can filter out stuff
+                       # (i.e. here, we don't run "loops 1" just in case "local$i" would
+                       # be run, as we can determine from pattern 9:9 that nothing must run)
 
 module Loops2
 using ReTest
