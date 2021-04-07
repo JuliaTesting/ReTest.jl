@@ -61,6 +61,7 @@ Format(stats, desc_align) = Format(stats, desc_align, 0, 0, 0,0 ,0)
 mutable struct ReTestSet <: AbstractTestSet
     mod::String # enclosing module
     description::AbstractString
+    id::Int64
     overall::Bool # TODO: could be conveyed by having self.mod == ""
     results::Vector
     n_passed::Int
@@ -70,8 +71,8 @@ mutable struct ReTestSet <: AbstractTestSet
     exception::Union{TestSetException,Nothing}
 end
 
-ReTestSet(mod, desc, overall=false; verbose = true) =
-    ReTestSet(mod, desc, overall, [], 0, false, verbose, NamedTuple(), nothing)
+ReTestSet(mod, desc, id::Integer=0; overall=false, verbose = true) =
+    ReTestSet(mod, desc, id, overall, [], 0, false, verbose, NamedTuple(), nothing)
 
 # For a non-passed result, simply store the result
 record(ts::ReTestSet, t::Union{Broken,Fail,Error}) = (push!(ts.results, t); t)
@@ -103,7 +104,8 @@ function print_test_errors(ts::ReTestSet)
 end
 
 function print_test_results(ts::ReTestSet, fmt::Format;
-                            depth::Int=0, bold::Bool=false, hasbroken::Bool=false)
+                            depth::Int=0, bold::Bool=false, hasbroken::Bool=false,
+                            maxidw::Int)
     # Calculate the overall number for each type so each of
     # the test result types are aligned
     upd = false
@@ -186,6 +188,9 @@ function print_test_results(ts::ReTestSet, fmt::Format;
 
     # Print the outer test set header once
     if upd
+        if maxidw > 0
+            print(' '^(maxidw + 2)) # +2 for "| " after number
+        end
         printstyled(rpad("", align, " "), "  ", " "; bold=true, color=:white)
         if pass_width > 0
             printstyled(lpad("Pass", pass_width, " "), "  "; bold=true, color=:green)
@@ -213,7 +218,7 @@ function print_test_results(ts::ReTestSet, fmt::Format;
     # Recursively print a summary at every level
     print_counts(ts, fmt, depth, align,
                  pass_width, fail_width, error_width, broken_width, total_width;
-                 bold=bold)
+                 bold=bold, maxidw=maxidw)
 end
 
 # Called at the end of a @testset, behaviour depends on whether
@@ -308,7 +313,7 @@ end
 # the tree of test sets
 function print_counts(ts::ReTestSet, fmt::Format, depth, align,
                       pass_width, fail_width, error_width, broken_width, total_width;
-                      bold)
+                      bold, maxidw)
     # Count results by each type at this level, and recursively
     # through any child test sets
     passes, fails, errors, broken, c_passes, c_fails, c_errors, c_broken = get_test_counts(ts)
@@ -317,6 +322,14 @@ function print_counts(ts::ReTestSet, fmt::Format, depth, align,
     # the test results appear above each other
 
     style = bold ? (bold=bold, color=:white) : NamedTuple()
+    if maxidw > 0
+        if ts.id != 0
+            printstyled(lpad(ts.id, maxidw), "| ", color = :light_black, bold=true)
+        else
+            print(' '^(maxidw+2))
+        end
+    end
+
     printstyled(rpad(string("  "^depth, ts.description), align, " "); style...)
 
     np = passes + c_passes
@@ -409,7 +422,7 @@ function print_counts(ts::ReTestSet, fmt::Format, depth, align,
             if isa(t, ReTestSet)
                 print_counts(t, fmt, depth + 1, align,
                              pass_width, fail_width, error_width, broken_width, total_width,
-                             bold=false)
+                             bold=false, maxidw=maxidw)
             end
         end
     end
@@ -455,7 +468,7 @@ function testset_beginend(mod::String, isfinal::Bool, pat::Pattern, id::Int64, d
         end
         if !$isfinal || matches($pat, current_str, $id)
             local ret
-            local ts = ReTestSet($mod, $desc; verbose=$(options.transient_verbose))
+            local ts = ReTestSet($mod, $desc, $id; verbose=$(options.transient_verbose))
             if nworkers() == 1 && get_testset_depth() == 0 && $(chan.preview) !== nothing
                 put!($(chan.preview), $desc)
             end
@@ -515,7 +528,7 @@ function testset_forloop(mod::String, isfinal::Bool, pat::Pattern, id::Int64,
                 # it's 1000 times faster to copy from tmprng rather than calling Random.seed!
                 copy!(RNG, tmprng)
             end
-            ts = ReTestSet($mod, $desc; verbose=$(options.transient_verbose))
+            ts = ReTestSet($mod, $desc, $id; verbose=$(options.transient_verbose))
             if nworkers() == 1 && get_testset_depth() == 0 && $(chan.preview) !== nothing
                 put!($(chan.preview), ts.description)
             end
