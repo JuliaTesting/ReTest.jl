@@ -439,6 +439,21 @@ function get_testset_string(remove_last=false)
     join('/' * ts.description for ts in (remove_last ? testsets[1:end-1] : testsets))
 end
 
+# HACK: we re-use the same macro name `@testset` for actual execution (like in `Test`)
+# as for the one documented in ReTest (deferred execution), because otherwise
+# packages wouldn't know about the former, say named @retestset (which has to be evaluated
+# within packages' modules). We could export @retestset but this is fragile;
+# is there a simple alternative?
+# In the meantime, we create this semi-catch-all method, called from make_ts,
+# so that when arguments are messed up (forgot to update call in make_ts), we don't end-up
+# calling the real-catch-all method from InlineTest (which is again deferred), which
+# regularly leads to confusing behavior
+
+# try to not mess up first three arguments!
+macro testset(mod::String, isfinal::Bool, pat::Pattern, x...)
+    error("invalid arguments")
+end
+
 # non-inline testset with regex filtering support
 macro testset(mod::String, isfinal::Bool, pat::Pattern, id::Int64, desc::Union{String,Expr}, options,
               stats::Bool, chan, body)
