@@ -95,6 +95,10 @@ hasregex(pat::Union{And,Or}) =
         false :
         any(hasregex, pat.xs)
 
+hasinteger(::Regex) = false
+hasinteger(::Integer) = true
+hasinteger(pat::Union{And,Or}) = any(hasinteger, pat.xs)
+
 
 # * TestsetExpr
 
@@ -444,7 +448,7 @@ revise_pkgid() = Base.PkgId(Base.UUID("295af30f-e4ad-537b-8983-00126c2a3abe"), "
 
 """
     retest(m::Module..., pattern...; dry::Bool=false,
-                                     stats::Bool=false, verbose::Real=true, id::Bool=true,
+                                     stats::Bool=false, verbose::Real=true, [id::Bool],
                                      shuffle::Bool=false, recursive::Bool=true)
 
 Run all the tests declared in `@testset` blocks, within modules `m` if specified,
@@ -460,7 +464,7 @@ or within all currently loaded modules otherwise.
   `verbose=true` annotation to corresponding testsets); the default behavior
   (`true` or `1`) corresponds to printing the result of top-level testsets.
 * If `id` is `true`, a unique (per module) integer ID is printed next to each testset,
-  which can be used for filtering.
+  which can be used for filtering. The default value of `id` depends on other options.
 * If `shuffle` is `true`, shuffle the order in which top-level testsets within
   a given module are run, as well as the list of passed modules.
 * If `recursive` is `true`, the tests for all the recursive submodules of
@@ -520,7 +524,7 @@ function retest(args::Union{Module,AbstractString,Regex,Integer,AbstractArray}..
 
     implicitmodules, modules, pat, verbose = process_args(args, verbose, shuffle, recursive)
     overall = length(modules) > 1
-    root = Testset.ReTestSet("", "Overall", true)
+    root = Testset.ReTestSet("", "Overall", overall=true)
 
     maxidw = Ref{Int}(0) # visual width for showing IDs (Ref for mutability in hack below)
     tests_descs_hasbrokens = fetchtests.(modules, Ref(pat), verbose, overall, Ref(maxidw))
@@ -543,6 +547,9 @@ function retest(args::Union{Module,AbstractString,Regex,Integer,AbstractArray}..
         return
     end
 
+    id = something(id, dry | hasinteger(pat))
+    maxidw[] = id ? maxidw[] : 0
+
     for imod in eachindex(modules)
         mod = modules[imod]
         tests = alltests[imod]
@@ -552,7 +559,6 @@ function retest(args::Union{Module,AbstractString,Regex,Integer,AbstractArray}..
             shuffle!(tests)
 
         if dry
-            id = something(id, true)
             showmod = overall || implicitmodules
             if showmod
                 imod > 1 && verbose > 0 &&
@@ -598,7 +604,7 @@ function retest(args::Union{Module,AbstractString,Regex,Integer,AbstractArray}..
         exception = Ref{Exception}()
         interrupted = Threads.Atomic{Bool}(false)
 
-        module_ts = Testset.ReTestSet("", string(mod) * ':', true)
+        module_ts = Testset.ReTestSet("", string(mod) * ':', overall=true)
         push!(root.results, module_ts)
 
         many = length(tests) > 1 || isfor(tests[1]) # FIXME: isfor when only one iteration
@@ -717,7 +723,8 @@ function retest(args::Union{Module,AbstractString,Regex,Integer,AbstractArray}..
                         module_ts.description = chop(module_ts.description, tail=1)
                         clear_line()
                         Testset.print_test_results(module_ts, format,
-                                                   bold=true, hasbroken=hasbroken)
+                                                   bold=true, hasbroken=hasbroken,
+                                                   maxidw=maxidw[])
                     else
                         nothing
                     end
@@ -756,7 +763,8 @@ function retest(args::Union{Module,AbstractString,Regex,Integer,AbstractArray}..
                                 rts, format;
                                 depth = Int(!rts.overall & isindented(verbose, overall, many)),
                                 bold = rts.overall | !many,
-                                hasbroken=hasbroken
+                                hasbroken=hasbroken,
+                                maxidw=maxidw[]
                             )
                         end
                         if rts.anynonpass
@@ -892,7 +900,8 @@ function retest(args::Union{Module,AbstractString,Regex,Integer,AbstractArray}..
             println()
     end
     nmodules > 1 && !dry &&
-        Testset.print_test_results(root, format, bold=true, hasbroken=hasbroken)
+        Testset.print_test_results(root, format, bold=true,
+                                   hasbroken=hasbroken, maxidw=maxidw[])
     nothing
 end
 

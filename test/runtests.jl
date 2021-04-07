@@ -656,19 +656,21 @@ for dry=(true, false),
     verbose=0:3,
     stats=(true, false),
     mod=((X,), (YYYYYYYYYYYYY,), (X, YYYYYYYYYYYYY), (NoTests,)),
-    regex=(r"inner", r"", "not matching")
+    pattern=(r"inner", 1:99, "not matching")
 
-    if regex == "not matching"
+    id=rand([true, false, nothing])
+    if pattern == "not matching"
         mod in [(X,), (X, YYYYYYYYYYYYY)] || continue
         verbose in 0:1 || continue
     end
     if mod == (NoTests,)
-        dry == false && verbose in 0:1 && regex == r"" ||
+        dry == false && verbose in 0:1 && pattern == 1:99 ||
             continue
     end
     modstr = length(mod) == 1 ? string(mod[1]) : string(mod)
-    println("\n####################### Display: mod=$modstr stats=$stats dry=$dry verbose=$verbose regex=$regex\n")
-    retest(mod..., regex; shuffle=true, verbose=verbose, stats=stats, dry=dry)
+    # have to show 'X' below, because `nothing` can't be printed on old Julia
+    println("\n####################### Display: mod=$modstr stats=$stats dry=$dry verbose=$verbose pattern=$pattern, id=$(something(id, 'X'))\n")
+    retest(mod..., pattern; shuffle=true, verbose=verbose, stats=stats, dry=dry, id=id)
 end
 
 ### dry-run
