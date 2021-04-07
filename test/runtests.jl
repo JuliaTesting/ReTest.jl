@@ -260,6 +260,60 @@ check(MultiPat, ["a", "aa"], "a", [1, 3])
 check(MultiPat, ["aa", "c"], ["aa", 4])
 
 
+### Module patterns ##########################################################
+
+RUN = []
+
+module ModPat
+using ReTest
+using Main: RUN
+
+@testset "aa" begin
+    push!(RUN, "aa")
+    @testset "b" begin
+        push!(RUN, "b")
+    end
+end
+
+@testset "ab" begin
+    push!(RUN, "ab")
+end
+
+module In
+module Ner
+using ReTest
+using Main: RUN
+
+@testset "c" begin
+    push!(RUN, "c")
+end
+end end # In.Ner
+end # ModPat
+
+module ModPat2
+using ReTest
+using Main: RUN
+
+@testset "ad" begin
+    push!(RUN, "ad")
+end
+end
+
+function _check(x...)
+    empty!(RUN)
+    retest(x[1:end-1]...)
+    @test RUN == split(x[end])
+end
+
+_check(ModPat, "aa b ab c")
+_check(ModPat => 1:99, "aa b ab") # no recursive
+_check(ModPat => "a", 1:2, "aa b")
+_check(ModPat2 => "a", ModPat, 1:9, "ad aa b ab c") # ModPat recursive
+_check(ModPat2 => "a", ModPat, 2:9, "aa b ab")
+_check(ModPat2 => "a", ModPat, ModPat, 2:9, "aa b ab") # deduplicate
+_check(ModPat2 => "", ModPat => "aa", 2, "aa b")
+
+
 ### toplevel #################################################################
 
 # The following test is just to exert `@assert allunique(TESTED_MODULES)` in
@@ -268,13 +322,12 @@ check(MultiPat, ["aa", "c"], ["aa", 4])
 # tested modules, which are in submodules of Main, are not re-added to
 # TESTED_MODULES while going through submodules of Base.loaded_modules ∋ Main
 retest(dry=true)
-
-RUN = []
+RUNTOP = []
 @testset "toplevel" begin
     # this tests that the testset is run exactly once
     # Main is special here, as it's both in Base.loaded_modules
     # and it gets registered automatically in ReTest.TESTED_MODULES
-    push!(RUN, "toplevel")
+    push!(RUNTOP, "toplevel")
     @test true
 end
 
@@ -286,7 +339,7 @@ for v in (-rand(1:9), 4.2, -Inf)
     @test_throws ArgumentError retest(verbose=v)
 end
 
-@test RUN == ["toplevel"]
+@test RUNTOP == ["toplevel"]
 
 retest(r"^/f1", stats=true) # just test that a regex can be passed,
                             # and that stats works for multiple subtests

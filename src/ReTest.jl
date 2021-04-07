@@ -447,11 +447,10 @@ end
 revise_pkgid() = Base.PkgId(Base.UUID("295af30f-e4ad-537b-8983-00126c2a3abe"), "Revise")
 
 """
-    retest(m::Module..., pattern...; dry::Bool=false,
-                                     stats::Bool=false, verbose::Real=true, [id::Bool],
-                                     shuffle::Bool=false, recursive::Bool=true)
+    retest(mod..., pattern...; dry::Bool=false, stats::Bool=false, verbose::Real=true, [id::Bool],
+                               shuffle::Bool=false, recursive::Bool=true)
 
-Run all the tests declared in `@testset` blocks, within modules `m` if specified,
+Run all the tests declared in `@testset` blocks, within modules `mod` if specified,
 or within all currently loaded modules otherwise.
 
 ### Keywords
@@ -468,7 +467,7 @@ or within all currently loaded modules otherwise.
 * If `shuffle` is `true`, shuffle the order in which top-level testsets within
   a given module are run, as well as the list of passed modules.
 * If `recursive` is `true`, the tests for all the recursive submodules of
-  the passed modules `m` are also run.
+  the passed modules `mod` are also run.
 
 ### Filtering
 
@@ -508,11 +507,24 @@ This means for example that `"a|b"` will match a subject like `"a|b"` or `"A|B"`
 but not like `"a"` (only in Julia versions >= 1.3; in older versions,
 the regex is simply created as `Regex(pattern, "i")`).
 
+### Per-module patterns
+
+In addition to modules or patterns, positional arguments of `retest` can also be
+a pair of the form `mod => pattern`: then `pattern` is used to filter only
+testsets from `mod`; if other "standalone" patterns (not attached to a module) are
+specified, they also apply to `mod`. For example, a call like
+`retest(mod1 => 1:3, mod2, "x")` is equivalent to `retest(mod1, 1:3, "x")`
+and `retest(mod2, "x")`.
+Note that the `recursive` keyword does _not_ apply to modules from a pair.
+
+
 !!! note
     this function executes each (top-level) `@testset` block using `eval` *within* the
-    module in which it was written (e.g. `m`, when specified).
+    module in which it was written (e.g. `mod`, when specified).
 """
-function retest(args::Union{Module,AbstractString,Regex,Integer,AbstractArray}...;
+function retest(args::Union{Module,AbstractString,Regex,Integer,AbstractArray,
+                            Pair{Module,
+                                 <:Union{AbstractString,Regex,Integer,AbstractArray}}}...;
                 dry::Bool=false,
                 stats::Bool=false,
                 shuffle::Bool=false,
@@ -522,12 +534,12 @@ function retest(args::Union{Module,AbstractString,Regex,Integer,AbstractArray}..
                 id=nothing,
                 )
 
-    implicitmodules, modules, pat, verbose = process_args(args, verbose, shuffle, recursive)
+    implicitmodules, modules, verbose = process_args(args, verbose, shuffle, recursive)
     overall = length(modules) > 1
     root = Testset.ReTestSet("", "Overall", overall=true)
 
     maxidw = Ref{Int}(0) # visual width for showing IDs (Ref for mutability in hack below)
-    tests_descs_hasbrokens = fetchtests.(modules, Ref(pat), verbose, overall, Ref(maxidw))
+    tests_descs_hasbrokens = fetchtests.(modules, verbose, overall, Ref(maxidw))
     isempty(tests_descs_hasbrokens) &&
         throw(ArgumentError("no modules using ReTest could be found and none were passed"))
 
@@ -542,16 +554,20 @@ function retest(args::Union{Module,AbstractString,Regex,Integer,AbstractArray}..
     if nmodules == 0
         plural = length(emptymods) > 1 ? "s" : ""
         print("No matching tests for module$plural ")
-        join(stdout, string.(getindex.((modules,), emptymods)), ", ", " and ")
+        join(stdout,
+             string.(first.(getindex.((modules,), emptymods))),
+             ", ", " and ")
         println('.')
         return
     end
 
-    id = something(id, dry | hasinteger(pat))
+    id = something(id, dry | any(modules) do (mod, pat)
+                                 hasinteger(pat)
+                             end)
     maxidw[] = id ? maxidw[] : 0
 
     for imod in eachindex(modules)
-        mod = modules[imod]
+        mod, pat = modules[imod]
         tests = alltests[imod]
         isempty(tests) && continue
 
@@ -914,15 +930,50 @@ end
 
 function process_args(args, verbose, shuffle, recursive)
     ########## process args
-    patterns = []
-    modules = Module[]
+    baremods = Module[] # list of standalone modules (not in a pair)
+    patterns = []       # list of standalone patterns
+    modpats = []        # pairs, plus "pair-ized" standalone modules
+
     for arg in args
         if arg isa Module
-            push!(modules, arg)
+            arg in baremods && continue # we uniquify only in the simple cases
+            push!(modpats, arg => And(patterns))
+            push!(baremods, arg)
+        elseif arg isa Pair{Module}
+            push!(modpats, first(arg) => And([make_pattern(last(arg)), And(patterns)]))
         else
             push!(patterns, make_pattern(arg))
         end
     end
+    if !allunique(first.(modpats))
+        throw(ArgumentError("some modules specified multiple times"))
+        # TODO: show name of said modules
+        # NOTE: we _could_ merge the specifications for a given module, but it seems better
+        # to tell the user about potential error.
+        # Also, currently we can't simply run successively both `mod=>pat1` and `mod=>pat2`
+        # in a row, because `resolve!` is run for all pairs before running the tests
+        # (i.e. it's called before the big loop over modules in `retest`), and the testsets
+        # carry some state for a given pattern (of course this would be fixable).
+    end
+
+    implicitmodules = isempty(modpats)
+
+    ########## process modules
+    if implicitmodules || !isempty(baremods)
+        # + we automatically select all loaded modules with ReTest (1st condition), or
+        # + we need to look for recursive (2nd condition), which applies only to baremods
+        lmods = length(baremods)
+        computemodules!(baremods, recursive)
+        newmods = splice!(baremods, lmods+1:length(baremods))
+        # remove from newmods those already present in modpats
+        filter!(newmods) do mod
+            all(modpats) do (m, p)
+                m != mod
+            end
+        end
+        append!(modpats, newmods .=> Ref(And(patterns)))
+    end
+    shuffle && shuffle!(modpats)
 
     ########## process verbose
     if !isinteger(verbose) && !isinf(verbose) || signbit(verbose)
@@ -933,10 +984,10 @@ function process_args(args, verbose, shuffle, recursive)
     end
     verbose = Int(verbose)
 
-    isempty(modules), computemodules!(modules, shuffle, recursive), And(patterns), verbose
+    implicitmodules, modpats, verbose
 end
 
-function computemodules!(modules::Vector{Module}, shuffle, recursive)
+function computemodules!(modules::Vector{Module}, recursive)
     if isempty(modules) || recursive # update TESTED_MODULES
         # TESTED_MODULES might have "duplicate" entries, i.e. modules with the same
         # name, when one overwrites itself by being redefined; in this case,
@@ -978,7 +1029,7 @@ function computemodules!(modules::Vector{Module}, shuffle, recursive)
         # recursive doesn't change anything here
         append!(modules, TESTED_MODULES) # copy! not working on Julia 1.0
     else
-        unique!(modules)
+        @assert allunique(modules)
         if recursive
             for mod in TESTED_MODULES
                 mod ∈ modules && continue
@@ -995,11 +1046,10 @@ function computemodules!(modules::Vector{Module}, shuffle, recursive)
             end
         end
     end
-    shuffle && shuffle!(modules)
     modules
 end
 
-function fetchtests(mod, pat, verbose, overall, maxidw)
+function fetchtests((mod, pat), verbose, overall, maxidw)
     tests = updatetests!(mod)
     descwidth = 0
     hasbroken = false
