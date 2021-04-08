@@ -58,12 +58,24 @@ struct Or <: Pattern
 end
 
 alwaysmatches(pat::And) = all(alwaysmatches, pat.xs)
-alwaysmatches(pat::Or) = any(alwaysmatches, pat.xs)
+
+alwaysmatches(pat::Or) =
+    pat.xs isa AbstractArray{<:Integer} ?
+        false : # special case for huge unit ranges; locally, this optimization seems
+                # unnecessary, i.e. alwaysmatches(Or(1:10...0)) is constant time anyway,
+                # but on CI, the any(...) below takes tooooo long
+        any(alwaysmatches, pat.xs)
+
 alwaysmatches(rx::Regex) = isempty(rx.pattern)
 alwaysmatches(id::Integer) = false
 
 matches(pat::And, x, id) = all(p -> matches(p, x, id), pat.xs)
-matches(pat::Or, x, id) = any(p -> matches(p, x, id), pat.xs)
+
+matches(pat::Or, x, id) =
+    pat.xs isa AbstractArray{<:Integer} ?
+        id ∈ pat.xs : # optimized for unit ranges
+        any(p -> matches(p, x, id), pat.xs)
+
 matches(rx::Regex, x, _) = occursin(rx, x)
 matches(pat::Integer, _, id) = pat == id
 
