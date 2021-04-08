@@ -252,7 +252,7 @@ check(MultiPat, ["d1", "d2"], ["aa", "2", ["2", "1"]], "d")
 
 # with integers
 # check we don't collect the range:
-check(MultiPat, ["a", "b", "aa", "c", "d1", "d2"], 1:Int64(10)^2)
+check(MultiPat, ["a", "b", "aa", "c", "d1", "d2"], 1:Int64(10)^15)
 check(MultiPat, ["d1", "d2"], 5)
 check(MultiPat, ["a", "b", "aa"], "a", 2:3)
 check(MultiPat, ["a", "b"], "a", 1:2)
