@@ -528,7 +528,7 @@ Note that the `recursive` keyword does _not_ apply to modules from a pair.
     this function executes each (top-level) `@testset` block using `eval` *within* the
     module in which it was written (e.g. `mod`, when specified).
 """
-function retest(args::ArgType...;
+function retest(@nospecialize(args::ArgType...);
                 dry::Bool=false,
                 stats::Bool=false,
                 shuffle::Bool=false,
@@ -932,7 +932,7 @@ function thread_pin(t::Task, tid::UInt16)
     return t
 end
 
-function process_args(args, verbose, shuffle, recursive)
+function process_args(@nospecialize(args), verbose, shuffle, recursive)
     ########## process args
     baremods = Module[] # list of standalone modules (not in a pair)
     patterns = []       # list of standalone patterns
