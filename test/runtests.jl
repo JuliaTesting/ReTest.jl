@@ -4,6 +4,24 @@ Pkg.develop(PackageSpec(path="../InlineTest"))
 
 using ReTest
 
+RUN = []
+
+function check(x...; runtests=false, verbose=true, stats=false, dry=false)
+    args = x[1:end-1]
+    expected = x[end]
+    if expected isa AbstractString
+        expected = split(x[end])
+    end
+
+    empty!(RUN)
+    if runtests
+        getfield(args[1], :runtests)(args[2:end]...; verbose=verbose, stats=stats, dry=dry)
+    else
+        retest(args...; verbose=verbose, stats=stats, dry=dry)
+    end
+    @test RUN == expected
+end
+
 module M
 using ReTest
 
@@ -105,8 +123,7 @@ retest(M)
 
 module N
 using ReTest
-
-RUN = []
+using Main: RUN
 
 # testing non-final non-toplevel testsets
 @testset "i" begin
@@ -133,29 +150,19 @@ RUN = []
         end
     end
 end
+end # N
 
-function check(rx, list)
-    empty!(RUN)
-    retest(N, Regex(rx))
-    @test sort(RUN) == sort(list)
-    empty!(RUN)
-    N.runtests(Regex(rx))
-    @test sort(RUN) == sort(list)
-end
-end
-
-import .N
-N.check(".*j1", [])
-N.check(".*j/1", [])
-N.check("^/i/j0", [])
-N.check("^/i/l10", [])
+check(N, r".*j1", ""; runtests=true)
+check(N, r".*j/1", ""; runtests=false)
+check(N, r"^/i/j0", ""; runtests=true)
+check(N, r"^/i/l10", ""; runtests=false)
 
 ### module P #################################################################
+# test ReTest's wrapping of non-regex patterns
 
 module P
 using ReTest
-
-RUN = []
+using Main: RUN
 
 # testing non-final non-toplevel testsets
 @testset "a" begin
@@ -177,39 +184,28 @@ end
     push!(RUN, "D&E")
     @test true
 end
+end # P
 
-function check(rx, list)
-    empty!(RUN)
-    retest(P, rx, verbose=0)
-    @test sort(RUN) == sort(list)
-    empty!(RUN)
-    P.runtests(rx, verbose=2)
-    @test sort(RUN) == sort(list)
-end
-end
-
-import .P # test ReTest's wrapping of non-regex patterns
-P.check("b", ["a", "b", "b|c"]) # an implicit prefix r".*" is added
-P.check("B", ["a", "b", "b|c"]) # idem, case-insensitive
-P.check(r"B", []) # not case-insensitive
+check(P, "b", "a b b|c"; verbose=2) # an implicit prefix r".*" is added
+check(P, "B", "a b b|c"; verbose=0, runtests=true) # idem, case-insensitive
+check(P, r"B", "") # not case-insensitive
 
 if VERSION >= v"1.3"
-    P.check("b|c", ["a", "b|c"]) # "b" is not matched
-    P.check("B|C", ["a", "b|c"]) # idem, case-insensitive
+    check(P, "b|c", "a b|c") # "b" is not matched
+    check(P, "B|C", "a b|c") # idem, case-insensitive
 end
 
-P.check("d&e", ["D&E"])
-P.check("d&E", ["D&E"])
-P.check(r"d&E", [])
-P.check(r"d&E"i, ["D&E"])
+check(P, "d&e", "D&E")
+check(P, "d&E", "D&E")
+check(P, r"d&E", "")
+check(P, r"d&E"i, "D&E")
 
 
 ### multiple patterns ########################################################
 
 module MultiPat
 using ReTest
-
-RUN = []
+using Main: RUN
 
 @testset "a" begin
     push!(RUN, "a")
@@ -233,37 +229,29 @@ end
 
 end # MultiPat
 
-function check(mod, res, pats...)
-    empty!(mod.RUN)
-    retest(mod, pats...)
-    @test sort(mod.RUN) == sort(res)
-end
-
-check(MultiPat, ["a", "b", "aa"], "a")
-check(MultiPat, ["a", "b", "c"], "b")
-check(MultiPat, ["a", "b"], "a", "b")
-check(MultiPat, ["a", "b"], ("a", "b"))
-check(MultiPat, ["a", "b"], "b", r"a")
-check(MultiPat, [], "b", "d")
-check(MultiPat, [], "a", "e")
-check(MultiPat, ["aa", "d2"], ["aa", "2"])
-check(MultiPat, ["d1", "d2"], ["1", "2"])
-check(MultiPat, ["d2"], ["aa", "2"], "d")
-check(MultiPat, ["d1", "d2"], ["aa", "2", ["2", "1"]], "d")
+check(MultiPat, "a", "a b aa")
+check(MultiPat, "b", "a b c")
+check(MultiPat, "a", "b", "a b")
+check(MultiPat, ("a", "b"), "a b")
+check(MultiPat, "b", r"a", "a b")
+check(MultiPat, "b", "d", "")
+check(MultiPat, "a", "e", "")
+check(MultiPat, ["aa", "2"], "aa d2")
+check(MultiPat, ["1", "2"], "d1 d2")
+check(MultiPat, ["aa", "2"], "d", "d2")
+check(MultiPat, ["aa", "2", ["2", "1"]], "d", "d1 d2")
 
 # with integers
 # check we don't collect the range:
-check(MultiPat, ["a", "b", "aa", "c", "d1", "d2"], 1:Int64(10)^15)
-check(MultiPat, ["d1", "d2"], 5)
-check(MultiPat, ["a", "b", "aa"], "a", 2:3)
-check(MultiPat, ["a", "b"], "a", 1:2)
-check(MultiPat, ["a", "aa"], "a", [1, 3])
-check(MultiPat, ["aa", "c"], ["aa", 4])
+check(MultiPat, 1:Int64(10)^15, "a b aa c d1 d2")
+check(MultiPat, 5, "d1 d2")
+check(MultiPat, "a", 2:3, "a b aa")
+check(MultiPat, "a", 1:2, "a b")
+check(MultiPat, "a", [1, 3], "a aa")
+check(MultiPat, ["aa", 4], "aa c")
 
 
 ### Module patterns ##########################################################
-
-RUN = []
 
 module ModPat
 using ReTest
@@ -300,21 +288,14 @@ using Main: RUN
 end
 end
 
-function _check(x...)
-    empty!(RUN)
-    retest(x[1:end-1]...)
-    @test RUN == split(x[end])
-end
-
-_check(ModPat, "aa b ab c")
-_check(ModPat => 1:99, "aa b ab") # no recursive
-_check(ModPat => "a", 1:2, "aa b")
-_check(ModPat2 => "a", ModPat, 1:9, "ad aa b ab c") # ModPat recursive
-_check(ModPat2 => ("a", 1:9), ModPat => 1:9, "ad aa b ab") # ModPat not recursive
-_check(ModPat2 => "a", ModPat, 2:9, "aa b ab")
-_check(ModPat2 => "a", ModPat, ModPat, 2:9, "aa b ab") # deduplicate
-_check(ModPat2 => "", ModPat => "aa", 2, "aa b")
-
+check(ModPat, "aa b ab c")
+check(ModPat => 1:99, "aa b ab") # no recursive
+check(ModPat => "a", 1:2, "aa b")
+check(ModPat2 => "a", ModPat, 1:9, "ad aa b ab c") # ModPat recursive
+check(ModPat2 => ("a", 1:9), ModPat => 1:9, "ad aa b ab") # ModPat not recursive
+check(ModPat2 => "a", ModPat, 2:9, "aa b ab")
+check(ModPat2 => "a", ModPat, ModPat, 2:9, "aa b ab") # deduplicate
+check(ModPat2 => "", ModPat => "aa", 2, "aa b")
 
 ### toplevel #################################################################
 
@@ -355,10 +336,7 @@ import Main: RUN
     push!(RUN, 1)
 end
 end
-retest(Overwritten, stats=true) # testing stats when there are not tests
-@test RUN == [1]
-
-empty!(RUN)
+check(Overwritten, [1]; stats=true) # testing stats when there are not tests
 
 module Overwritten
 using ReTest
@@ -367,16 +345,15 @@ import Main: RUN
     push!(RUN, 2)
 end
 end
-retest(Overwritten)
-@test RUN == [2] # 1 must not appear (i.e. ReTest must not keep a reference to
-                 # the old overwritten version of `Overwritten`
+check(Overwritten, [2])
+# 1 must not appear (i.e. ReTest must not keep a reference to
+# the old overwritten version of `Overwritten`
 
 ### Loops ####################################################################
 
 module Loops1
 using ReTest
-
-RUN = []
+using Main: RUN
 
 @testset "loops 1" begin
     push!(RUN, 9)
@@ -404,15 +381,14 @@ end
 # empty!(Loops1.RUN)
 # retest(Loops1) # should not log
 check(Loops1, [9, 1, 0, -1, 2, 0, -1])
-check(Loops1, [], 9:9) # when no regex is passed, even with the presence of statically
+check(Loops1, 9:9, []) # when no regex is passed, even with the presence of statically
                        # unresolvable descriptions, we can filter out stuff
                        # (i.e. here, we don't run "loops 1" just in case "local$i" would
                        # be run, as we can determine from pattern 9:9 that nothing must run)
 
 module Loops2
 using ReTest
-
-RUN = []
+using Main: RUN
 
 @testset "loops 2" begin
     @testset "generator $i $I" for (i, I) in (i => typeof(i) for i in (1, 2))
@@ -435,16 +411,12 @@ end
 # TODO: check whether another run could lead to the same result, i.e. RUN == [1, 0, 2, 0] ?
 # @test_logs (:warn, r"could not evaluate testset-for iterator.*") retest(Loops2, r"asd")
 # @test Loops2.RUN == [1, 0, 2, 0]
-# empty!(Loops2.RUN)
-@test isempty(Loops2.RUN)
 
-retest(Loops2)
-@test Loops2.RUN == [1, 0, -1, 2, 0, -1]
+check(Loops2, [1, 0, -1, 2, 0, -1])
 
 module Loops3
 using ReTest
-
-RUN = []
+using Main: RUN
 
 @testset "loops 3" begin
     @testset "generator $i $I" for (i, I) in [i => typeof(i) for i in (1, 2)]
@@ -463,16 +435,13 @@ RUN = []
 end
 end
 
-retest(Loops3, r"asd")
-@test Loops3.RUN == []
-empty!(Loops3.RUN)
-retest(Loops3)
-@test Loops3.RUN == [1, 0, -1, 2, 0, -1]
+check(Loops3, r"asd", [])
+check(Loops3, [1, 0, -1, 2, 0, -1])
 
 module MultiLoops
 using ReTest
+using Main: RUN
 
-RUN = []
 C1, C2 = 1:2 # check that iteration has access to these values
 
 @testset "multiloops $x $y $z" for (x, y) in zip(1:C2, 1:2), z in C1:x
@@ -481,16 +450,12 @@ C1, C2 = 1:2 # check that iteration has access to these values
 end
 end
 
-retest(MultiLoops)
-@test MultiLoops.RUN == [(1, 1), (2, 1), (2, 2)]
-empty!(MultiLoops.RUN)
-retest(MultiLoops, "1 1")
-@test MultiLoops.RUN == [(1, 1)]
+check(MultiLoops, [(1, 1), (2, 1), (2, 2)])
+check(MultiLoops, "1 1", [(1, 1)])
 
 module Anonym
 using ReTest
-
-RUN = []
+using Main: RUN
 
 @testset for x=1:2
     @testset begin
@@ -500,15 +465,13 @@ RUN = []
 end
 end
 
-retest(Anonym)
-@test Anonym.RUN == [1, 2]
+check(Anonym, [1, 2])
 
 ### loop variable collision ##################################################
 
 module LoopCollision
 using ReTest
-
-RUN = []
+using Main: RUN
 
 @assert isdefined(LoopCollision, :sincos)
 @assert isdefined(LoopCollision, :sinpi)
@@ -526,15 +489,15 @@ end
 end # LoopCollision
 
 retest(LoopCollision, dry=true)
-retest(LoopCollision, dry=false)
-@test LoopCollision.RUN == [sin, cos, (sin, 1), (cos, 1)]
+check(LoopCollision, [sin, cos, (sin, 1), (cos, 1)]; dry=false)
+
 
 ### interpolated description #################################################
 
 module Interpolate
 using ReTest
+using Main: RUN
 
-RUN = []
 X = 0
 
 @testset "a $X" verbose=true begin
@@ -559,21 +522,16 @@ end
 end # Interpolate
 
 retest(Interpolate, dry=true)
-retest(Interpolate)
-@test Interpolate.RUN == 1:5
-empty!(Interpolate.RUN)
+check(Interpolate, 1:5)
 
-retest(Interpolate, "0")
-@test Interpolate.RUN == 1:5
-empty!(Interpolate.RUN)
+check(Interpolate, "0", 1:5)
 
-retest(Interpolate, "4")
-@test Interpolate.RUN == 4:5
+check(Interpolate, "4", 4:5)
 
 module InterpolateImpossible
 using ReTest
+using Main: RUN
 
-RUN = []
 X = 0
 
 @testset "a $X" verbose=true begin
@@ -603,16 +561,9 @@ end
 end # InterpolateImpossible
 
 retest(InterpolateImpossible, dry=true)
-retest(InterpolateImpossible)
-@test InterpolateImpossible.RUN == 1:6
-empty!(InterpolateImpossible.RUN)
-
-retest(InterpolateImpossible, "0")
-@test InterpolateImpossible.RUN == 1:6
-empty!(InterpolateImpossible.RUN)
-
-retest(InterpolateImpossible, "4") # should have a warning or two
-@test InterpolateImpossible.RUN == 4:6
+check(InterpolateImpossible, 1:6)
+check(InterpolateImpossible, "0", 1:6)
+check(InterpolateImpossible, "4", 4:6) # should have a warning or two
 
 
 ### Failing ##################################################################
