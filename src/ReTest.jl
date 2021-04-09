@@ -87,6 +87,7 @@ make_pattern(str::AbstractString) = VERSION >= v"1.3" ? r""i * str :
 make_pattern(pat::AbstractArray) = Or(make_pattern.(pat))
 # special case for optimizing unit-ranges:
 make_pattern(pat::AbstractArray{<:Integer}) = Or(pat)
+make_pattern(@nospecialize(pat::Tuple)) = And(Any[make_pattern(p) for p in pat])
 
 hasregex(::Regex) = true
 hasregex(::Integer) = false
@@ -446,6 +447,11 @@ end
 
 revise_pkgid() = Base.PkgId(Base.UUID("295af30f-e4ad-537b-8983-00126c2a3abe"), "Revise")
 
+"accepted types as positional arguments of `retest`"
+const ArgType = Union{Module,AbstractString,Regex,Integer,AbstractArray,Tuple,
+                      Pair{Module,
+                           <:Union{AbstractString,Regex,Integer,AbstractArray,Tuple}}}
+
 """
     retest(mod..., pattern...; dry::Bool=false, stats::Bool=false, verbose::Real=true, [id::Bool],
                                shuffle::Bool=false, recursive::Bool=true)
@@ -479,6 +485,7 @@ might be filtered out).
 
 A `pattern` can be a string, a `Regex`, an integer or an array.
 For a testset to "match" an array, it must match at least one of its elements (disjunction).
+Tp match a tuple, it must match all of its elements (conjunction).
 To match an integer, its ID must be equal to this integer (cf. the `id` keyword).
 
 ### `Regex` filtering
@@ -512,9 +519,8 @@ the regex is simply created as `Regex(pattern, "i")`).
 In addition to modules or patterns, positional arguments of `retest` can also be
 a pair of the form `mod => pattern`: then `pattern` is used to filter only
 testsets from `mod`; if other "standalone" patterns (not attached to a module) are
-specified, they also apply to `mod`. For example, a call like
-`retest(mod1 => 1:3, mod2, "x")` is equivalent to `retest(mod1, 1:3, "x")`
-and `retest(mod2, "x")`.
+specified, they also conjunctively apply to `mod`. For example, a call like
+`retest(mod1 => 1:3, mod2, "x")` is equivalent to `retest(mod1 => (1:3, "x"), mod2 => "x")`.
 Note that the `recursive` keyword does _not_ apply to modules from a pair.
 
 
@@ -522,9 +528,7 @@ Note that the `recursive` keyword does _not_ apply to modules from a pair.
     this function executes each (top-level) `@testset` block using `eval` *within* the
     module in which it was written (e.g. `mod`, when specified).
 """
-function retest(args::Union{Module,AbstractString,Regex,Integer,AbstractArray,
-                            Pair{Module,
-                                 <:Union{AbstractString,Regex,Integer,AbstractArray}}}...;
+function retest(args::ArgType...;
                 dry::Bool=false,
                 stats::Bool=false,
                 shuffle::Bool=false,

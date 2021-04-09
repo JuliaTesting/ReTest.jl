@@ -242,6 +242,7 @@ end
 check(MultiPat, ["a", "b", "aa"], "a")
 check(MultiPat, ["a", "b", "c"], "b")
 check(MultiPat, ["a", "b"], "a", "b")
+check(MultiPat, ["a", "b"], ("a", "b"))
 check(MultiPat, ["a", "b"], "b", r"a")
 check(MultiPat, [], "b", "d")
 check(MultiPat, [], "a", "e")
@@ -309,6 +310,7 @@ _check(ModPat, "aa b ab c")
 _check(ModPat => 1:99, "aa b ab") # no recursive
 _check(ModPat => "a", 1:2, "aa b")
 _check(ModPat2 => "a", ModPat, 1:9, "ad aa b ab c") # ModPat recursive
+_check(ModPat2 => ("a", 1:9), ModPat => 1:9, "ad aa b ab") # ModPat not recursive
 _check(ModPat2 => "a", ModPat, 2:9, "aa b ab")
 _check(ModPat2 => "a", ModPat, ModPat, 2:9, "aa b ab") # deduplicate
 _check(ModPat2 => "", ModPat => "aa", 2, "aa b")
