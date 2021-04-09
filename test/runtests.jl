@@ -1,10 +1,9 @@
-using Pkg
+using ReTest, Pkg
+
 Pkg.activate("ReTest")
 Pkg.develop(PackageSpec(path="../InlineTest"))
 
-using ReTest
-
-RUN = []
+const RUN = []
 
 function check(x...; runtests=false, verbose=true, stats=false, dry=false)
     args = x[1:end-1]
@@ -21,6 +20,17 @@ function check(x...; runtests=false, verbose=true, stats=false, dry=false)
     end
     @test RUN == expected
 end
+
+macro chapter(title, x)
+    title = string(title)
+
+    if isempty(ARGS) || any(pat -> occursin(Regex(pat, "i"), title), ARGS)
+        printstyled("\n\n", rpad("## $title #", 78, '#'), "\n\n", bold=true, color=:cyan)
+        esc(x)
+    end
+end
+
+# * M ........................................................................
 
 module M
 using ReTest
@@ -94,32 +104,36 @@ function check(rx, list)
         end
     end
 end
+end #
+
+@chapter M begin
+    # we don't put these checks in a @testset, as this would modify filtering logic
+    # (e.g. with `@testset "filtering" ...`, testset subjects would start with "/filtering/...")
+    M.check("a", ["a"])
+    M.check("a1", []) # testset is "final", so we do a full match
+    M.check("b", ["b1", "b2"])
+    M.check("/b", ["b1", "b2"])
+    M.check("b1", ["b1"])
+    M.check("c1", []) # "c1" is *not* partially matched against "/c/"
+    M.check("c/1", []) # "c" is partially matched, but nothing fully matches afterwards
+    M.check("c/d1", [])
+    M.check("c/d", ["c", "d"])
+    M.check("/c", ["c", "d", "e1", "e2"])
+    M.check(".*d", ["c", "d"])
+    M.check(".*(e1|e2)", ["c", "e1", "e2"])
+    M.check("f1", ["f1", "g", "h1", "h2"])
+    M.check("f",  ["f1", "g", "h1", "h2"])
+    M.check(".*g", ["f1", "g"])
+    M.check(".*h", ["f1", "h1", "h2"])
+    M.check(".*h1", ["f1", "h1"])
+    M.check(".*h\$", [])
+
+    # by default, respect order of tests:
+    M.check("", ["a", "b1", "b2", "c", "d", "e1", "e2", "f1", "g", "h1", "h2"])
+    retest(M)
 end
 
-# we don't put these checks in a @testset, as this would modify filtering logic
-# (e.g. with `@testset "filtering" ...`, testset subjects would start with "/filtering/...")
-M.check("a", ["a"])
-M.check("a1", []) # testset is "final", so we do a full match
-M.check("b", ["b1", "b2"])
-M.check("/b", ["b1", "b2"])
-M.check("b1", ["b1"])
-M.check("c1", []) # "c1" is *not* partially matched against "/c/"
-M.check("c/1", []) # "c" is partially matched, but nothing fully matches afterwards
-M.check("c/d1", [])
-M.check("c/d", ["c", "d"])
-M.check("/c", ["c", "d", "e1", "e2"])
-M.check(".*d", ["c", "d"])
-M.check(".*(e1|e2)", ["c", "e1", "e2"])
-M.check("f1", ["f1", "g", "h1", "h2"])
-M.check("f",  ["f1", "g", "h1", "h2"])
-M.check(".*g", ["f1", "g"])
-M.check(".*h", ["f1", "h1", "h2"])
-M.check(".*h1", ["f1", "h1"])
-M.check(".*h\$", [])
-
-# by default, respect order of tests:
-M.check("", ["a", "b1", "b2", "c", "d", "e1", "e2", "f1", "g", "h1", "h2"])
-retest(M)
+# * N ........................................................................
 
 module N
 using ReTest
@@ -152,12 +166,14 @@ using Main: RUN
 end
 end # N
 
-check(N, r".*j1", ""; runtests=true)
-check(N, r".*j/1", ""; runtests=false)
-check(N, r"^/i/j0", ""; runtests=true)
-check(N, r"^/i/l10", ""; runtests=false)
+@chapter N begin
+    check(N, r".*j1", ""; runtests=true)
+    check(N, r".*j/1", ""; runtests=false)
+    check(N, r"^/i/j0", ""; runtests=true)
+    check(N, r"^/i/l10", ""; runtests=false)
+end
 
-### module P #################################################################
+# * P ........................................................................
 # test ReTest's wrapping of non-regex patterns
 
 module P
@@ -186,22 +202,24 @@ end
 end
 end # P
 
-check(P, "b", "a b b|c"; verbose=2) # an implicit prefix r".*" is added
-check(P, "B", "a b b|c"; verbose=0, runtests=true) # idem, case-insensitive
-check(P, r"B", "") # not case-insensitive
+@chapter P begin
+    check(P, "b", "a b b|c"; verbose=2) # an implicit prefix r".*" is added
+    check(P, "B", "a b b|c"; verbose=0, runtests=true) # idem, case-insensitive
+    check(P, r"B", "") # not case-insensitive
 
-if VERSION >= v"1.3"
-    check(P, "b|c", "a b|c") # "b" is not matched
-    check(P, "B|C", "a b|c") # idem, case-insensitive
+    if VERSION >= v"1.3"
+        check(P, "b|c", "a b|c") # "b" is not matched
+        check(P, "B|C", "a b|c") # idem, case-insensitive
+    end
+
+    check(P, "d&e", "D&E")
+    check(P, "d&E", "D&E")
+    check(P, r"d&E", "")
+    check(P, r"d&E"i, "D&E")
 end
 
-check(P, "d&e", "D&E")
-check(P, "d&E", "D&E")
-check(P, r"d&E", "")
-check(P, r"d&E"i, "D&E")
 
-
-### multiple patterns ########################################################
+# * multiple patterns ........................................................
 
 module MultiPat
 using ReTest
@@ -229,29 +247,31 @@ end
 
 end # MultiPat
 
-check(MultiPat, "a", "a b aa")
-check(MultiPat, "b", "a b c")
-check(MultiPat, "a", "b", "a b")
-check(MultiPat, ("a", "b"), "a b")
-check(MultiPat, "b", r"a", "a b")
-check(MultiPat, "b", "d", "")
-check(MultiPat, "a", "e", "")
-check(MultiPat, ["aa", "2"], "aa d2")
-check(MultiPat, ["1", "2"], "d1 d2")
-check(MultiPat, ["aa", "2"], "d", "d2")
-check(MultiPat, ["aa", "2", ["2", "1"]], "d", "d1 d2")
+@chapter MultiPat begin
+    check(MultiPat, "a", "a b aa")
+    check(MultiPat, "b", "a b c")
+    check(MultiPat, "a", "b", "a b")
+    check(MultiPat, ("a", "b"), "a b")
+    check(MultiPat, "b", r"a", "a b")
+    check(MultiPat, "b", "d", "")
+    check(MultiPat, "a", "e", "")
+    check(MultiPat, ["aa", "2"], "aa d2")
+    check(MultiPat, ["1", "2"], "d1 d2")
+    check(MultiPat, ["aa", "2"], "d", "d2")
+    check(MultiPat, ["aa", "2", ["2", "1"]], "d", "d1 d2")
 
-# with integers
-# check we don't collect the range:
-check(MultiPat, 1:Int64(10)^15, "a b aa c d1 d2")
-check(MultiPat, 5, "d1 d2")
-check(MultiPat, "a", 2:3, "a b aa")
-check(MultiPat, "a", 1:2, "a b")
-check(MultiPat, "a", [1, 3], "a aa")
-check(MultiPat, ["aa", 4], "aa c")
+    # with integers
+    # check we don't collect the range:
+    check(MultiPat, 1:Int64(10)^15, "a b aa c d1 d2")
+    check(MultiPat, 5, "d1 d2")
+    check(MultiPat, "a", 2:3, "a b aa")
+    check(MultiPat, "a", 1:2, "a b")
+    check(MultiPat, "a", [1, 3], "a aa")
+    check(MultiPat, ["aa", 4], "aa c")
+end
 
 
-### Module patterns ##########################################################
+# * Module patterns ..........................................................
 
 module ModPat
 using ReTest
@@ -286,48 +306,55 @@ using Main: RUN
 @testset "ad" begin
     push!(RUN, "ad")
 end
+end # ModPat2
+
+@chapter ModPat begin
+    check(ModPat, "aa b ab c")
+    check(ModPat => 1:99, "aa b ab") # no recursive
+    check(ModPat => "a", 1:2, "aa b")
+    check(ModPat2 => "a", ModPat, 1:9, "ad aa b ab c") # ModPat recursive
+    check(ModPat2 => ("a", 1:9), ModPat => 1:9, "ad aa b ab") # ModPat not recursive
+    check(ModPat2 => "a", ModPat, 2:9, "aa b ab")
+    check(ModPat2 => "a", ModPat, ModPat, 2:9, "aa b ab") # deduplicate
+    check(ModPat2 => "", ModPat => "aa", 2, "aa b")
 end
 
-check(ModPat, "aa b ab c")
-check(ModPat => 1:99, "aa b ab") # no recursive
-check(ModPat => "a", 1:2, "aa b")
-check(ModPat2 => "a", ModPat, 1:9, "ad aa b ab c") # ModPat recursive
-check(ModPat2 => ("a", 1:9), ModPat => 1:9, "ad aa b ab") # ModPat not recursive
-check(ModPat2 => "a", ModPat, 2:9, "aa b ab")
-check(ModPat2 => "a", ModPat, ModPat, 2:9, "aa b ab") # deduplicate
-check(ModPat2 => "", ModPat => "aa", 2, "aa b")
+# * toplevel .................................................................
 
-### toplevel #################################################################
+@chapter toplevel begin
+    # The following test is just to exert `@assert allunique(TESTED_MODULES)` in
+    # computemodules!, and must be run before any toplevel @testset in declared,
+    # so that `Main` is not yet in TESTED_MODULES; we check that previous
+    # tested modules, which are in submodules of Main, are not re-added to
+    # TESTED_MODULES while going through submodules of Base.loaded_modules ∋ Main
+    retest(dry=true)
+    RUNTOP = []
+    @testset "toplevel" begin
+        # this tests that the testset is run exactly once
+        # Main is special here, as it's both in Base.loaded_modules
+        # and it gets registered automatically in ReTest.TESTED_MODULES
+        push!(RUNTOP, "toplevel")
+        @test true
+    end
 
-# The following test is just to exert `@assert allunique(TESTED_MODULES)` in
-# computemodules!, and must be run before any toplevel @testset in declared,
-# so that `Main` is not yet in TESTED_MODULES; we check that previous
-# tested modules, which are in submodules of Main, are not re-added to
-# TESTED_MODULES while going through submodules of Base.loaded_modules ∋ Main
-retest(dry=true)
-RUNTOP = []
-@testset "toplevel" begin
-    # this tests that the testset is run exactly once
-    # Main is special here, as it's both in Base.loaded_modules
-    # and it gets registered automatically in ReTest.TESTED_MODULES
-    push!(RUNTOP, "toplevel")
-    @test true
+    retest(verbose=Inf)
+    retest("a", shuffle=true, stats=true)
+    retest(M, N, P, "b", dry=true)
+
+    for v in (-rand(1:9), 4.2, -Inf)
+        @test_throws ArgumentError retest(verbose=v)
+    end
+
+    @test RUNTOP == ["toplevel"]
+
+    retest(r"^/f1", stats=true) # just test that a regex can be passed,
+                                # and that stats works for multiple subtests
+
+    empty!(RUN)
 end
 
-retest(verbose=Inf)
-retest("a", shuffle=true, stats=true)
-retest(M, N, P, "b", dry=true)
 
-for v in (-rand(1:9), 4.2, -Inf)
-    @test_throws ArgumentError retest(verbose=v)
-end
-
-@test RUNTOP == ["toplevel"]
-
-retest(r"^/f1", stats=true) # just test that a regex can be passed,
-                            # and that stats works for multiple subtests
-
-empty!(RUN)
+# * Overwritten ..............................................................
 
 module Overwritten
 using ReTest
@@ -335,8 +362,11 @@ import Main: RUN
 @testset "first" begin
     push!(RUN, 1)
 end
+end # Overwritten
+
+@chapter Overwritten begin
+    check(Overwritten, [1]; stats=true) # testing stats when there are not tests
 end
-check(Overwritten, [1]; stats=true) # testing stats when there are not tests
 
 module Overwritten
 using ReTest
@@ -345,11 +375,15 @@ import Main: RUN
     push!(RUN, 2)
 end
 end
-check(Overwritten, [2])
-# 1 must not appear (i.e. ReTest must not keep a reference to
-# the old overwritten version of `Overwritten`
 
-### Loops ####################################################################
+@chapter Overwritten begin
+    check(Overwritten, [2])
+    # 1 must not appear (i.e. ReTest must not keep a reference to
+    # the old overwritten version of `Overwritten`
+end
+
+
+# * Loops ....................................................................
 
 module Loops1
 using ReTest
@@ -374,17 +408,19 @@ using Main: RUN
         end
     end
 end
-end
+end # Loops1
 
-# @test_logs (:warn, r"could not evaluate testset description.*") retest(Loops1, r"asd")
-# @test Loops1.RUN == [1, 0, 2, 0]
-# empty!(Loops1.RUN)
-# retest(Loops1) # should not log
-check(Loops1, [9, 1, 0, -1, 2, 0, -1])
-check(Loops1, 9:9, []) # when no regex is passed, even with the presence of statically
-                       # unresolvable descriptions, we can filter out stuff
-                       # (i.e. here, we don't run "loops 1" just in case "local$i" would
-                       # be run, as we can determine from pattern 9:9 that nothing must run)
+@chapter Loops begin
+    # @test_logs (:warn, r"could not evaluate testset description.*") retest(Loops1, r"asd")
+    # @test Loops1.RUN == [1, 0, 2, 0]
+    # empty!(Loops1.RUN)
+    # retest(Loops1) # should not log
+    check(Loops1, [9, 1, 0, -1, 2, 0, -1])
+    check(Loops1, 9:9, []) # when no regex is passed, even with the presence of statically
+                           # unresolvable descriptions, we can filter out stuff
+                           # (i.e. here, we don't run "loops 1" just in case "local$i" would
+                           # be run, as we can determine from pattern 9:9 that nothing must run)
+end
 
 module Loops2
 using ReTest
@@ -405,14 +441,14 @@ using Main: RUN
         end
     end
 end
-end
+end # Loops2
 
 # the test below has been solved
 # TODO: check whether another run could lead to the same result, i.e. RUN == [1, 0, 2, 0] ?
 # @test_logs (:warn, r"could not evaluate testset-for iterator.*") retest(Loops2, r"asd")
 # @test Loops2.RUN == [1, 0, 2, 0]
 
-check(Loops2, [1, 0, -1, 2, 0, -1])
+@chapter Loops check(Loops2, [1, 0, -1, 2, 0, -1])
 
 module Loops3
 using ReTest
@@ -433,10 +469,12 @@ using Main: RUN
         end
     end
 end
-end
+end # Loops3
 
-check(Loops3, r"asd", [])
-check(Loops3, [1, 0, -1, 2, 0, -1])
+@chapter Loops begin
+    check(Loops3, r"asd", [])
+    check(Loops3, [1, 0, -1, 2, 0, -1])
+end
 
 module MultiLoops
 using ReTest
@@ -448,10 +486,14 @@ C1, C2 = 1:2 # check that iteration has access to these values
     push!(RUN, (x, z))
     @test true
 end
+end # MultiLoops
+
+@chapter Loops begin
+    check(MultiLoops, [(1, 1), (2, 1), (2, 2)])
+    check(MultiLoops, "1 1", [(1, 1)])
 end
 
-check(MultiLoops, [(1, 1), (2, 1), (2, 2)])
-check(MultiLoops, "1 1", [(1, 1)])
+# * Anonym ...................................................................
 
 module Anonym
 using ReTest
@@ -463,11 +505,12 @@ using Main: RUN
         push!(RUN, x)
     end
 end
-end
+end # Anonym
 
-check(Anonym, [1, 2])
+@chapter Anonym check(Anonym, [1, 2])
 
-### loop variable collision ##################################################
+
+# * loop variable collision ..................................................
 
 module LoopCollision
 using ReTest
@@ -488,11 +531,13 @@ end
 
 end # LoopCollision
 
-retest(LoopCollision, dry=true)
-check(LoopCollision, [sin, cos, (sin, 1), (cos, 1)]; dry=false)
+@chapter LoopCollision begin
+    retest(LoopCollision, dry=true)
+    check(LoopCollision, [sin, cos, (sin, 1), (cos, 1)]; dry=false)
+end
 
 
-### interpolated description #################################################
+# * interpolated description .................................................
 
 module Interpolate
 using ReTest
@@ -521,12 +566,12 @@ end
 end
 end # Interpolate
 
-retest(Interpolate, dry=true)
-check(Interpolate, 1:5)
-
-check(Interpolate, "0", 1:5)
-
-check(Interpolate, "4", 4:5)
+@chapter Interpolate begin
+    retest(Interpolate, dry=true)
+    check(Interpolate, 1:5)
+    check(Interpolate, "0", 1:5)
+    check(Interpolate, "4", 4:5)
+end
 
 module InterpolateImpossible
 using ReTest
@@ -560,13 +605,15 @@ end
 end
 end # InterpolateImpossible
 
-retest(InterpolateImpossible, dry=true)
-check(InterpolateImpossible, 1:6)
-check(InterpolateImpossible, "0", 1:6)
-check(InterpolateImpossible, "4", 4:6) # should have a warning or two
+@chapter Interpolate begin
+    retest(InterpolateImpossible, dry=true)
+    check(InterpolateImpossible, 1:6)
+    check(InterpolateImpossible, "0", 1:6)
+    check(InterpolateImpossible, "4", 4:6) # should have a warning or two
+end
 
 
-### Failing ##################################################################
+# * Failing ..................................................................
 
 module Failing
 using ReTest
@@ -574,11 +621,11 @@ using ReTest
 @testset "has fails" begin
     @test false
 end
-end
+end # Failing
 
-@test_throws Test.TestSetException retest(Failing)
+@chapter Failing @test_throws Test.TestSetException retest(Failing)
 
-### Duplicate ################################################################
+# * Duplicate ................................................................
 
 module Duplicate
 using ReTest
@@ -602,21 +649,23 @@ end
     @test true
     push!(RUN, i)
 end
+end # Duplicate
+
+@chapter Duplicate begin
+    @test_logs (
+        :warn, r"duplicate description for @testset, overwriting:.*") (
+        :warn,  r"duplicate description for @testset, overwriting:.*"
+        )  Duplicate.runtests()
+    @test Duplicate.RUN == [2, 5, 6]
+
+    # uniquify
+    empty!(Duplicate.RUN)
+    retest(Duplicate, Duplicate, "dupe5")
+    @test Duplicate.RUN == [5]
 end
 
-@test_logs (
-    :warn, r"duplicate description for @testset, overwriting:.*") (
-    :warn,  r"duplicate description for @testset, overwriting:.*")  Duplicate.runtests()
-@test Duplicate.RUN == [2, 5, 6]
 
-### Uniquify #################################################################
-
-empty!(Duplicate.RUN)
-
-retest(Duplicate, Duplicate, "dupe5")
-@test Duplicate.RUN == [5]
-
-### Display ##################################################################
+# * Display ..................................................................
 
 # we exercise a bunch of codepaths, and this allows to have an idea whether
 # everything prints properly (writing proper display tests will be soooo boring)
@@ -629,7 +678,7 @@ using ReTest
     @testset "X.inner" begin
     end
 end
-end
+end # X
 
 module YYYYYYYYYYYYY
 using ReTest
@@ -649,16 +698,16 @@ end
         end
     end
 end
-end
+end # YYYYYYYYYYYYY
 
 module NoTests
 using ReTest
 
 @testset "empty" begin end
 @testset "empty $i" for i=1:1 end
-end
+end # NoTests
 
-for dry=(true, false),
+@chapter Display for dry=(true, false),
     verbose=0:3,
     stats=(true, false),
     mod=((X,), (YYYYYYYYYYYYY,), (X, YYYYYYYYYYYYY), (NoTests,)),
@@ -679,7 +728,8 @@ for dry=(true, false),
     retest(mod..., pattern; shuffle=true, verbose=verbose, stats=stats, dry=dry, id=id)
 end
 
-### dry-run
+
+# * DryRun ...................................................................
 
 module DryRun
 using ReTest
@@ -707,9 +757,11 @@ end
 
 end # DryRun
 
-retest(DryRun, dry=true)
-retest(DryRun, dry=true, verbose=0)
-retest(DryRun, dry=true, verbose=5)
+@chapter DryRun begin
+    retest(DryRun, dry=true)
+    retest(DryRun, dry=true, verbose=0)
+    retest(DryRun, dry=true, verbose=5)
+end
 
 module DryRun2
 using ReTest
@@ -717,44 +769,51 @@ using ReTest
 @testset "just a dummy module" begin end
 end # DryRun2
 
-retest(DryRun, DryRun2, dry=true, verbose=0)
-retest(DryRun, DryRun2, dry=true, verbose=1)
+@chapter DryRun begin
+    retest(DryRun, DryRun2, dry=true, verbose=0)
+    retest(DryRun, DryRun2, dry=true, verbose=1)
+end
 
-### InlineTest ###############################################################
 
-using Pkg
-Pkg.activate("./FakePackage")
-Pkg.develop(PackageSpec(path="../InlineTest"))
-Pkg.develop(PackageSpec(path="..")) # ReTest
-Pkg.test("FakePackage")
+# * InlineTest ...............................................................
 
-### Hijack ###################################################################
+@chapter InlineTest begin
+    using Pkg
+    Pkg.activate("./FakePackage")
+    Pkg.develop(PackageSpec(path="../InlineTest"))
+    Pkg.develop(PackageSpec(path="..")) # ReTest
+    Pkg.test("FakePackage")
+end
 
-Pkg.activate("./Hijack")
-Pkg.develop(PackageSpec(path="..")) # ReTest
-Pkg.test("Hijack")
 
-if VERSION >= v"1.5"
+# * Hijack ...................................................................
 
-    using Hijack
-    ReTest.hijack(Hijack)
-    retest(HijackTests)
-    @test Hijack.RUN == [1]
-    empty!(Hijack.RUN)
+@chapter Hijack begin
+    Pkg.activate("./Hijack")
+    Pkg.develop(PackageSpec(path="..")) # ReTest
+    Pkg.test("Hijack")
 
-    @test_throws ErrorException ReTest.hijack(Hijack, :HijackTests2, revise=true)
+    if VERSION >= v"1.5"
 
-    using Revise
-    ReTest.hijack(Hijack, :HijackTests2, revise=true)
-    retest(HijackTests2)
-    @test Hijack.RUN == [1]
-    empty!(Hijack.RUN)
+        using Hijack
+        ReTest.hijack(Hijack)
+        retest(HijackTests)
+        @test Hijack.RUN == [1]
+        empty!(Hijack.RUN)
 
-    cp("./Hijack/test/subdir/sub.jl",
-       "./Hijack/test/subdir/sub.orig.jl", force=true)
+        @test_throws ErrorException ReTest.hijack(Hijack, :HijackTests2, revise=true)
 
-    write("./Hijack/test/subdir/sub.jl",
-          """
+        using Revise
+        ReTest.hijack(Hijack, :HijackTests2, revise=true)
+        retest(HijackTests2)
+        @test Hijack.RUN == [1]
+        empty!(Hijack.RUN)
+
+        cp("./Hijack/test/subdir/sub.jl",
+           "./Hijack/test/subdir/sub.orig.jl", force=true)
+
+        write("./Hijack/test/subdir/sub.jl",
+              """
 @test true
 
 @testset "sub" begin
@@ -763,12 +822,13 @@ if VERSION >= v"1.5"
     push!(Hijack.RUN, 2)
 end
 """)
-    Revise.revise()
-    try
-        retest(HijackTests2)
-        @test Hijack.RUN == [2]
-    finally
-        mv("./Hijack/test/subdir/sub.orig.jl",
-           "./Hijack/test/subdir/sub.jl", force=true)
+        Revise.revise()
+        try
+            retest(HijackTests2)
+            @test Hijack.RUN == [2]
+        finally
+            mv("./Hijack/test/subdir/sub.orig.jl",
+               "./Hijack/test/subdir/sub.jl", force=true)
+        end
     end
 end
