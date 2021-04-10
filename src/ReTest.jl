@@ -101,6 +101,7 @@ matches(pat::Or, x, id) =
 
 matches(pat::Not, x, id) = !matches(pat.x, x, id)
 matches(rx::Regex, x, _) = occursin(rx, x)
+matches(rx::Regex, ::Missing, _) = missing
 matches(pat::Integer, _, id) = pat >= 0 ? pat == id : pat != -id
 
 make_pattern(x::PatternX) = x
@@ -123,15 +124,6 @@ make_pattern(pat::AbstractArray) = Or(PatternX[make_pattern(p) for p in pat])
 # special case for optimizing unit-ranges:
 make_pattern(pat::AbstractArray{<:Integer}) = Or(pat)
 make_pattern(@nospecialize(pat::Tuple)) = And(PatternX[make_pattern(p) for p in pat])
-
-hasregex(::Regex) = true
-hasregex(::Integer) = false
-hasregex(pat::Union{And,Or}) =
-    pat.xs isa AbstractArray{<:Integer} ?
-        false :
-        any(hasregex, pat.xs)
-
-hasregex(pat::Not) = hasregex(pat.x)
 
 hasinteger(::Regex) = false
 hasinteger(::Integer) = true
@@ -272,8 +264,7 @@ end
 
 function resolve!(mod::Module, ts::TestsetExpr, pat::Pattern;
                   verbose::Int, id::Int64, # external calls
-                  force::Bool=false, shown::Bool=true, depth::Int=0, # only recursive calls
-                  hasrx=hasregex(pat))
+                  force::Bool=false, shown::Bool=true, depth::Int=0) # only recursive calls
 
     strings = empty!(ts.strings)
     desc = ts.desc
@@ -291,8 +282,9 @@ function resolve!(mod::Module, ts::TestsetExpr, pat::Pattern;
     # and ts.run == true
 
     function giveup()
-        ts.run = hasrx ? true : # conservative, we don't really know at this point
-                         matches(pat, "", ts.id)
+        ts.run = coalesce(matches(pat, missing, ts.id), true)
+        # if matches yields missing, we don't really know at this point, so be
+        # conservative and default to true
 
         if shown
             # set ts.descwidth to a lower bound to reduce misalignment

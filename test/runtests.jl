@@ -583,6 +583,7 @@ using ReTest, ..Trace
 X = 0
 
 @testset "a $X" verbose=true begin
+    trace(0)
     j = 9
     @testset "b $X $j" begin
         trace(1)
@@ -605,9 +606,10 @@ end # InterpolateImpossible
 
 @chapter Interpolate begin
     retest(InterpolateImpossible, dry=true)
-    check(InterpolateImpossible, 1:6)
-    check(InterpolateImpossible, "0", 1:6)
-    check(InterpolateImpossible, "4", 4:6) # should have a warning or two
+    check(InterpolateImpossible, 0:6)
+    check(InterpolateImpossible, "0", 0:6)
+    check(InterpolateImpossible, "4", [0, 4, 5, 6]) # should have a warning or two
+    check(InterpolateImpossible, "d", not(2:3), 4:6)
 end
 
 
