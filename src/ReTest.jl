@@ -93,15 +93,15 @@ alwaysmatches(id::Integer) = false
 matches(pat::And, x, id) = all(p -> matches(p, x, id), pat.xs)
 
 matches(pat::Or, x, id) =
-    if pat.xs isa AbstractArray{<:Integer}
-        id ∈ pat.xs # optimized for unit ranges
+    if pat.xs isa AbstractUnitRange{<:Integer} && minimum(pat.xs) >= 0
+        id ∈ pat.xs # this is optimised, i.e. it's not O(n)
     else
         any(p -> matches(p, x, id), pat.xs)
     end
 
 matches(pat::Not, x, id) = !matches(pat.x, x, id)
 matches(rx::Regex, x, _) = occursin(rx, x)
-matches(pat::Integer, _, id) = pat == id
+matches(pat::Integer, _, id) = pat >= 0 ? pat == id : pat != -id
 
 make_pattern(x::PatternX) = x
 make_pattern(str::AbstractString) = VERSION >= v"1.3" ? r""i * str :
@@ -516,6 +516,9 @@ To match an integer, its ID must be equal to this integer (cf. the `id` keyword)
 
 A pattern can also be the "negation" of a pattern, via the [`not`](@ref) function,
 which allows to exclude testsets from being run.
+As a special case, the negation of an integer can be expressed as its arithmetic
+negation, e.g. `not(3)` is equivalent to `-3`.
+
 
 ### `Regex` filtering
 

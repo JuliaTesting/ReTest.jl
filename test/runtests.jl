@@ -274,6 +274,10 @@ end # MultiPat
     check(MultiPat, not(4:10), "a b aa")
     check(MultiPat, not((1:3, "b")), "a aa c d1 d2")
     check(MultiPat, not([1:2, "aa", not("d")]), "d1 d2")
+    check(MultiPat, -2, -4, -5, -6, "a aa")
+    check(MultiPat, (-3, "a"), "a b")
+    check(MultiPat, -1:3, "a b aa c d1 d2") # TODO: test this were 2, 3 can be tested
+                                            # without forcing also testing 1
 end
 
 
