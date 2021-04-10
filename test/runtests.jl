@@ -3,7 +3,17 @@ using ReTest, Pkg
 Pkg.activate("ReTest")
 Pkg.develop(PackageSpec(path="../InlineTest"))
 
+module Trace
+export trace
+using ReTest: @test
+
 const RUN = []
+
+function trace(x)
+    push!(RUN, x)
+    @test true
+end
+end
 
 function check(x...; runtests=false, verbose=true, stats=false, dry=false)
     args = x[1:end-1]
@@ -12,13 +22,13 @@ function check(x...; runtests=false, verbose=true, stats=false, dry=false)
         expected = split(x[end])
     end
 
-    empty!(RUN)
+    empty!(Trace.RUN)
     if runtests
         getfield(args[1], :runtests)(args[2:end]...; verbose=verbose, stats=stats, dry=dry)
     else
         retest(args...; verbose=verbose, stats=stats, dry=dry)
     end
-    @test RUN == expected
+    @test Trace.RUN == expected
 end
 
 macro chapter(title, x)
@@ -29,6 +39,7 @@ macro chapter(title, x)
         esc(x)
     end
 end
+
 
 # * M ........................................................................
 
@@ -133,34 +144,29 @@ end #
     retest(M)
 end
 
+
 # * N ........................................................................
 
 module N
-using ReTest
-using Main: RUN
+using ReTest, ..Trace
 
 # testing non-final non-toplevel testsets
 @testset "i" begin
-    push!(RUN, "i")
-    @test true
+    trace("i")
 
     @testset "j" verbose=false begin # false, just to test that it works
-        push!(RUN, "j")
-        @test true
+        trace("j")
 
         @testset "k" begin
-            push!(RUN, "k")
-            @test true
+            trace("k")
         end
     end
 
     @testset "l$i" verbose=true for i=1:1
-        push!(RUN, "l$i")
-        @test true
+        trace("l$i")
 
         @testset "m" begin
-            push!(RUN, "m")
-            @test true
+            trace("m")
         end
     end
 end
@@ -177,28 +183,23 @@ end
 # test ReTest's wrapping of non-regex patterns
 
 module P
-using ReTest
-using Main: RUN
+using ReTest, ..Trace
 
 # testing non-final non-toplevel testsets
 @testset "a" begin
-    push!(RUN, "a")
-    @test true
+    trace("a")
 
     @testset "b" begin
-        push!(RUN, "b")
-        @test true
+        trace("b")
     end
 
     @testset "b|c" begin
-        push!(RUN, "b|c")
-        @test true
+        trace("b|c")
     end
 end
 
 @testset "D&E" begin
-    push!(RUN, "D&E")
-    @test true
+    trace("D&E")
 end
 end # P
 
@@ -222,27 +223,26 @@ end
 # * multiple patterns ........................................................
 
 module MultiPat
-using ReTest
-using Main: RUN
+using ReTest, ..Trace
 
 @testset "a" begin
-    push!(RUN, "a")
+    trace("a")
 
     @testset "b" begin
-        push!(RUN, "b")
+        trace("b")
     end
 end
 
 @testset "aa" begin
-    push!(RUN, "aa")
+    trace("aa")
 end
 
 @testset "b" begin
-    push!(RUN, "c")
+    trace("c")
 end
 
 @testset "d$i" for i=1:2
-    push!(RUN, "d$i")
+    trace("d$i")
 end
 
 end # MultiPat
@@ -274,37 +274,34 @@ end
 # * Module patterns ..........................................................
 
 module ModPat
-using ReTest
-using Main: RUN
+using ReTest, ..Trace
 
 @testset "aa" begin
-    push!(RUN, "aa")
+    trace("aa")
     @testset "b" begin
-        push!(RUN, "b")
+        trace("b")
     end
 end
 
 @testset "ab" begin
-    push!(RUN, "ab")
+    trace("ab")
 end
 
 module In
 module Ner
-using ReTest
-using Main: RUN
+using ReTest, ....Trace
 
 @testset "c" begin
-    push!(RUN, "c")
+    trace("c")
 end
 end end # In.Ner
 end # ModPat
 
 module ModPat2
-using ReTest
-using Main: RUN
+using ReTest, ..Trace
 
 @testset "ad" begin
-    push!(RUN, "ad")
+    trace("ad")
 end
 end # ModPat2
 
@@ -319,6 +316,7 @@ end # ModPat2
     check(ModPat2 => "", ModPat => "aa", 2, "aa b")
 end
 
+
 # * toplevel .................................................................
 
 @chapter toplevel begin
@@ -329,6 +327,7 @@ end
     # TESTED_MODULES while going through submodules of Base.loaded_modules ∋ Main
     retest(dry=true)
     RUNTOP = []
+
     @testset "toplevel" begin
         # this tests that the testset is run exactly once
         # Main is special here, as it's both in Base.loaded_modules
@@ -349,18 +348,16 @@ end
 
     retest(r"^/f1", stats=true) # just test that a regex can be passed,
                                 # and that stats works for multiple subtests
-
-    empty!(RUN)
 end
 
 
 # * Overwritten ..............................................................
 
 module Overwritten
-using ReTest
-import Main: RUN
+using ReTest, ..Trace
+
 @testset "first" begin
-    push!(RUN, 1)
+    trace(1)
 end
 end # Overwritten
 
@@ -369,10 +366,10 @@ end # Overwritten
 end
 
 module Overwritten
-using ReTest
-import Main: RUN
+using ReTest, ..Trace
+
 @testset "second" begin
-    push!(RUN, 2)
+    trace(2)
 end
 end
 
@@ -386,24 +383,20 @@ end
 # * Loops ....................................................................
 
 module Loops1
-using ReTest
-using Main: RUN
+using ReTest, ..Trace
 
 @testset "loops 1" begin
-    push!(RUN, 9)
+    trace(9)
     a = 1
     b = 2
 
     @testset "local$i" for i in (a, b)
-        push!(RUN, i)
-        @test true
+        trace(i)
         @testset "sub" begin
-            push!(RUN, 0)
-            @test true
+            trace(0)
 
             @testset "final" begin
-                @test true
-                push!(RUN, -1)
+                trace(-1)
             end
         end
     end
@@ -423,20 +416,16 @@ end # Loops1
 end
 
 module Loops2
-using ReTest
-using Main: RUN
+using ReTest, ..Trace
 
 @testset "loops 2" begin
     @testset "generator $i $I" for (i, I) in (i => typeof(i) for i in (1, 2))
-        push!(RUN, i)
-        @test true
+        trace(i)
         @testset "sub" begin
-            push!(RUN, 0)
-            @test true
+            trace(0)
 
             @testset "final" begin
-                @test true
-                push!(RUN, -1)
+                trace(-1)
             end
         end
     end
@@ -451,20 +440,16 @@ end # Loops2
 @chapter Loops check(Loops2, [1, 0, -1, 2, 0, -1])
 
 module Loops3
-using ReTest
-using Main: RUN
+using ReTest, ..Trace
 
 @testset "loops 3" begin
     @testset "generator $i $I" for (i, I) in [i => typeof(i) for i in (1, 2)]
-        push!(RUN, i)
-        @test true
+        trace(i)
         @testset "sub" begin
-            push!(RUN, 0)
-            @test true
+            trace(0)
 
             @testset "final" begin
-                @test true
-                push!(RUN, -1)
+                trace(-1)
             end
         end
     end
@@ -477,14 +462,12 @@ end # Loops3
 end
 
 module MultiLoops
-using ReTest
-using Main: RUN
+using ReTest, ..Trace
 
 C1, C2 = 1:2 # check that iteration has access to these values
 
 @testset "multiloops $x $y $z" for (x, y) in zip(1:C2, 1:2), z in C1:x
-    push!(RUN, (x, z))
-    @test true
+    trace((x, z))
 end
 end # MultiLoops
 
@@ -496,13 +479,11 @@ end
 # * Anonym ...................................................................
 
 module Anonym
-using ReTest
-using Main: RUN
+using ReTest, ..Trace
 
 @testset for x=1:2
     @testset begin
-        @test true
-        push!(RUN, x)
+        trace(x)
     end
 end
 end # Anonym
@@ -513,20 +494,18 @@ end # Anonym
 # * loop variable collision ..................................................
 
 module LoopCollision
-using ReTest
-using Main: RUN
+using ReTest, ..Trace
 
 @assert isdefined(LoopCollision, :sincos)
 @assert isdefined(LoopCollision, :sinpi)
 
 @testset "collision $sincos" for sincos in (sin, cos)
     @test sincos(1.0) isa Float64
-    push!(RUN, sincos)
+    trace(sincos)
 end
 
 @testset "collision $sincos sinpi $sinpi" for sincos = (sin, cos), sinpi = (1,)
-    @test true
-    push!(RUN, (sincos, sinpi))
+    trace((sincos, sinpi))
 end
 
 end # LoopCollision
@@ -540,28 +519,23 @@ end
 # * interpolated description .................................................
 
 module Interpolate
-using ReTest
-using Main: RUN
+using ReTest, ..Trace
 
 X = 0
 
 @testset "a $X" verbose=true begin
     @testset "b $X" begin
-        @test true
-        push!(RUN, 1)
+        trace(1)
     end
     @testset "c $X $i" for i=2:3
-        @test true
-        push!(RUN, i)
+        trace(i)
     end
 end
 
 @testset "d $X $i" verbose=true for i=4:4
-    @test true
-    push!(RUN, i)
+    trace(i)
     @testset "e $X" begin
-        @test true
-        push!(RUN, 5)
+        trace(5)
     end
 end
 end # Interpolate
@@ -574,33 +548,27 @@ end # Interpolate
 end
 
 module InterpolateImpossible
-using ReTest
-using Main: RUN
+using ReTest, ..Trace
 
 X = 0
 
 @testset "a $X" verbose=true begin
     j = 9
     @testset "b $X $j" begin
-        @test true
-        push!(RUN, 1)
+        trace(1)
     end
     @testset "c $X $j $i" for i=2:3
-        @test true
-        push!(RUN, i)
+        trace(i)
     end
 end
 
 @testset "d $X $i" verbose=true for i=4:4
-    @test true
-    push!(RUN, i)
+    trace(i)
     @testset "e $X $i" begin
-        @test true
-        push!(RUN, 5)
+        trace(5)
     end
     @testset "$i" begin # must work even "$i" is made only of Expr (no String parts)
-        @test true
-        push!(RUN, 6)
+        trace(6)
     end
 end
 end # InterpolateImpossible
