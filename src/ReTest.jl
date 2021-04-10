@@ -1,6 +1,6 @@
 module ReTest
 
-export retest, @testset
+export retest, @testset, not
 
 using Distributed
 using Base.Threads: nthreads
@@ -49,45 +49,68 @@ using .Testset: Testset, Format
 
 # * Pattern
 
+const PatternX = Union{Pattern, Regex, Integer}
+
 struct And <: Pattern
-    xs::AbstractArray
+    xs::AbstractArray{<:PatternX}
 end
 
 struct Or <: Pattern
-    xs::AbstractArray
+    xs::AbstractArray{<:PatternX}
 end
+
+struct Not <: Pattern
+    x::PatternX
+end
+
+"""
+    not(pattern)
+
+Create an object suitable for filtering testsets (in the [`retest`](@ref) function),
+which "negates" the meaning of `pattern`: a testset matches `not(pattern)`
+if and only if it doesn't match `pattern`.
+
+For example `not("a")` matches any testset whose subject doesn't contain `"a"`,
+and `not(1:3)` matches all the testsets but the first three of a module.
+"""
+not(x) = Not(make_pattern(x))
 
 alwaysmatches(pat::And) = all(alwaysmatches, pat.xs)
 
 alwaysmatches(pat::Or) =
-    pat.xs isa AbstractArray{<:Integer} ?
-        false : # special case for huge unit ranges; locally, this optimization seems
-                # unnecessary, i.e. alwaysmatches(Or(1:10...0)) is constant time anyway,
-                # but on CI, the any(...) below takes tooooo long
+    if pat.xs isa AbstractArray{<:Integer}
+        false # special case for huge unit ranges; locally, this optimization seems
+              # unnecessary, i.e. alwaysmatches(Or(1:10...0)) is constant time anyway,
+              # but on CI, the any(...) below takes tooooo long
+    else
         any(alwaysmatches, pat.xs)
+    end
 
+alwaysmatches(::Not) = false
 alwaysmatches(rx::Regex) = isempty(rx.pattern)
 alwaysmatches(id::Integer) = false
 
 matches(pat::And, x, id) = all(p -> matches(p, x, id), pat.xs)
 
 matches(pat::Or, x, id) =
-    pat.xs isa AbstractArray{<:Integer} ?
-        id ∈ pat.xs : # optimized for unit ranges
+    if pat.xs isa AbstractArray{<:Integer}
+        id ∈ pat.xs # optimized for unit ranges
+    else
         any(p -> matches(p, x, id), pat.xs)
+    end
 
+matches(pat::Not, x, id) = !matches(pat.x, x, id)
 matches(rx::Regex, x, _) = occursin(rx, x)
 matches(pat::Integer, _, id) = pat == id
 
-make_pattern(rx::Regex) = rx
-make_pattern(id::Integer) = id
+make_pattern(x::PatternX) = x
 make_pattern(str::AbstractString) = VERSION >= v"1.3" ? r""i * str :
                                                         Regex(str, "i")
 
-make_pattern(pat::AbstractArray) = Or(make_pattern.(pat))
+make_pattern(pat::AbstractArray) = Or(PatternX[make_pattern(p) for p in pat])
 # special case for optimizing unit-ranges:
 make_pattern(pat::AbstractArray{<:Integer}) = Or(pat)
-make_pattern(@nospecialize(pat::Tuple)) = And(Any[make_pattern(p) for p in pat])
+make_pattern(@nospecialize(pat::Tuple)) = And(PatternX[make_pattern(p) for p in pat])
 
 hasregex(::Regex) = true
 hasregex(::Integer) = false
@@ -96,9 +119,12 @@ hasregex(pat::Union{And,Or}) =
         false :
         any(hasregex, pat.xs)
 
+hasregex(pat::Not) = hasregex(pat.x)
+
 hasinteger(::Regex) = false
 hasinteger(::Integer) = true
 hasinteger(pat::Union{And,Or}) = any(hasinteger, pat.xs)
+hasinteger(pat::Not) = hasinteger(pat.x)
 
 
 # * TestsetExpr
@@ -448,9 +474,9 @@ end
 revise_pkgid() = Base.PkgId(Base.UUID("295af30f-e4ad-537b-8983-00126c2a3abe"), "Revise")
 
 "accepted types as positional arguments of `retest`"
-const ArgType = Union{Module,AbstractString,Regex,Integer,AbstractArray,Tuple,
+const ArgType = Union{Module,PatternX,AbstractString,AbstractArray,Tuple,
                       Pair{Module,
-                           <:Union{AbstractString,Regex,Integer,AbstractArray,Tuple}}}
+                           <:Union{PatternX,AbstractString,AbstractArray,Tuple}}}
 
 """
     retest(mod..., pattern...; dry::Bool=false, stats::Bool=false, verbose::Real=true, [id::Bool],
@@ -487,6 +513,9 @@ A `pattern` can be a string, a `Regex`, an integer or an array.
 For a testset to "match" an array, it must match at least one of its elements (disjunction).
 Tp match a tuple, it must match all of its elements (conjunction).
 To match an integer, its ID must be equal to this integer (cf. the `id` keyword).
+
+A pattern can also be the "negation" of a pattern, via the [`not`](@ref) function,
+which allows to exclude testsets from being run.
 
 ### `Regex` filtering
 
@@ -935,7 +964,7 @@ end
 function process_args(@nospecialize(args), verbose, shuffle, recursive)
     ########## process args
     baremods = Module[] # list of standalone modules (not in a pair)
-    patterns = []       # list of standalone patterns
+    patterns = PatternX[]       # list of standalone patterns
     modpats = []        # pairs, plus "pair-ized" standalone modules
 
     for arg in args
@@ -944,7 +973,8 @@ function process_args(@nospecialize(args), verbose, shuffle, recursive)
             push!(modpats, arg => And(patterns))
             push!(baremods, arg)
         elseif arg isa Pair{Module}
-            push!(modpats, first(arg) => And([make_pattern(last(arg)), And(patterns)]))
+            push!(modpats,
+                  first(arg) => And(PatternX[make_pattern(last(arg)), And(patterns)]))
         else
             push!(patterns, make_pattern(arg))
         end

@@ -268,6 +268,12 @@ end # MultiPat
     check(MultiPat, "a", 1:2, "a b")
     check(MultiPat, "a", [1, 3], "a aa")
     check(MultiPat, ["aa", 4], "aa c")
+
+    # with Not
+    check(MultiPat, not("a"), "c d1 d2")
+    check(MultiPat, not(4:10), "a b aa")
+    check(MultiPat, not((1:3, "b")), "a aa c d1 d2")
+    check(MultiPat, not([1:2, "aa", not("d")]), "d1 d2")
 end
 
 
