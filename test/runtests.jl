@@ -281,6 +281,26 @@ end # MultiPat
 end
 
 
+# * StringPat ................................................................
+
+module StringPat
+using ReTest, ..Trace
+
+@testset "aa" begin trace("aa") end
+@testset "-a" begin trace("-a") end
+@testset "b" begin trace("b") end
+
+end # StringPat
+
+@chapter StringPat begin
+    check(StringPat, "a", "aa -a")
+    check(StringPat, "-a", "b")
+    check(StringPat, "--a", "-a")
+    check(StringPat, not("--a"), "aa b")
+    check(StringPat, "-aa", "-a b")
+end
+
+
 # * Module patterns ..........................................................
 
 module ModPat

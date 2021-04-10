@@ -104,8 +104,20 @@ matches(rx::Regex, x, _) = occursin(rx, x)
 matches(pat::Integer, _, id) = pat >= 0 ? pat == id : pat != -id
 
 make_pattern(x::PatternX) = x
-make_pattern(str::AbstractString) = VERSION >= v"1.3" ? r""i * str :
-                                                        Regex(str, "i")
+
+function make_pattern(str::AbstractString)
+    neg = false
+    if startswith(str, '-')
+        str = chop(str, head=1, tail=0)
+        if !startswith(str, '-')
+            neg = true
+        end
+    end
+
+    rx = VERSION >= v"1.3" ? r""i * str :
+                             Regex(str, "i")
+    neg ? not(rx) : rx
+end
 
 make_pattern(pat::AbstractArray) = Or(PatternX[make_pattern(p) for p in pat])
 # special case for optimizing unit-ranges:
@@ -545,6 +557,14 @@ If a passed `pattern` is a string, then it is wrapped in a `Regex` with the
 This means for example that `"a|b"` will match a subject like `"a|b"` or `"A|B"`,
 but not like `"a"` (only in Julia versions >= 1.3; in older versions,
 the regex is simply created as `Regex(pattern, "i")`).
+
+As a special case, if a string pattern starts with the `'-'` character,
+it's interpreted as the negation of the pattern corresponding to the
+string with `'-'` chopped off, e.g. `"-abc"` is equivalent to `not("abc")`.
+Unless the string starts with two `'-'` characters, in which case
+the first `'-'` is chopped off, e.g. `"--abc"` will match subjects
+such as `"123-abc"`. To negate such a pattern, just use `not`,
+e.g. `not("--abc")`.
 
 ### Per-module patterns
 
