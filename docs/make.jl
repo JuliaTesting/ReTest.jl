@@ -1,6 +1,6 @@
 using Documenter, ReTest
 
-makedocs(sitename = "ReTest.j",
+makedocs(sitename = "ReTest.jl",
          modules = [ReTest, ReTest.InlineTest])
 
 
