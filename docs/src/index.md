@@ -52,7 +52,7 @@ Finally, for convenience, `ReTest.@testset` also implicitly defines a
 `M.runtests(...)` is equivalent to calling `retest(M, ...)`.
 
 
-## `retest` and `@testset`
+## API
 
 ```@meta
 CurrentModule = ReTest
@@ -60,6 +60,7 @@ CurrentModule = ReTest
 
 ```@docs
 retest
+not
 @testset
 ```
 
