@@ -15,7 +15,7 @@ function trace(x)
 end
 end
 
-function check(x...; runtests=false, verbose=true, stats=false, dry=false)
+function check(x...; runtests=false, verbose=true, stats=false, dry=false, strict::Bool=true)
     args = x[1:end-1]
     expected = x[end]
     if expected isa AbstractString
@@ -24,9 +24,10 @@ function check(x...; runtests=false, verbose=true, stats=false, dry=false)
 
     empty!(Trace.RUN)
     if runtests
-        getfield(args[1], :runtests)(args[2:end]...; verbose=verbose, stats=stats, dry=dry)
+        getfield(args[1], :runtests)(args[2:end]...; verbose=verbose, stats=stats, dry=dry,
+                                     strict=strict)
     else
-        retest(args...; verbose=verbose, stats=stats, dry=dry)
+        retest(args...; verbose=verbose, stats=stats, dry=dry, strict=strict)
     end
     @test Trace.RUN == expected
 end
@@ -177,6 +178,11 @@ end # N
     check(N, r".*j/1", ""; runtests=false)
     check(N, r"^/i/j0", ""; runtests=true)
     check(N, r"^/i/l10", ""; runtests=false)
+
+    # strict keyword
+    check(N, 1, "i")
+    check(N, 1, "i", strict=true)
+    check(N, 1, "i j l1", strict=false)
 end
 
 # * P ........................................................................
@@ -185,7 +191,6 @@ end
 module P
 using ReTest, ..Trace
 
-# testing non-final non-toplevel testsets
 @testset "a" begin
     trace("a")
 

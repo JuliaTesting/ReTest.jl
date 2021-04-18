@@ -149,7 +149,7 @@ mutable struct TestsetExpr
     loops::Union{Vector{Expr},Nothing}
     parent::Union{TestsetExpr,Nothing}
     children::Vector{TestsetExpr}
-    strings::Vector{String}
+    strings::Vector{Union{String,Missing}}
     # loopvalues & loopiters: when successful in evaluating loop values in resolve!,
     # we "flatten" the nested for loops into a single loop, with loopvalues
     # containing tuples of values, and loopiters the tuples of variables to which the
@@ -252,18 +252,22 @@ end
 # - the most important: sorting out which testsets must be run
 #   (and in the process, precompute descriptions when possible, and IDs)
 #
-# Concerning the last point, we make the following compromise: as it's probably
-# rare that a Regex matches a given testset but not its children
-# (as in r"a$" for the subjects "/a" and "/a/b"), and in order to reduce the
-# computational load of resolve!, once a testset is found to have to run,
+# Concerning the last point, we have the following alternatives with
+# a different compromise, depending on the value of `strict`:
+#
+# false) as it's probably rare that a Regex matches a given testset but not its
+# children (as in r"a$" for the subjects "/a" and "/a/b"), and in order to reduce
+# the computational load of resolve!, once a testset is found to have to run,
 # its children are automatically assumed to have to run; the correct filtering
 # will then happen only for final testsets. The drawback is a risk for
 # more compilation than necessary, and wasted runtime while executing
 # children testsets.
-# TODO: implement the alternative to make a real comparison
+#
+# true) a testset found to have to run doesn't force its children to run.
+# The drawback is more exhaustive tree walking and more string churn.
 
 function resolve!(mod::Module, ts::TestsetExpr, pat::Pattern;
-                  verbose::Int, id::Int64, # external calls
+                  verbose::Int, id::Int64, strict::Bool, # external calls
                   force::Bool=false, shown::Bool=true, depth::Int=0) # only recursive calls
 
     strings = empty!(ts.strings)
@@ -312,11 +316,14 @@ function resolve!(mod::Module, ts::TestsetExpr, pat::Pattern;
         if shown
             ts.descwidth = descwidth(desc)
         end
+        hasmissing = false
         for str in parentstrs
-            ts.run && break
-            new = str * '/' * desc
+            !strict && ts.run && break
+            new = str * "/" * desc # TODO: implement *(::Missing, ::Char) in Base ?
+            hasmissing |= new === missing # comes either from desc or str
             ts.run = coalesce(matches(pat, new, ts.id), true)
-            new !== missing && push!(strings, new)
+            hasmissing && str === missing ||
+                push!(strings, new)
         end
     else # we have a testset-for with description which needs interpolation
         xs = ()
@@ -348,12 +355,13 @@ function resolve!(mod::Module, ts::TestsetExpr, pat::Pattern;
             ts.descwidth = shown ? descwidth(missing) : 0
             ts.run = coalesce(matches(pat, missing, ts.id), true)
         end
+        hasmissing = false
         for x in xs # empty loop if eval above threw
             descx = eval_desc(mod, ts, x)
             if shown
                 ts.descwidth = max(ts.descwidth, descwidth(descx))
             end
-            if ts.run
+            if !strict && ts.run
                 if !shown # no need to compute subsequent descx to update ts.descwidth
                     break
                 else
@@ -361,10 +369,14 @@ function resolve!(mod::Module, ts::TestsetExpr, pat::Pattern;
                 end
             end
             for str in parentstrs
-                ts.run && break
-                new = str * '/' * descx
-                ts.run = coalesce(matches(pat, new, ts.id), true)
-                new !== missing && push!(strings, new)
+                !strict && ts.run && break
+                new = str * "/" * descx
+                hasmissing |= new === missing
+                if !ts.run
+                    ts.run = coalesce(matches(pat, new, ts.id), true)
+                end
+                hasmissing && str === missing ||
+                    push!(strings, new)
             end
         end
     end
@@ -373,9 +385,9 @@ function resolve!(mod::Module, ts::TestsetExpr, pat::Pattern;
     ts.hasbrokenrec = ts.hasbroken
 
     for tsc in ts.children
-        runc, id = resolve!(mod, tsc, pat, force=ts.run,
+        runc, id = resolve!(mod, tsc, pat, force = !strict && ts.run,
                             shown=shown & ts.options.transient_verbose,
-                            depth=depth+1, verbose=verbose-1, id=id)
+                            depth=depth+1, verbose=verbose-1, id=id, strict=strict)
         run |= runc
         ts.descwidth = max(ts.descwidth, tsc.descwidth)
         if tsc.run
@@ -468,8 +480,8 @@ const ArgType = Union{Module,PatternX,AbstractString,AbstractArray,Tuple,
                            <:Union{PatternX,AbstractString,AbstractArray,Tuple}}}
 
 """
-    retest(mod..., pattern...; dry::Bool=false, stats::Bool=false, verbose::Real=true, [id::Bool],
-                               shuffle::Bool=false, recursive::Bool=true)
+    retest(mod..., pattern...; dry::Bool=false, stats::Bool=false, verbose::Real=true,
+                               [id::Bool], shuffle::Bool=false, recursive::Bool=true)
 
 Run all the tests declared in `@testset` blocks, within modules `mod` if specified,
 or within all currently loaded modules otherwise.
@@ -565,6 +577,7 @@ function retest(@nospecialize(args::ArgType...);
                 verbose::Real=true, # should be @nospecialize, but not supported on old Julia
                 recursive::Bool=true,
                 id=nothing,
+                strict::Bool=true,
                 )
 
     implicitmodules, modules, verbose = process_args(args, verbose, shuffle, recursive)
@@ -572,7 +585,8 @@ function retest(@nospecialize(args::ArgType...);
     root = Testset.ReTestSet("", "Overall", overall=true)
 
     maxidw = Ref{Int}(0) # visual width for showing IDs (Ref for mutability in hack below)
-    tests_descs_hasbrokens = fetchtests.(modules, verbose, overall, Ref(maxidw))
+    tests_descs_hasbrokens = fetchtests.(modules, verbose, overall, Ref(maxidw);
+                                         strict=strict)
     isempty(tests_descs_hasbrokens) &&
         throw(ArgumentError("no modules using ReTest could be found and none were passed"))
 
@@ -1083,14 +1097,14 @@ function computemodules!(modules::Vector{Module}, recursive)
     modules
 end
 
-function fetchtests((mod, pat), verbose, overall, maxidw)
+function fetchtests((mod, pat), verbose, overall, maxidw; strict)
     tests = updatetests!(mod)
     descwidth = 0
     hasbroken = false
 
     id = 1
     for ts in tests
-        run, id = resolve!(mod, ts, pat, verbose=verbose, id=id)
+        run, id = resolve!(mod, ts, pat, verbose=verbose, id=id, strict=strict)
         run || continue
         descwidth = max(descwidth, ts.descwidth)
         hasbroken |= ts.hasbrokenrec
