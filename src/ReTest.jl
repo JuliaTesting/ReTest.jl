@@ -483,8 +483,9 @@ const ArgType = Union{Module,PatternX,AbstractString,AbstractArray,Tuple,
     retest(mod..., pattern...; dry::Bool=false, stats::Bool=false, verbose::Real=true,
                                [id::Bool], shuffle::Bool=false, recursive::Bool=true)
 
-Run all the tests declared in `@testset` blocks, within modules `mod` if specified,
+Run tests declared with [`@testset`](@ref) blocks, within modules `mod` if specified,
 or within all currently loaded modules otherwise.
+When no `pattern`s are specified, all the tests are run.
 
 ### Keywords
 
@@ -506,13 +507,15 @@ or within all currently loaded modules otherwise.
 
 It's possible to filter run testsets by specifying one or multiple `pattern`s.
 A testset is guaranteed to run only if it "matches" all passed patterns (conjunction).
+Even if a testset is run, its nested testsets might not run if they don't match
+the patterns.
 Moreover if a testset is run, its enclosing testset, if any, also has to run
 (although not necessarily exhaustively, i.e. other nested testsets
 might be filtered out).
 
-A `pattern` can be a string, a `Regex`, an integer or an array.
+A `pattern` can be a string, a `Regex`, an integer, an array or a tuple.
 For a testset to "match" an array, it must match at least one of its elements (disjunction).
-Tp match a tuple, it must match all of its elements (conjunction).
+To match a tuple, it must match all of its elements (conjunction).
 To match an integer, its ID must be equal to this integer (cf. the `id` keyword).
 
 A pattern can also be the "negation" of a pattern, via the [`not`](@ref) function,
