@@ -281,51 +281,42 @@ function resolve!(mod::Module, ts::TestsetExpr, pat::Pattern;
     # TODO: probably no need to eval the descriptions when they won't be shown
     # and ts.run == true
 
-    function giveup()
-        ts.run = coalesce(matches(pat, missing, ts.id), true)
-        # if matches yields missing, we don't really know at this point, so be
-        # conservative and default to true
-
-        if shown
-            # set ts.descwidth to a lower bound to reduce misalignment
-            ts.descwidth = 2*depth + mapreduce(+, desc.args) do part
-                                         if part isa String
-                                             textwidth(part)
-                                         else
-                                             4 # give 4 spaces for unknown string part
-                                         end
-                                     end
+    descwidth(desc) =
+        if desc !== missing
+            textwidth(desc) + 2*depth
+        else
+            # set width to a lower bound to reduce misalignment
+            2*depth + mapreduce(+, ts.desc.args) do part
+                          if part isa String
+                              textwidth(part)
+                          else
+                              4 # give 4 spaces for unknown string part
+                          end
+                      end
         end
-    end
 
     loops = ts.loops
     if loops === nothing || desc isa String
         # TODO: maybe, for testset-for and !(desc isa String), still try this branch
         # in case the the interpolation can be resolved thanks to a global binding
         # (i.e. the description doesn't depend on loop variables)
-        gaveup = false
+
         if !(desc isa String)
             # TODO: compute desc only when !ts.run (i.e. it wasn't forced) ?
             try
-                desc = Core.eval(mod, desc)
+                desc = Core.eval(mod, desc)::String
             catch
-                giveup()
-                gaveup = true
+                desc = missing
             end
         end
-        if !gaveup
-            if shown
-                ts.descwidth = textwidth(desc) + 2*depth
-            end
-            for str in parentstrs
-                ts.run && break
-                new = str * '/' * desc
-                if matches(pat, new, ts.id)
-                    ts.run = true
-                else
-                    push!(strings, new)
-                end
-            end
+        if shown
+            ts.descwidth = descwidth(desc)
+        end
+        for str in parentstrs
+            ts.run && break
+            new = str * '/' * desc
+            ts.run = coalesce(matches(pat, new, ts.id), true)
+            new !== missing && push!(strings, new)
         end
     else # we have a testset-for with description which needs interpolation
         xs = ()
@@ -354,16 +345,13 @@ function resolve!(mod::Module, ts::TestsetExpr, pat::Pattern;
             ts.loopiters = loopiters
         catch
             @assert xs == ()
-            giveup()
+            ts.descwidth = shown ? descwidth(missing) : 0
+            ts.run = coalesce(matches(pat, missing, ts.id), true)
         end
         for x in xs # empty loop if eval above threw
             descx = eval_desc(mod, ts, x)
-            if descx === nothing
-                giveup()
-                break
-            end
             if shown
-                ts.descwidth = max(ts.descwidth, textwidth(descx) + 2*depth)
+                ts.descwidth = max(ts.descwidth, descwidth(descx))
             end
             if ts.run
                 if !shown # no need to compute subsequent descx to update ts.descwidth
@@ -373,13 +361,10 @@ function resolve!(mod::Module, ts::TestsetExpr, pat::Pattern;
                 end
             end
             for str in parentstrs
+                ts.run && break
                 new = str * '/' * descx
-                if matches(pat, new, ts.id)
-                    ts.run = true
-                    break
-                else
-                    push!(strings, new)
-                end
+                ts.run = coalesce(matches(pat, new, ts.id), true)
+                new !== missing && push!(strings, new)
             end
         end
     end
@@ -415,7 +400,7 @@ eval_desc(mod, ts, x) =
                       end
                       end)::String
         catch
-            nothing
+            missing
         end
     end
 
@@ -1194,11 +1179,12 @@ function dryrun(mod::Module, ts::TestsetExpr, pat::Pattern, align::Int=0, parent
         else
             for (i, x) in enumerate(loopvalues)
                 descx = eval_desc(mod, ts, x)
-                if descx === nothing
+                if descx === missing
                     @assert i == 1
                     return dryrun_beginend(ts.desc, length(loopvalues))
                 end
-                dryrun_beginend(descx === nothing ? ts.desc : descx)
+                @assert descx !== missing # should be unnecessary, but there was a test below
+                dryrun_beginend(descx)
             end
         end
     end
