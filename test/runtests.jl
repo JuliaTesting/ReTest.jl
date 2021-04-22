@@ -239,7 +239,7 @@ end # Child
 end # Parent
 
 @chapter Parent begin
-    check(Parent, "child", runtests=false)
+    check(Parent, "child", runtests=true)
 end
 
 # * multiple patterns ........................................................

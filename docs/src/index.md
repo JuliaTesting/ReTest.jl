@@ -48,8 +48,9 @@ dependency). But `ReTest` still has to be loaded (as a "test" dependency) in
 order to call `retest`.
 
 Finally, for convenience, `ReTest.@testset` also implicitly defines a
-`runtests` function within the enclosing module, say `M`, such that
-`M.runtests(...)` is equivalent to calling `retest(M, ...)`.
+`runtests` function within the enclosing module (and within all recursive
+parent modules), say `M`, such that `M.runtests(...)` is equivalent to
+calling `retest(M, ...)`.
 
 
 ## API

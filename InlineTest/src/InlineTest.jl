@@ -48,17 +48,24 @@ Internally, `@testset` expressions are converted to an equivalent of
 `Test.@testset` at execution time.
 """
 macro testset(args...)
-    if !isdefined(__module__, :runtests)
-        @eval __module__ begin
-            """
-                $($__module__).runtests(pattern...; kwargs...)
+    let mod = __module__
+        while !isdefined(mod, :runtests)
+            @eval mod begin
+                """
+                    $($mod).runtests(pattern...; kwargs...)
 
-            Equivalent to `ReTest.retest($($__module__), pattern...; kwargs...)`.
-            """
-            function runtests(specs...; kwargs...)
-                $retest($__module__, specs...; kwargs...)
+                Equivalent to `ReTest.retest($($mod), pattern...; kwargs...)`.
+                This function is defined automatically in any module containing
+                a `@testset`, possibly nested within submodules.
+                """
+                function runtests(specs...; kwargs...)
+                    $retest($mod, specs...; kwargs...)
+                end
             end
+            mod = parentmodule(mod)
         end
+    end
+    if !isdefined(__module__, INLINE_TEST)
         # Credit to Takafumi Arakaki for the idea of creating a submodule
         # within modules using InlineTest in order to be able to define
         # an `__init__` function which does the registration
@@ -67,8 +74,6 @@ macro testset(args...)
             const tests = (tests=[], news=[], map=Dict{Union{String,Expr},Int}())
             __init__() = $register($__module__)
         end
-    else
-        @assert isdefined(__module__, INLINE_TEST)
     end
     # this must take effect at compile/run time rather than parse time, e.g.
     # if the @testset if in a `if false` branch
