@@ -1054,6 +1054,10 @@ function computemodules!(modules::Vector{Module}, recursive)
         end
         filter!(x -> x !== nothing, TESTED_MODULES)
 
+        # What is below is obsolete as we now reliably register modules in TESTED_MODULES.
+        # We still keep it for a while just to check this assumption.
+        # TODO: delete
+        #
         # TESTED_MODULES is not up-to-date w.r.t. package modules which have
         # precompilation, so we have to also look in Base.loaded_modules
         for mod in values(Base.loaded_modules)
@@ -1064,17 +1068,24 @@ function computemodules!(modules::Vector{Module}, recursive)
             if str ∉ seen
                 push!(seen, str) # probably unnecessary, if str are all unique in this loop
                 for sub in recsubmodules(mod)
-                    if isdefined(sub, INLINE_TEST) && sub ∉ TESTED_MODULES
-                        # sub might be a submodule of a Main-like module mod (e.g. via a
-                        # REPL "contextual module"), in which case it already got registered
-                        push!(TESTED_MODULES, sub)
+                    # new version: just check the assumption
+                    nameof(sub) == INLINE_TEST && continue
+                    if isdefined(sub, INLINE_TEST)
+                        @assert sub in TESTED_MODULES
                     end
+                    # old effective version:
+                    # if isdefined(sub, INLINE_TEST) && sub ∉ TESTED_MODULES
+                    #     # sub might be a submodule of a Main-like module mod (e.g. via a
+                    #     # REPL "contextual module"), in which case it already got registered
+                    #     push!(TESTED_MODULES, sub)
+                    # end
                 end
             end
         end
 
         @assert all(m -> m isa Module, TESTED_MODULES)
         @assert allunique(TESTED_MODULES)
+        filter!(m -> m ∉ (ReTest, ReTest.ReTestTest), TESTED_MODULES)
     end
     if isempty(modules)
         # recursive doesn't change anything here

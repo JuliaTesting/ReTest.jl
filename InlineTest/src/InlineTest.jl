@@ -31,14 +31,8 @@ const INLINE_TEST = Symbol("##InlineTest-01b48f5c342f65df7fcd07f28f0d2cacbb09f0a
 
 const TESTED_MODULES = Union{Module,Nothing}[]
 
-
-function get_tests(m::Module)
-    if !isdefined(m, INLINE_TEST)
-        @eval m $INLINE_TEST = (tests=[], news=[], map=Dict{Union{String,Expr},Int}())
-        push!(TESTED_MODULES, m)
-    end
-    getfield(m, INLINE_TEST)
-end
+get_tests(m::Module) = getfield(m, INLINE_TEST).tests
+register(m::Module) = push!(TESTED_MODULES, m)
 
 function retest end
 
@@ -58,6 +52,16 @@ macro testset(args...)
         @eval __module__ function runtests(specs...; kwargs...)
             $retest($__module__, specs...; kwargs...)
         end
+        # Credit to Takafumi Arakaki for the idea of creating a submodule
+        # within modules using InlineTest in order to be able to define
+        # an `__init__` function which does the registration
+        # (as we can't directly create/modify `__init__` for the given module).
+        @eval __module__ module $INLINE_TEST
+            const tests = (tests=[], news=[], map=Dict{Union{String,Expr},Int}())
+            __init__() = $register($__module__)
+        end
+    else
+        @assert isdefined(__module__, INLINE_TEST)
     end
     # this must take effect at compile/run time rather than parse time, e.g.
     # if the @testset if in a `if false` branch
