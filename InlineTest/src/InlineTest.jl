@@ -49,8 +49,15 @@ Internally, `@testset` expressions are converted to an equivalent of
 """
 macro testset(args...)
     if !isdefined(__module__, :runtests)
-        @eval __module__ function runtests(specs...; kwargs...)
-            $retest($__module__, specs...; kwargs...)
+        @eval __module__ begin
+            """
+                $($__module__).runtests(pattern...; kwargs...)
+
+            Equivalent to `ReTest.retest($($__module__), pattern...; kwargs...)`.
+            """
+            function runtests(specs...; kwargs...)
+                $retest($__module__, specs...; kwargs...)
+            end
         end
         # Credit to Takafumi Arakaki for the idea of creating a submodule
         # within modules using InlineTest in order to be able to define
