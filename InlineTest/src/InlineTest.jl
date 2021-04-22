@@ -41,7 +41,7 @@ function retest end
 
 Similar to `Test.@testset args...`, but the contained tests are not run
 immediately, and are instead stored for later execution, triggered by
-`runtests()`.
+[`retest()`](@ref) or `runtests()`.
 Invocations of `@testset` can be nested, but qualified invocations of
 `ReTest.@testset` can't.
 Internally, `@testset` expressions are converted to an equivalent of
