@@ -63,11 +63,11 @@ end
 
 function populate_mod!(mod, path; lazy, Revise)
     files = Any[path]
-    substitue!(x) = substitue_retest!(x, lazy, files, dirname(path))
+    substitute!(x) = substitute_retest!(x, lazy, files, dirname(path))
 
     @eval mod begin
         using ReTest # for files which don't have `using Test`
-        include($substitue!, $path)
+        include($substitute!, $path)
     end
 
     if Revise !== nothing
@@ -103,8 +103,8 @@ function hijack(packagemod::Module, modname=nothing; parentmodule::Module=Main,
     end
 end
 
-function substitue_retest!(ex, lazy, files=nothing, root=nothing)
-    substitue!(x) = substitue_retest!(x, lazy, files, root)
+function substitute_retest!(ex, lazy, files=nothing, root=nothing)
+    substitute!(x) = substitute_retest!(x, lazy, files, root)
 
     if Meta.isexpr(ex, :using)
         for used in ex.args
@@ -123,11 +123,11 @@ function substitue_retest!(ex, lazy, files=nothing, root=nothing)
                 push!(files, newfile)
                 root = :(dirname($newfile))
             end
-            insert!(ex.args, 2, substitue!)
+            insert!(ex.args, 2, substitute!)
         end
     elseif Meta.isexpr(ex, :module)
         @assert Meta.isexpr(ex.args[3], :block)
-        substitue!.(ex.args[3].args)
+        substitute!.(ex.args[3].args)
     else
         filter_toplevel!(ex, lazy)
     end
