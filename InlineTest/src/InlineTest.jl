@@ -23,19 +23,21 @@ using Test: Test,
     detect_ambiguities, detect_unbound_args
 
 
-const INLINE_TEST = Ref{Symbol}(:__INLINE_TEST__)
-const TESTED_MODULES = Union{Module,Nothing}[]
+# it seems difficult to use gensym here, as other gensym calls (from other
+# modules) can lead to collisions or mismatches, whether we statically
+# initialize INLINE_TEST or at __init__ time; so let's use a long enough
+# static random hexadecimal string
+const INLINE_TEST = Symbol("##InlineTest-01b48f5c342f65df7fcd07f28f0d2cacbb09f0a0")
 
-__init__() = INLINE_TEST[] = gensym()
+const TESTED_MODULES = Union{Module,Nothing}[]
 
 
 function get_tests(m::Module)
-    inline_test::Symbol = INLINE_TEST[]
-    if !isdefined(m, inline_test)
-        @eval m $inline_test = (tests=[], news=[], map=Dict{Union{String,Expr},Int}())
+    if !isdefined(m, INLINE_TEST)
+        @eval m $INLINE_TEST = (tests=[], news=[], map=Dict{Union{String,Expr},Int}())
         push!(TESTED_MODULES, m)
     end
-    getfield(m, inline_test)
+    getfield(m, INLINE_TEST)
 end
 
 function retest end

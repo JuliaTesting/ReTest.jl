@@ -1064,7 +1064,7 @@ function computemodules!(modules::Vector{Module}, recursive)
             if str ∉ seen
                 push!(seen, str) # probably unnecessary, if str are all unique in this loop
                 for sub in recsubmodules(mod)
-                    if isdefined(sub, INLINE_TEST[]) && sub ∉ TESTED_MODULES
+                    if isdefined(sub, INLINE_TEST) && sub ∉ TESTED_MODULES
                         # sub might be a submodule of a Main-like module mod (e.g. via a
                         # REPL "contextual module"), in which case it already got registered
                         push!(TESTED_MODULES, sub)
