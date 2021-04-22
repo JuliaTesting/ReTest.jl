@@ -226,6 +226,21 @@ end # P
     check(P, r"d&E"i, "D&E")
 end
 
+# * retest can be called on parent modules
+
+module Parent
+module Child
+using ReTest, ...Trace
+
+@testset "child" begin
+    trace("child")
+end
+end # Child
+end # Parent
+
+@chapter Parent begin
+    check(Parent, "child", runtests=false)
+end
 
 # * multiple patterns ........................................................
 

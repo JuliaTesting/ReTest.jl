@@ -591,7 +591,7 @@ function retest(@nospecialize(args::ArgType...);
     tests_descs_hasbrokens = fetchtests.(modules, verbose, overall, Ref(maxidw);
                                          strict=strict)
     isempty(tests_descs_hasbrokens) &&
-        throw(ArgumentError("no modules using ReTest could be found and none were passed"))
+        throw(ArgumentError("no modules using ReTest could be found"))
 
     alltests = first.(tests_descs_hasbrokens)
     descwidth = max(textwidth(root.description),
@@ -1014,8 +1014,10 @@ function process_args(@nospecialize(args), verbose, shuffle, recursive)
         # + we automatically select all loaded modules with ReTest (1st condition), or
         # + we need to look for recursive (2nd condition), which applies only to baremods
         lmods = length(baremods)
+        baremods_orig = copy(baremods)
         computemodules!(baremods, recursive)
         newmods = splice!(baremods, lmods+1:length(baremods))
+        @assert baremods == baremods_orig
         # remove from newmods those already present in modpats
         filter!(newmods) do mod
             all(modpats) do (m, p)
@@ -1024,6 +1026,10 @@ function process_args(@nospecialize(args), verbose, shuffle, recursive)
         end
         append!(modpats, newmods .=> Ref(And(patterns)))
     end
+    # remove modules which don't have tests, which can happen when a parent module without
+    # tests is passed to retest in order to run tests in its submodules
+    filter!(((m, _),) -> isdefined(m, INLINE_TEST), modpats)
+
     shuffle && shuffle!(modpats)
 
     ########## process verbose
