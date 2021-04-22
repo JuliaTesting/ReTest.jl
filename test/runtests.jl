@@ -1,7 +1,9 @@
-using ReTest, Pkg
+using Pkg
 
 Pkg.activate("ReTest")
 Pkg.develop(PackageSpec(path="../InlineTest"))
+
+using ReTest # must be after develop of InlineTest, so as to not load a registered version
 
 module Trace
 export trace
