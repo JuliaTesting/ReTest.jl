@@ -142,6 +142,38 @@ otherwise, without a `MyPackageTests` module, including the file a second
 time currently triggers a warning for each overwritten toplevel testset.
 
 
+#### Keeping the ability to use `Test`
+
+One might want to have the possibility to use either `Test` or `ReTest` depending on the
+context. Reasons to still use `Test` include:
+* when running `retest` for the first time in a Julia session, more code has
+  to be compiled than when running tests with `Test`, so in the case of
+  running the whole test suite, few seconds can be spared (although using
+  `ReTest` in parallel mode would generally compensate for this);
+* `ReTest` is not yet a fully mature and battle tested package, so you might
+  want to not rely exclusively on it, e.g. for C.I.
+
+An alternate way to organize the test files is as follows, assuming `using Test` is only
+present in "runtests.jl":
+1. remove `using Test` from "runtests.jl"
+2. rename "runtests.jl" to "tests.jl"
+3. create a "MyPackageTests.jl" file with the following content:
+   ```julia
+   module MyPackageTests
+   using ReTest
+   include("tests.jl")
+   end
+   ```
+4. create a "runtests.jl" file with the following content:
+   ```julia
+   using Test
+   include("tests.jl")
+   ```
+
+That way, `include("test/runtests.jl")` or `Pkg.test()` will run tests using `Test`,
+while `include("test/MyPackageTests.jl"); MyPackageTests.runtests()` will use `ReTest`.
+
+
 ## Filtering
 
 Most of the time, filtering with a simple string is likely to be enough. For example, in
