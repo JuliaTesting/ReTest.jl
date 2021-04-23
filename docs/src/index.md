@@ -119,22 +119,24 @@ other testsets.
 
 ## Switching from `Test` to `ReTest`
 
-When used in a package `MyPackage`, the test code can be organized as follows:
-1. replace `using Test` by `using ReTest` in the "runtests.jl" file
+When used in a package `MyPackage`, the recommended way to organize
+test code is as follows:
+1. replace `using Test` by `using ReTest` in the "runtests.jl" file (and in all
+   other test files having `using Test`)
 2. wrap the whole content of "runtests.jl" within a module named
    `MyPackageTests`
-3. rename "runtests.jl" to "tests.jl"
-4. create "runtests.jl" with the following content:
-   `include("tests.jl"); MyPackageTests.runtests()`
+3. rename "runtests.jl" to "MyPackageTests.jl"
+4. create a "runtests.jl" file with the following content:
+   `include("MyPackageTests.jl"); MyPackageTests.runtests()`
 
 This means that running "runtests.jl" will have the same net effect as before.
-The "tests.jl" file can now be `include`d in your REPL session
-(`include("tests.jl")`), and you can run all or some of its tests (e.g.
+The "MyPackageTests.jl" file can now be `include`d in your REPL session
+(`include("MyPackageTests.jl")`), and you can run all or some of its tests (e.g.
 `MyPackageTests.runtests("addition")`).
 
 Wrapping the tests in `MyPackageTests` allows to not pollute `Main` and keeps
 the tests of different packages separated. Also, you can
-modify "tests.jl" and re-include it to have the corresponding tests updated
+modify "MyPackageTests.jl" and re-include it to have the corresponding tests updated
 (the `MyPackageTests` module is replaced in `Main`);
 otherwise, without a `MyPackageTests` module, including the file a second
 time currently triggers a warning for each overwritten toplevel testset.
@@ -168,7 +170,7 @@ multiple workers, which have to be set manually. Running the tests looks like:
 ```julia
 using Distributed
 addprocs(2)
-@everywhere include("test/tests.jl")
+@everywhere include("test/MyPackageTests.jl")
 MyPackageTests.runtests()
 ```
 
@@ -215,15 +217,16 @@ which is then overwritten. This works only if the description is not modified,
 otherwise both the old and new versions of the testset will co-exist.
 
 For testsets in a "script" loaded with `includet`, e.g. those in a
-"test/tests.jl" file, you can request `Revise` to "load" the updated testsets by
-putting `__revise_mode__ = :eval` in the enclosing module.
+"test/MyPackageTests.jl" file, you can request `Revise` to "load" the updated
+testsets by putting `__revise_mode__ = :eval` in the enclosing module.
 
 When files are included recursively, plain `includet` won't work
 (it is currently documented to be "deliberately non-recursive").
 There are two work-arounds:
-1. rename your "test/tests.jl" file to "test/MyPackageTests.jl" and load it as a module
-   (this might involve updating your `LOAD_PATH` to include "test/" and making sure
-   the required packages are found)
+1. load `MyPackageTests` as a module, i.e. via `using MyPackageTests` instead
+   of `include("test/MyPackageTests.jl")` (this might involve updating your
+   `LOAD_PATH` to include "test/" and making sure the required packages are
+   found)
 2. use the [following `recursive_includet`](https://github.com/timholy/Revise.jl/issues/518#issuecomment-667097500)
    function instead of `includet`:
 ```julia
