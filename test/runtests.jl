@@ -17,7 +17,8 @@ function trace(x)
 end
 end
 
-function check(x...; runtests=false, verbose=true, stats=false, dry=false, strict::Bool=true)
+function check(x...; runtests=false, verbose=true, stats=false, dry=false, strict::Bool=true,
+               recursive=true)
     args = x[1:end-1]
     expected = x[end]
     if expected isa AbstractString
@@ -27,9 +28,10 @@ function check(x...; runtests=false, verbose=true, stats=false, dry=false, stric
     empty!(Trace.RUN)
     if runtests
         getfield(args[1], :runtests)(args[2:end]...; verbose=verbose, stats=stats, dry=dry,
-                                     strict=strict)
+                                     strict=strict, recursive=recursive)
     else
-        retest(args...; verbose=verbose, stats=stats, dry=dry, strict=strict)
+        retest(args...; verbose=verbose, stats=stats, dry=dry, strict=strict,
+               recursive=recursive)
     end
     @test Trace.RUN == expected
 end
@@ -359,10 +361,16 @@ end # ModPat2
 
 @chapter ModPat begin
     check(ModPat, "aa b ab c")
-    check(ModPat => 1:99, "aa b ab") # no recursive
+    check(ModPat => 1:99, "aa b ab c") # recursive
+    check(ModPat => 1:99, "aa b ab", recursive=false) # no recursive
     check(ModPat => "a", 1:2, "aa b")
+    check(ModPat => "a", ModPat => 1:2, "aa b") # patterns are merged for a module
+    check(ModPat => 3:3, ModPat.In => "c", "ab") # In inherits from ModPat
+    check(3:3, ModPat.In.Ner => "c", "") # In.Ner inherits from global patterns
     check(ModPat2 => "a", ModPat, 1:9, "ad aa b ab c") # ModPat recursive
-    check(ModPat2 => ("a", 1:9), ModPat => 1:9, "ad aa b ab") # ModPat not recursive
+    check(ModPat2 => ("a", 1:9), ModPat => 1:9, "ad aa b ab c") # ModPat recursive
+    check(ModPat2 => ("a", 1:9), ModPat => 1:9, "ad aa b ab",
+          recursive=false) # ModPat not recursive
     check(ModPat2 => "a", ModPat, 2:9, "aa b ab")
     check(ModPat2 => "a", ModPat, ModPat, 2:9, "aa b ab") # deduplicate
     check(ModPat2 => "", ModPat => "aa", 2, "aa b")

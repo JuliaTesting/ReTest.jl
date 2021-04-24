@@ -52,8 +52,10 @@ using .Testset: Testset, Format
 const PatternX = Union{Pattern, Regex, Integer}
 
 struct And <: Pattern
-    xs::AbstractArray{<:PatternX}
+    xs::Vector{PatternX}
 end
+
+And() = And(PatternX[])
 
 struct Or <: Pattern
     xs::AbstractArray{<:PatternX}
@@ -565,8 +567,9 @@ a pair of the form `mod => pattern`: then `pattern` is used to filter only
 testsets from `mod`; if other "standalone" patterns (not attached to a module) are
 specified, they also conjunctively apply to `mod`. For example, a call like
 `retest(mod1 => 1:3, mod2, "x")` is equivalent to `retest(mod1 => (1:3, "x"), mod2 => "x")`.
-Note that the `recursive` keyword does _not_ apply to modules from a pair.
-
+If `recursive` is `true`, `pattern` is also applied to all recursive submodules `sub`
+of `mod`; if `sub` is also specified as `sub => subpat`, the patterns are merged,
+i.e. this is equivalent to specifying `sub => (pattern, subpat)`.
 
 !!! note
     this function executes each (top-level) `@testset` block using `eval` *within* the
@@ -980,57 +983,93 @@ end
 
 function process_args(@nospecialize(args), verbose, shuffle, recursive)
     ########## process args
-    baremods = Module[] # list of standalone modules (not in a pair)
-    patterns = PatternX[]       # list of standalone patterns
-    modpats = []        # pairs, plus "pair-ized" standalone modules
+    patterns = PatternX[] # list of standalone patterns
+    modpats = Dict{Module,Any}() # pairs module => pattern
+    modules = Module[] # ordered list of keys from modpats
 
+    # first we initialize modpats with the given patterns for "module-patterns"
+    # standalone are added at a later stage, because we want to add them only
+    # to "root" modules when recursive=true so that they are not checked multiple
+    # times (once for a given module and once for each of its tested parent modules)
     for arg in args
         if arg isa Module
-            arg in baremods && continue # we uniquify only in the simple cases
-            push!(modpats, arg => And(patterns))
-            push!(baremods, arg)
+            # if arg was already seen, it already has pattern And() added, so nothing to do
+            get!(modpats, arg, And())
+            arg ∉ modules && push!(modules, arg)
         elseif arg isa Pair{Module}
-            push!(modpats,
-                  first(arg) => And(PatternX[make_pattern(last(arg)), And(patterns)]))
+            mod = first(arg)
+            pat = get!(modpats, mod, And())
+            push!(pat.xs, make_pattern(last(arg)))
+            mod ∉ modules && push!(modules, mod)
         else
             push!(patterns, make_pattern(arg))
         end
     end
-    if !allunique(first.(modpats))
-        throw(ArgumentError("some modules specified multiple times"))
-        # TODO: show name of said modules
-        # NOTE: we _could_ merge the specifications for a given module, but it seems better
-        # to tell the user about potential error.
-        # Also, currently we can't simply run successively both `mod=>pat1` and `mod=>pat2`
-        # in a row, because `resolve!` is run for all pairs before running the tests
-        # (i.e. it's called before the big loop over modules in `retest`), and the testsets
-        # carry some state for a given pattern (of course this would be fixable).
-    end
-
-    implicitmodules = isempty(modpats)
 
     ########## process modules
-    if implicitmodules || !isempty(baremods)
-        # + we automatically select all loaded modules with ReTest (1st condition), or
-        # + we need to look for recursive (2nd condition), which applies only to baremods
-        lmods = length(baremods)
-        baremods_orig = copy(baremods)
-        computemodules!(baremods, recursive)
-        newmods = splice!(baremods, lmods+1:length(baremods))
-        @assert baremods == baremods_orig
-        # remove from newmods those already present in modpats
-        filter!(newmods) do mod
-            all(modpats) do (m, p)
-                m != mod
+    @assert allunique(modules)
+
+    implicitmodules = isempty(modpats)
+    if implicitmodules || recursive
+        update_TESTED_MODULES!()
+    end
+    if implicitmodules
+        append!(modules, TESTED_MODULES)
+        for mod in modules
+            modpats[mod] = And(patterns)
+        end
+    elseif recursive
+        roots = Module[]
+        # explore TESTED_MODULES maintaining order to preserve order of appearance of
+        # in modules/files
+        for mod in unique!([modules; TESTED_MODULES;])
+            par = mod
+            while true
+                newpar = parentmodule(par)
+                if newpar == par # no parent in modules was found
+                    mod in modules && push!(roots, mod)
+                    break
+                end
+                par = newpar
+                if par ∈ modules
+                    # we need to attach par's pattern to mod's pattern
+                    # it's not a problem if par's pattern is updated later, as the
+                    # value in modpats is not changed (but rather mutated in-place),
+                    # so mod's pattern will still see the updated pattern of par
+                    if mod in modules
+                        # modpats[mod]::And must not be set to a new value, as submodules
+                        # might already reference it, and the following update must be
+                        # visible to them; so we update the .xs field instead
+                        push!(modpats[mod].xs, modpats[par])
+                    else
+                        push!(modules, mod)
+                        # patterns for mod and par will always be the same, so no need
+                        # to copy; whether par was initially in modules or not, if in a
+                        # subsequent iteration (over mod) an intermediate module `inter` is
+                        # found (mod << inter << par), we know that `inter` was not
+                        # initially in modules, and can therefore also share the same
+                        # pattern, i.e. pattern for mod doesn't need to diverge from
+                        # that of par
+                        modpats[mod] = modpats[par]
+                    end
+                    break
+                end
             end
         end
-        append!(modpats, newmods .=> Ref(And(patterns)))
+        for mod in roots
+            append!(modpats[mod].xs, patterns)
+        end
+    else
+        for pat in values(modpats)
+            append!(pat.xs, patterns)
+        end
     end
+
     # remove modules which don't have tests, which can happen when a parent module without
     # tests is passed to retest in order to run tests in its submodules
-    filter!(((m, _),) -> isdefined(m, INLINE_TEST), modpats)
+    filter!(m -> isdefined(m, INLINE_TEST), modules)
 
-    shuffle && shuffle!(modpats)
+    shuffle && shuffle!(modules)
 
     ########## process verbose
     if !isinteger(verbose) && !isinf(verbose) || signbit(verbose)
@@ -1041,80 +1080,56 @@ function process_args(@nospecialize(args), verbose, shuffle, recursive)
     end
     verbose = Int(verbose)
 
-    implicitmodules, modpats, verbose
+    implicitmodules, [mod => modpats[mod] for mod in modules], verbose
 end
 
-function computemodules!(modules::Vector{Module}, recursive)
-    if isempty(modules) || recursive # update TESTED_MODULES
-        # TESTED_MODULES might have "duplicate" entries, i.e. modules with the same
-        # name, when one overwrites itself by being redefined; in this case,
-        # let's just delete older entries:
-        seen = Set{String}()
-        for idx in reverse(eachindex(TESTED_MODULES))
-            str = string(TESTED_MODULES[idx])
-            if str in seen
-                TESTED_MODULES[idx] = nothing
-            else
-                push!(seen, str)
-            end
+function update_TESTED_MODULES!()
+    # TESTED_MODULES might have "duplicate" entries, i.e. modules with the same
+    # name, when one overwrites itself by being redefined; in this case,
+    # let's just delete older entries:
+    seen = Set{String}()
+    for idx in reverse(eachindex(TESTED_MODULES))
+        str = string(TESTED_MODULES[idx])
+        if str in seen
+            TESTED_MODULES[idx] = nothing
+        else
+            push!(seen, str)
         end
-        filter!(x -> x !== nothing, TESTED_MODULES)
-
-        # What is below is obsolete as we now reliably register modules in TESTED_MODULES.
-        # We still keep it for a while just to check this assumption.
-        # TODO: delete
-        #
-        # TESTED_MODULES is not up-to-date w.r.t. package modules which have
-        # precompilation, so we have to also look in Base.loaded_modules
-        for mod in values(Base.loaded_modules)
-            # exclude modules from Main, which presumably already had a chance to get
-            # registered in TESTED_MODULES at runtime
-            mod ∈ (ReTest, Main, Base) && continue # TODO: should exclude stdlibs too
-            str = string(mod)
-            if str ∉ seen
-                push!(seen, str) # probably unnecessary, if str are all unique in this loop
-                for sub in recsubmodules(mod)
-                    # new version: just check the assumption
-                    nameof(sub) == INLINE_TEST && continue
-                    if isdefined(sub, INLINE_TEST)
-                        @assert sub in TESTED_MODULES
-                    end
-                    # old effective version:
-                    # if isdefined(sub, INLINE_TEST) && sub ∉ TESTED_MODULES
-                    #     # sub might be a submodule of a Main-like module mod (e.g. via a
-                    #     # REPL "contextual module"), in which case it already got registered
-                    #     push!(TESTED_MODULES, sub)
-                    # end
-                end
-            end
-        end
-
-        @assert all(m -> m isa Module, TESTED_MODULES)
-        @assert allunique(TESTED_MODULES)
-        filter!(m -> m ∉ (ReTest, ReTest.ReTestTest), TESTED_MODULES)
     end
-    if isempty(modules)
-        # recursive doesn't change anything here
-        append!(modules, TESTED_MODULES) # copy! not working on Julia 1.0
-    else
-        @assert allunique(modules)
-        if recursive
-            for mod in TESTED_MODULES
-                mod ∈ modules && continue
-                par = mod
-                while true
-                    newpar = parentmodule(par)
-                    newpar == par && break
-                    par = newpar
-                    if par ∈ modules
-                        push!(modules, mod)
-                        break
-                    end
+    filter!(x -> x !== nothing, TESTED_MODULES)
+
+    # What is below is obsolete as we now reliably register modules in TESTED_MODULES.
+    # We still keep it for a while just to check this assumption.
+    # TODO: delete
+    #
+    # TESTED_MODULES is not up-to-date w.r.t. package modules which have
+    # precompilation, so we have to also look in Base.loaded_modules
+    for mod in values(Base.loaded_modules)
+        # exclude modules from Main, which presumably already had a chance to get
+        # registered in TESTED_MODULES at runtime
+        mod ∈ (ReTest, Main, Base) && continue # TODO: should exclude stdlibs too
+        str = string(mod)
+        if str ∉ seen
+            push!(seen, str) # probably unnecessary, if str are all unique in this loop
+            for sub in recsubmodules(mod)
+                # new version: just check the assumption
+                nameof(sub) == INLINE_TEST && continue
+                if isdefined(sub, INLINE_TEST)
+                    @assert sub in TESTED_MODULES
                 end
+                # old effective version:
+                # if isdefined(sub, INLINE_TEST) && sub ∉ TESTED_MODULES
+                #     # sub might be a submodule of a Main-like module mod (e.g. via a
+                #     # REPL "contextual module"), in which case it already got registered
+                #     push!(TESTED_MODULES, sub)
+                # end
             end
         end
     end
-    modules
+
+    @assert all(m -> m isa Module, TESTED_MODULES)
+    @assert allunique(TESTED_MODULES)
+    filter!(m -> m ∉ (ReTest, ReTest.ReTestTest), TESTED_MODULES)
 end
 
 function fetchtests((mod, pat), verbose, overall, maxidw; strict)
