@@ -852,5 +852,17 @@ end
             mv("./Hijack/test/subdir/sub.orig.jl",
                "./Hijack/test/subdir/sub.jl", force=true)
         end
+
+        # test lazy=true
+        empty!(Hijack.RUN)
+        ReTest.hijack("./Hijack/test/lazy.jl", :HijackLazy, lazy=true)
+        retest(HijackLazy)
+        @test Hijack.RUN == [1, 3]
+
+        # test lazy=:brutal
+        empty!(Hijack.RUN)
+        ReTest.hijack("./Hijack/test/lazy.jl", :HijackBrutal, lazy=:brutal)
+        retest(HijackBrutal)
+        @test Hijack.RUN == [3]
     end
 end
