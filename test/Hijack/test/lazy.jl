@@ -13,9 +13,12 @@ for _=1:1
                 begin
                     @test false
                 end
-                @testset "lazy inner" begin
-                    @test true
-                    push!(Hijack.RUN, 1)
+                while true
+                    @testset "lazy inner" begin
+                        @test true
+                        push!(Hijack.RUN, 1)
+                    end
+                    break
                 end
             else
                 @test false

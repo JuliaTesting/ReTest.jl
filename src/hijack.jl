@@ -19,7 +19,8 @@ The current procedure is as follows:
    have multiple arguments);
 2. apply recursively these two rules:
    * for all `include`d files, provided the `include` statement is at the toplevel,
-     or nested within these toplevel constructs: `begin`, `let`, `for`, `if`;
+     or nested within these toplevel constructs:
+     `begin`, `let`, `for`, `while`, `if`, `try`;
    * on the content of all included modules.
 
 When `source` is `Base` or a standard library module, a slightly different
@@ -29,7 +30,8 @@ mechanism is used to find test files (which can contain e.g. non-toplevel
 The `lazy` keyword specifies whether some toplevel expressions should be skipped:
 * `false` means nothing is skipped;
 * `true` means toplevel `@test*` macros are removed, as well as those defined
-  within these toplevel (but possible nested) blocks: `begin`, `let`, `for`, `if`;
+  within these toplevel (but possible nested) blocks:
+  `begin`, `let`, `for`, `while`, `if`, `try`;
 * `:brutal` means toplevel `@test*` macros are removed, as well as toplevel
   `begin`, `let`, `for` or `if` blocks.
 
@@ -139,11 +141,11 @@ function substitute_retest!(ex, lazy, files=nothing, root=nothing)
         if lazy != false && ex.args[1] ∈ TEST_MACROS
             empty_expr!(ex)
         end
-    elseif ex isa Expr && ex.head ∈ (:block, :let, :for, :if)
+    elseif ex isa Expr && ex.head ∈ (:block, :let, :for, :while, :if, :try)
         if lazy == :brutal
             empty_expr!(ex)
         else
-            beg = ex.head ∈ (:block,) ? 1 : 2
+            beg = ex.head ∈ (:block, :try) ? 1 : 2
             for x in ex.args[beg:end]
                 substitute!(x)
             end

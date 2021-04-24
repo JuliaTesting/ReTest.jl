@@ -820,7 +820,7 @@ end
         using Hijack
         ReTest.hijack(Hijack)
         retest(HijackTests)
-        @test Hijack.RUN == [1]
+        @test Hijack.RUN == [1, 5, 4]
         empty!(Hijack.RUN)
 
         @test_throws ErrorException ReTest.hijack(Hijack, :HijackTests2, revise=true)
@@ -828,7 +828,7 @@ end
         using Revise
         ReTest.hijack(Hijack, :HijackTests2, revise=true)
         retest(HijackTests2)
-        @test Hijack.RUN == [1]
+        @test Hijack.RUN == [1, 5, 4]
         empty!(Hijack.RUN)
 
         cp("./Hijack/test/subdir/sub.jl",
@@ -847,7 +847,7 @@ end
         Revise.revise()
         try
             retest(HijackTests2)
-            @test Hijack.RUN == [2]
+            @test Hijack.RUN == [2, 5, 4]
         finally
             mv("./Hijack/test/subdir/sub.orig.jl",
                "./Hijack/test/subdir/sub.jl", force=true)

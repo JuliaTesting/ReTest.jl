@@ -11,8 +11,18 @@ begin
     let cond=true
         let
             if cond
-                for _=1:1
-                    include("included.jl")
+                for i=1:1
+                    while i==1
+                        try
+                            include("included.jl")
+                            error(":)")
+                        catch
+                            include("simple.jl")
+                        finally
+                            include("simple2.jl")
+                        end
+                        i+=1
+                    end
                 end
             end
             if false
