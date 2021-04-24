@@ -477,7 +477,7 @@ end
 revise_pkgid() = Base.PkgId(Base.UUID("295af30f-e4ad-537b-8983-00126c2a3abe"), "Revise")
 
 "accepted types as positional arguments of `retest`"
-const ArgType = Union{Module,PatternX,AbstractString,AbstractArray,Tuple,
+const ArgType = Union{Module,PatternX,AbstractString,AbstractArray,Tuple,Symbol,
                       Pair{Module,
                            <:Union{PatternX,AbstractString,AbstractArray,Tuple}}}
 
@@ -585,6 +585,9 @@ function retest(@nospecialize(args::ArgType...);
                 id=nothing,
                 strict::Bool=true,
                 )
+
+    dry, stats, shuffle, group, verbose, recursive, id, strict =
+        update_keywords(args, dry, stats, shuffle, group, verbose, recursive, id, strict)
 
     implicitmodules, modules, verbose = process_args(args, verbose, shuffle, recursive)
     overall = length(modules) > 1
@@ -981,6 +984,40 @@ function thread_pin(t::Task, tid::UInt16)
     return t
 end
 
+# hidden feature, shortcuts for passing kwargs to retest
+function update_keywords(@nospecialize(args), dry, stats, shuffle, group, verbose,
+                         recursive, id, strict)
+    for arg in args
+        if arg isa Symbol
+            for c in string(arg)
+                c == 'v' && continue # "verbose" ignored, we care only about the value
+                val = islowercase(c)
+                c = lowercase(c)
+                if isnumeric(c)
+                    verbose = parse(Int, c)
+                elseif c == 'd'
+                    dry = val
+                elseif c == 's'
+                    stats = val
+                elseif c == 'h'
+                    shuffle = val
+                elseif c == 'g'
+                    group = val
+                elseif c == 'r'
+                    recursive = val
+                elseif c == 'i'
+                    id = val
+                elseif c == 't'
+                    strict = val
+                else
+                    error("bad keyword shortcut")
+                end
+            end
+        end
+    end
+    dry, stats, shuffle, group, verbose, recursive, id, strict
+end
+
 function process_args(@nospecialize(args), verbose, shuffle, recursive)
     ########## process args
     patterns = PatternX[] # list of standalone patterns
@@ -1001,6 +1038,8 @@ function process_args(@nospecialize(args), verbose, shuffle, recursive)
             pat = get!(modpats, mod, And())
             push!(pat.xs, make_pattern(last(arg)))
             mod ∉ modules && push!(modules, mod)
+        elseif arg isa Symbol
+            # ignored, already processed in update_keywords
         else
             push!(patterns, make_pattern(arg))
         end
