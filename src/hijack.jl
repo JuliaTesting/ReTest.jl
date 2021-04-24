@@ -17,9 +17,10 @@ defaults to `Symbol(source, :Tests)`.
 The current procedure is as follows:
 1. replace toplevel `using Test` occurrences by `using ReTest` (`using` can
    have multiple arguments);
-2. apply recursively these two rules for all `include`d files, provided
-   the `include` statement is at the toplevel, and on the content of
-   all modules.
+2. apply recursively these two rules:
+   * for all `include`d files, provided the `include` statement is at the toplevel,
+     or nested within these toplevel constructs: `begin`, `let`, `for`, `if`;
+   * on the content of all included modules.
 
 When `source` is `Base` or a standard library module, a slightly different
 mechanism is used to find test files (which can contain e.g. non-toplevel
@@ -79,7 +80,10 @@ function populate_mod!(mod, path; lazy, Revise)
             [$(files...)]
         end
         for filepath in filepaths
-            Revise.track(mod, filepath)
+            if isfile(filepath) # some files might not exist when they are conditionally
+                                # included
+                Revise.track(mod, filepath)
+            end
         end
     end
 end
@@ -131,8 +135,19 @@ function substitute_retest!(ex, lazy, files=nothing, root=nothing)
     elseif Meta.isexpr(ex, :module)
         @assert Meta.isexpr(ex.args[3], :block)
         substitute!.(ex.args[3].args)
-    else
-        filter_toplevel!(ex, lazy)
+    elseif Meta.isexpr(ex, :macrocall)
+        if lazy != false && ex.args[1] ∈ TEST_MACROS
+            empty_expr!(ex)
+        end
+    elseif ex isa Expr && ex.head ∈ (:block, :let, :for, :if)
+        if lazy == :brutal
+            empty_expr!(ex)
+        else
+            beg = ex.head ∈ (:block,) ? 1 : 2
+            for x in ex.args[beg:end]
+                substitute!(x)
+            end
+        end
     end
     ex
 end
@@ -147,24 +162,6 @@ const TEST_MACROS = Symbol.(["@test", "@test_throws", "@test_broken", "@test_ski
                              "@test_warn", "@test_nowarn", "@test_logs",
                              "@test_deprecated", "@inferred"])
 
-function filter_toplevel!(ex, lazy)
-    lazy != false && ex isa Expr || return ex
-
-    if ex.head == :macrocall &&
-        ex.args[1] ∈ TEST_MACROS
-        empty_expr!(ex)
-    elseif ex.head ∈ (:block, :let, :for, :if)
-        if lazy == :brutal
-            empty_expr!(ex)
-        else
-            beg = ex.head == :block ? 1 : 2
-            for x in ex.args[beg:end]
-                filter_toplevel!(x, lazy)
-            end
-        end
-    end
-    ex
-end
 
 """
     hijack_base(tests, [modname];
