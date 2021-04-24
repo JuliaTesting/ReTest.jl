@@ -28,3 +28,14 @@ function allequal(xs)
     end
     true
 end
+
+# test if a module or one of its parents was replaced
+function is_replaced(mod::Module)
+    par = parentmodule(mod)
+    while par != mod
+        getfield(par, nameof(mod)) != mod && return true
+        mod = par
+        par = parentmodule(par)
+    end
+    false
+end

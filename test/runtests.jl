@@ -416,7 +416,7 @@ end
 module Overwritten
 using ReTest, ..Trace
 
-@testset "first" begin
+@testset "overwritten first" begin
     trace(1)
 end
 end # Overwritten
@@ -428,15 +428,42 @@ end
 module Overwritten
 using ReTest, ..Trace
 
-@testset "second" begin
+@testset "overwritten second" begin
     trace(2)
+end
+end # Overwritten
+
+@chapter Overwritten begin
+    check(Overwritten, [2])
+    # 1 must not appear, i.e. ReTest must not keep a reference to
+    # the old overwritten version of `Overwritten`
+end
+
+module Overwritten
+# here Overwritten also doen't define a @testset, ony its submodule does
+# we want to check that the old version of Overwritten gets detected
+# as "replaced" and deleted from TESTED_MODULES
+
+module Sub
+using ReTest, ...Trace
+
+@testset "overwritten second" begin
+    trace(3)
+end
 end
 end
 
 @chapter Overwritten begin
-    check(Overwritten, [2])
-    # 1 must not appear (i.e. ReTest must not keep a reference to
-    # the old overwritten version of `Overwritten`
+    check("overwritten ", [3])
+    # 1 must not appear, i.e. ReTest must not keep a reference to
+    # the old overwritten version of `Overwritten`, even as Overwritten is not
+    # anymore in TESTED_MODULES
+end
+
+module Overwritten end # no testset at all
+
+@chapter Overwritten begin
+    check("overwritten", []) # all previous modules/submodules are "replaced"
 end
 
 

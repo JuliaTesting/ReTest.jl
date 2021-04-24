@@ -1123,16 +1123,17 @@ function process_args(@nospecialize(args), verbose, shuffle, recursive)
 end
 
 function update_TESTED_MODULES!()
-    # TESTED_MODULES might have "duplicate" entries, i.e. modules with the same
-    # name, when one overwrites itself by being redefined; in this case,
-    # let's just delete older entries:
+    # TESTED_MODULES might have "duplicate" entries, i.e. modules which were
+    # "replaced", when one overwrites itself by being redefined; in this case,
+    # let's just delete older entries. We must also take into account the possibility
+    # that a module was overwritten, but the new version doesn't have a @testset,
+    # in which case there won't be a duplicate, but we must still delete the entry.
     seen = Set{String}()
-    for idx in reverse(eachindex(TESTED_MODULES))
-        str = string(TESTED_MODULES[idx])
-        if str in seen
+    for idx in eachindex(TESTED_MODULES)
+        if is_replaced(TESTED_MODULES[idx])
             TESTED_MODULES[idx] = nothing
         else
-            push!(seen, str)
+            push!(seen, string(TESTED_MODULES[idx]))
         end
     end
     filter!(x -> x !== nothing, TESTED_MODULES)
