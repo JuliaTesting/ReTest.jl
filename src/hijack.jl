@@ -62,6 +62,9 @@ function hijack(path::AbstractString, modname=nothing; parentmodule::Module=Main
 end
 
 function populate_mod!(mod, path; lazy, Revise)
+    lazy ∈ (true, false, :brutal) ||
+        throw(ArgumentError("the `lazy` keyword must be `true`, `false` or `:brutal`"))
+
     files = Any[path]
     substitute!(x) = substitute_retest!(x, lazy, files, dirname(path))
 

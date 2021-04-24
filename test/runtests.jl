@@ -864,5 +864,9 @@ end
         ReTest.hijack("./Hijack/test/lazy.jl", :HijackBrutal, lazy=:brutal)
         retest(HijackBrutal)
         @test Hijack.RUN == [3]
+
+        # test lazy=:wrong
+        empty!(Hijack.RUN)
+        @test_throws ArgumentError ReTest.hijack("./Hijack/test/lazy.jl", :HijackWrong, lazy=:wrong)
     end
 end
