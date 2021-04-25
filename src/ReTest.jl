@@ -451,23 +451,30 @@ make_ts(ex::Expr, pat, stats, chan) =
     Expr(ex.head, map(x -> make_ts(x, pat, stats, chan), ex.args)...)
 
 # convert raw tests from InlineTest into TestsetExpr tests, and handle overwriting
-function updatetests!(mod::Module)
+function updatetests!(mod::Module, dup::Bool)
     tests, news, map = InlineTest.get_tests(mod)
     # work-around lack of ordered-dict
     # map: we keep only the latest version of a test at a given location,
     #      to be Revise-friendly (just an imperfect heuristic)
+    #      unless dup is true; if later on dup is false, we overwrite only
+    #      the last version; should we delete all of the versions in this case?
     for (tsargs, source) in news
         ts, hasbroken = parse_ts(source, string(mod), tsargs)
         idx = get!(map, ts.desc, length(tests) + 1)
         if idx == length(tests) + 1
             push!(tests, ts)
         else
-            if !(revise_pkgid() in keys(Base.loaded_modules))
+            if !dup && !(revise_pkgid() in keys(Base.loaded_modules))
                 desc = ts.desc isa String ? string('"', ts.desc, '"') : ts.desc
                 source = string(ts.source.file, ':', ts.source.line)
                 @warn "duplicate description for @testset, overwriting: $desc at $source"
             end
-            tests[idx] = ts
+            if dup
+                push!(tests, ts)
+                map[ts.desc] = length(tests)
+            else
+                tests[idx] = ts
+            end
         end
     end
     empty!(news)
@@ -483,7 +490,8 @@ const ArgType = Union{Module,PatternX,AbstractString,AbstractArray,Tuple,Symbol,
 
 """
     retest(mod..., pattern...; dry::Bool=false, stats::Bool=false, verbose::Real=true,
-                               [id::Bool], shuffle::Bool=false, recursive::Bool=true)
+                               [id::Bool], shuffle::Bool=false, recursive::Bool=true,
+                               dup::Bool=false)
 
 Run tests declared with [`@testset`](@ref) blocks, within modules `mod` if specified,
 or within all currently loaded modules otherwise.
@@ -504,6 +512,12 @@ When no `pattern`s are specified, all the tests are run.
   a given module are run, as well as the list of passed modules.
 * If `recursive` is `true`, the tests for all the recursive submodules of
   the passed modules `mod` are also run.
+* If `dup` is `true`, multiple toplevel testsets can have the same
+  description. If `false`, only the last testset of a "duplicate group" is
+  kept. The default is `false` in order to encourage having unique
+  descriptions (useful for filtering) but also and mostly to play well with
+  `Revise`. This keyword applies only to newly added testsets since the last
+  run.
 
 ### Filtering
 
@@ -584,10 +598,11 @@ function retest(@nospecialize(args::ArgType...);
                 recursive::Bool=true,
                 id=nothing,
                 strict::Bool=true,
+                dup::Bool=false,
                 )
 
-    dry, stats, shuffle, group, verbose, recursive, id, strict =
-        update_keywords(args, dry, stats, shuffle, group, verbose, recursive, id, strict)
+    dry, stats, shuffle, group, verbose, recursive, id, strict, dup =
+        update_keywords(args, dry, stats, shuffle, group, verbose, recursive, id, strict, dup)
 
     implicitmodules, modules, verbose = process_args(args, verbose, shuffle, recursive)
     overall = length(modules) > 1
@@ -595,7 +610,7 @@ function retest(@nospecialize(args::ArgType...);
 
     maxidw = Ref{Int}(0) # visual width for showing IDs (Ref for mutability in hack below)
     tests_descs_hasbrokens = fetchtests.(modules, verbose, overall, Ref(maxidw);
-                                         strict=strict)
+                                         strict=strict, dup=dup)
     isempty(tests_descs_hasbrokens) &&
         throw(ArgumentError("no modules using ReTest could be found"))
 
@@ -986,7 +1001,7 @@ end
 
 # hidden feature, shortcuts for passing kwargs to retest
 function update_keywords(@nospecialize(args), dry, stats, shuffle, group, verbose,
-                         recursive, id, strict)
+                         recursive, id, strict, dup)
     for arg in args
         if arg isa Symbol
             for c in string(arg)
@@ -1009,13 +1024,15 @@ function update_keywords(@nospecialize(args), dry, stats, shuffle, group, verbos
                     id = val
                 elseif c == 't'
                     strict = val
+                elseif c == 'u'
+                    dup = val
                 else
                     error("bad keyword shortcut")
                 end
             end
         end
     end
-    dry, stats, shuffle, group, verbose, recursive, id, strict
+    dry, stats, shuffle, group, verbose, recursive, id, strict, dup
 end
 
 function process_args(@nospecialize(args), verbose, shuffle, recursive)
@@ -1172,8 +1189,8 @@ function update_TESTED_MODULES!()
     filter!(m -> m ∉ (ReTest, ReTest.ReTestTest), TESTED_MODULES)
 end
 
-function fetchtests((mod, pat), verbose, overall, maxidw; strict)
-    tests = updatetests!(mod)
+function fetchtests((mod, pat), verbose, overall, maxidw; strict, dup)
+    tests = updatetests!(mod, dup)
     descwidth = 0
     hasbroken = false
 

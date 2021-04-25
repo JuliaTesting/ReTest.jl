@@ -719,6 +719,17 @@ end # Duplicate
     empty!(Duplicate.RUN)
     retest(Duplicate, Duplicate, "dupe5")
     @test Duplicate.RUN == [5]
+
+    # dup=true
+    @eval Duplicate begin
+        @testset "dupe" begin
+            @test true
+            push!(RUN, 7)
+        end
+    end
+    empty!(Duplicate.RUN)
+    retest(Duplicate, r"dupe$", dup=true)
+    @test Duplicate.RUN == [2, 7]
 end
 
 
