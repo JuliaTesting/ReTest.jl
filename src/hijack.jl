@@ -9,7 +9,8 @@ defined within `parentmodule`. If successful, the newly created module
 `modname` is returned and `modname.runtests()` should be callable.
 
 If `source::AbstractString`, then it's interpreted as the top level test file
-(possibly including other files), and `modname` defaults to an arbitrary name.
+(possibly including other files), and `modname` defaults to a name based
+on `basename(source)`.
 
 If `source::Module`, then it's interpreted as the name of a package, and the
 "test/runtests.jl" file from this package is loaded. In this case, `modname`
@@ -80,12 +81,7 @@ function hijack(path::AbstractString, modname=nothing; parentmodule::Module=Main
     Revise = get_revise(revise)
 
     if modname === nothing
-        modname = :TestMod
-        i = 1
-        while hasproperty(parentmodule, modname)
-            modname = Symbol(:TestMod, i)
-            i += 1
-        end
+        modname = replace(splitext(basename(path))[1], ['-', '.'] => '_')
     end
     modname = Symbol(modname)
 
