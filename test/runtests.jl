@@ -593,6 +593,8 @@ end # Interpolate
     check(Interpolate, 1:5)
     check(Interpolate, "0", 1:5)
     check(Interpolate, "4", 4:5)
+    check(Interpolate, interpolated, 1:5)
+    check(Interpolate, not(interpolated), [])
 end
 
 module InterpolateImpossible
@@ -625,9 +627,13 @@ end # InterpolateImpossible
 @chapter Interpolate begin
     retest(InterpolateImpossible, dry=true)
     check(InterpolateImpossible, 0:6)
+    check(InterpolateImpossible, interpolated, [0, 4])
     check(InterpolateImpossible, "0", 0:6)
     check(InterpolateImpossible, "4", [0, 4, 5, 6]) # should have a warning or two
     check(InterpolateImpossible, "d", not(2:3), 4:6)
+    check(InterpolateImpossible, "d", [0, 4, 5, 6])
+    check(InterpolateImpossible, "d", interpolated, [4])
+    check(InterpolateImpossible, "d", not(interpolated), [0, 4])
 end
 
 

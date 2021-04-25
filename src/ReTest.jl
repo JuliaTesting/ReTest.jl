@@ -1,6 +1,6 @@
 module ReTest
 
-export retest, @testset, not
+export retest, @testset, not, interpolated
 
 using Distributed
 using Base.Threads: nthreads
@@ -77,6 +77,60 @@ and `not(1:3)` matches all the testsets but the first three of a module.
 """
 not(x) = Not(make_pattern(x))
 
+struct Interpolated <: Pattern end
+
+"""
+    interpolated
+
+Singleton pattern which matches any testset whose description can be interpolated
+"statically", i.e. at filtering time before testset are actually run.
+Non-inferrable descriptions include those containing interpolated values
+which can't be known until run time.
+
+# Examples
+
+Given these testset:
+```julia
+@testset "outer" verbose=true begin
+    @test true
+    inner = "inner"
+    @testset "\$inner" begin
+        @test true
+    end
+end
+@testset "other" begin
+    @test true
+end
+```
+We get:
+```julia
+julia> retest("other", dry=true)
+Main
+1| outer
+2|   "\$(inner)"
+3| other
+
+julia> retest("other", dry=false)
+            Pass
+outer   |      1
+other   |      1
+Main    |      2
+
+julia> retest("other", dry=true, interpolated)
+Main
+3| other
+```
+
+Without `interpolated`, `retest` can't decide at filtering time whether the "inner"
+testset will run, so must mark the "outer" testset as having to run. At run
+time, "inner" is not run because it doesn't match the pattern, but "outer"
+still had to run to determine this. With the `interpolated` pattern, "inner" is
+filtered out and `retest` selects only testsets which are statically known to
+have to run.
+
+"""
+const interpolated = Interpolated()
+
 alwaysmatches(pat::And) = all(alwaysmatches, pat.xs)
 
 alwaysmatches(pat::Or) =
@@ -89,6 +143,7 @@ alwaysmatches(pat::Or) =
     end
 
 alwaysmatches(::Not) = false
+alwaysmatches(::Interpolated) = false
 alwaysmatches(rx::Regex) = isempty(rx.pattern)
 alwaysmatches(id::Integer) = false
 
@@ -102,6 +157,7 @@ matches(pat::Or, x, id) =
     end
 
 matches(pat::Not, x, id) = !matches(pat.x, x, id)
+matches(::Interpolated, x::Union{Missing,String}, id) = x !== missing
 matches(rx::Regex, x, _) = occursin(rx, x)
 matches(rx::Regex, ::Missing, _) = missing
 matches(pat::Integer, _, id) = pat >= 0 ? pat == id : pat != -id
@@ -131,6 +187,7 @@ hasinteger(::Regex) = false
 hasinteger(::Integer) = true
 hasinteger(pat::Union{And,Or}) = any(hasinteger, pat.xs)
 hasinteger(pat::Not) = hasinteger(pat.x)
+hasinteger(::Interpolated) = false
 
 
 # * TestsetExpr
@@ -539,6 +596,7 @@ which allows to exclude testsets from being run.
 As a special case, the negation of an integer can be expressed as its arithmetic
 negation, e.g. `not(3)` is equivalent to `-3`.
 
+A pattern can also be the [`interpolated`](@ref) singleton object, cf. its docstring.
 
 ### `Regex` filtering
 

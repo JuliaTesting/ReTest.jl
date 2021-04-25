@@ -59,9 +59,15 @@ calling `retest(M, ...)`.
 CurrentModule = ReTest
 ```
 
+* [`retest`](@ref)
+* [`not`](@ref)
+* [`interpolated`](@ref)
+* [`@testset`](@ref)
+
 ```@docs
 retest
 not
+interpolated
 @testset
 ```
 
