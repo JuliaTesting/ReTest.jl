@@ -853,7 +853,8 @@ end
     if VERSION >= v"1.5"
 
         using Hijack
-        ReTest.hijack(Hijack)
+        ReTest.hijack(Hijack, testset=false) # testset: just check that this method
+                                             # also accepts this kw (TODO: test it!)
         retest(HijackTests)
         @test Hijack.RUN == [1, 5, 4]
         empty!(Hijack.RUN)
@@ -903,5 +904,11 @@ end
         # test lazy=:wrong
         empty!(Hijack.RUN)
         @test_throws ArgumentError ReTest.hijack("./Hijack/test/lazy.jl", :HijackWrong, lazy=:wrong)
+
+        # test testset=true
+        empty!(Hijack.RUN)
+        ReTest.hijack("./Hijack/test/testset.jl", :HijackTestset, testset=true)
+        retest(HijackTestset)
+        @test Hijack.RUN == [1, 2, 3]
     end
 end

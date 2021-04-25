@@ -1,6 +1,7 @@
 """
     ReTest.hijack(source, [modname];
-                  parentmodule::Module=Main, lazy=false, revise::Bool=false)
+                  parentmodule::Module=Main, lazy=false, testset::Bool=false,
+                  revise::Bool=false)
 
 Given test files defined in `source` using the `Test` package, try to load
 them by replacing `Test` with `ReTest`, wrapping them in a module `modname`
@@ -27,6 +28,8 @@ When `source` is `Base` or a standard library module, a slightly different
 mechanism is used to find test files (which can contain e.g. non-toplevel
 `include`s), i.e. `ReTest.hijack_base` is used underneath.
 
+#### `lazy` keyword
+
 The `lazy` keyword specifies whether some toplevel expressions should be skipped:
 * `false` means nothing is skipped;
 * `true` means toplevel `@test*` macros are removed, as well as those defined
@@ -34,6 +37,32 @@ The `lazy` keyword specifies whether some toplevel expressions should be skipped
   `begin`, `let`, `for`, `while`, `if`, `try`;
 * `:brutal` means toplevel `@test*` macros are removed, as well as toplevel
   `begin`, `let`, `for` or `if` blocks.
+
+#### `testset` keyword
+
+The `testset` keyword can help to handle the case where `@testset`s contain
+`include` expressions (at the "toplevel" of the testset), like in the
+following example:
+```julia
+@testset "parent" begin
+    @test true
+    include("file_with_other_testsets.jl")
+end
+```
+
+This works well with `Test` because testsets are run immediately, as well as
+testsets contained in the included files, which are also recognized as children
+of the testset which include them. With `ReTest`, the `include` expressions
+would be evaluated only when the parent testsets are run, so that included
+testsets are not run themselves, but only "declared".
+
+It the `testset` keyword
+is `true`, `hijack` inspects `@testset` expressions and puts `include`
+expressions outside of the testset. This is not ideal, but at least allows
+`ReTest` to know about all the testsets right after the call to `hijack`, and
+to not declare new testsets when parent testsets are run.
+
+#### `revise` keyword
 
 The `revise` keyword specifies whether `Revise` should be used to track
 the test files (in particular the testsets). If `true`, `Revise` must
@@ -45,7 +74,8 @@ be loaded beforehand in your Julia session.
 function hijack end
 
 function hijack(path::AbstractString, modname=nothing; parentmodule::Module=Main,
-                                                       lazy=false, revise::Bool=false)
+                lazy=false, testset::Bool=false, revise::Bool=false)
+
     # do first, to error early if necessary
     Revise = get_revise(revise)
 
@@ -60,16 +90,16 @@ function hijack(path::AbstractString, modname=nothing; parentmodule::Module=Main
     modname = Symbol(modname)
 
     newmod = @eval parentmodule module $modname end
-    populate_mod!(newmod, path; lazy=lazy, Revise=Revise)
+    populate_mod!(newmod, path; lazy=lazy, testset=testset, Revise=Revise)
     newmod
 end
 
-function populate_mod!(mod, path; lazy, Revise)
+function populate_mod!(mod, path; lazy, Revise, testset)
     lazy ∈ (true, false, :brutal) ||
         throw(ArgumentError("the `lazy` keyword must be `true`, `false` or `:brutal`"))
 
     files = Any[path]
-    substitute!(x) = substitute_retest!(x, lazy, files, dirname(path))
+    substitute!(x) = substitute_retest!(x, lazy, testset, files, dirname(path))
 
     @eval mod begin
         using ReTest # for files which don't have `using Test`
@@ -91,7 +121,7 @@ function populate_mod!(mod, path; lazy, Revise)
 end
 
 function hijack(packagemod::Module, modname=nothing; parentmodule::Module=Main,
-                                                     lazy=false, revise::Bool=false)
+                lazy=false, testset::Bool=false, revise::Bool=false)
     packagepath = pathof(packagemod)
     packagepath === nothing && packagemod !== Base &&
         throw(ArgumentError("$packagemod is not a package"))
@@ -108,12 +138,13 @@ function hijack(packagemod::Module, modname=nothing; parentmodule::Module=Main,
                     parentmodule=parentmodule, lazy=lazy, revise=revise)
     else
         path = joinpath(dirname(dirname(packagepath)), "test", "runtests.jl")
-        hijack(path, modname, parentmodule=parentmodule, lazy=lazy, revise=revise)
+        hijack(path, modname, parentmodule=parentmodule,
+               lazy=lazy, testset=testset, revise=revise)
     end
 end
 
-function substitute_retest!(ex, lazy, files=nothing, root=nothing)
-    substitute!(x) = substitute_retest!(x, lazy, files, root)
+function substitute_retest!(ex, lazy, testset, files=nothing, root=nothing)
+    substitute!(x) = substitute_retest!(x, lazy, testset, files, root)
 
     if Meta.isexpr(ex, :using)
         for used in ex.args
@@ -140,6 +171,19 @@ function substitute_retest!(ex, lazy, files=nothing, root=nothing)
     elseif Meta.isexpr(ex, :macrocall)
         if lazy != false && ex.args[1] ∈ TEST_MACROS
             empty_expr!(ex)
+        elseif testset && ex.args[1] == Symbol("@testset")
+            # we remove `include` expressions and put them out of the `@testset`
+            body = ex.args[end]
+            if body.head == :for
+                body = body.args[end]
+            end
+            includes = splice!(body.args, findall(body.args) do x
+                                              Meta.isexpr(x, :call) && x.args[1] == :include
+                                          end)
+            map!(substitute!, includes, includes)
+            ex.head = :block
+            newts = Expr(:macrocall, ex.args...)
+            push!(empty!(ex.args), newts, includes...)
         end
     elseif ex isa Expr && ex.head ∈ (:block, :let, :for, :while, :if, :try)
         if lazy == :brutal
@@ -259,7 +303,7 @@ function hijack_base(tests, modname=nothing; parentmodule::Module=Main, lazy=fal
         @eval mod begin
             using Random
         end
-        populate_mod!(mod, ChooseTests.test_path(test), lazy=lazy, Revise=Revise)
+        populate_mod!(mod, ChooseTests.test_path(test), lazy=lazy, Revise=Revise, testset=false)
     end
 end
 
