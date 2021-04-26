@@ -86,6 +86,8 @@ Singleton pattern which matches any testset whose description can be interpolate
 "statically", i.e. at filtering time before testset are actually run.
 Non-inferrable descriptions include those containing interpolated values
 which can't be known until run time.
+This pattern has an effect closely related to that of the `static` keyword
+of [`retest`](@ref), discussed below, which is probably more generally useful.
 
 # Examples
 
@@ -128,6 +130,46 @@ still had to run to determine this. With the `interpolated` pattern, "inner" is
 filtered out and `retest` selects only testsets which are statically known to
 have to run.
 
+So again, `interpolated` doesn't have the same effect at filtering time (like when
+`dry=true`) and at run time.
+For example, one can see the list of non-interpolated descriptions as follows with
+`dry=true`, but not run them (because everything is interpolated at run time):
+
+```julia
+julia> retest(not(interpolated), dry=true)
+1| outer
+2|   "\$(inner)"
+
+julia> retest(not(interpolated), dry=false)
+            Pass
+Main:
+  outer |      1
+```
+
+The `static` keyword of `retest`, unlike `interpolated`, filters out only
+testsets which can't be proven to have to run at filtering time.
+It can have sometimes the same effect as when using `interpolated`,
+e.g. `retest("other", dry=true, static=true)` and
+`retest("other", dry=true, interpolated)` give the same result.
+
+But in some cases we might want to filter out noisy testsets whose
+description can't be interpolated, but still include those which are
+relevant. For example, assume we want to run testsets `1` and `2`,
+while excluding other testsets with uninterpolated descriptions:
+```julia
+julia> retest(1:2, dry=true, interpolated)
+Main
+1| outer
+
+julia> retest(1:2, dry=true, static=true)
+Main
+1| outer
+2|   "\$(inner)"
+```
+The solution with `interpolated` is not what we want, as we specifically
+want testset `2` to run. Given the filtering specifications (`1:2` here),
+the filtering algorithm can determine that `2` should run even though
+its description is unknown at this point.
 """
 const interpolated = Interpolated()
 
@@ -326,7 +368,7 @@ end
 # The drawback is more exhaustive tree walking and more string churn.
 
 function resolve!(mod::Module, ts::TestsetExpr, pat::Pattern;
-                  verbose::Int, id::Int64, strict::Bool, # external calls
+                  verbose::Int, id::Int64, strict::Bool, static::Bool, # external calls
                   force::Bool=false, shown::Bool=true, depth::Int=0) # only recursive calls
 
     strings = empty!(ts.strings)
@@ -380,7 +422,7 @@ function resolve!(mod::Module, ts::TestsetExpr, pat::Pattern;
             !strict && ts.run && break
             new = str * "/" * desc # TODO: implement *(::Missing, ::Char) in Base ?
             hasmissing |= new === missing # comes either from desc or str
-            ts.run = coalesce(matches(pat, new, ts.id), true)
+            ts.run = coalesce(matches(pat, new, ts.id), !static)
             hasmissing && str === missing ||
                 push!(strings, new)
         end
@@ -412,7 +454,7 @@ function resolve!(mod::Module, ts::TestsetExpr, pat::Pattern;
         catch
             @assert xs == ()
             ts.descwidth = shown ? descwidth(missing) : 0
-            ts.run = coalesce(matches(pat, missing, ts.id), true)
+            ts.run = coalesce(matches(pat, missing, ts.id), !static)
         end
         hasmissing = false
         for x in xs # empty loop if eval above threw
@@ -432,7 +474,7 @@ function resolve!(mod::Module, ts::TestsetExpr, pat::Pattern;
                 new = str * "/" * descx
                 hasmissing |= new === missing
                 if !ts.run
-                    ts.run = coalesce(matches(pat, new, ts.id), true)
+                    ts.run = coalesce(matches(pat, new, ts.id), !static)
                 end
                 hasmissing && str === missing ||
                     push!(strings, new)
@@ -445,7 +487,7 @@ function resolve!(mod::Module, ts::TestsetExpr, pat::Pattern;
 
     for tsc in ts.children
         runc, id = resolve!(mod, tsc, pat, force = !strict && ts.run,
-                            shown=shown & ts.options.transient_verbose,
+                            shown=shown & ts.options.transient_verbose, static=static,
                             depth=depth+1, verbose=verbose-1, id=id, strict=strict)
         run |= runc
         ts.descwidth = max(ts.descwidth, tsc.descwidth)
@@ -548,7 +590,7 @@ const ArgType = Union{Module,PatternX,AbstractString,AbstractArray,Tuple,Symbol,
 """
     retest(mod..., pattern...; dry::Bool=false, stats::Bool=false, verbose::Real=true,
                                [id::Bool], shuffle::Bool=false, recursive::Bool=true,
-                               dup::Bool=false)
+                               static::Bool=false, dup::Bool=false)
 
 Run tests declared with [`@testset`](@ref) blocks, within modules `mod` if specified,
 or within all currently loaded modules otherwise.
@@ -569,6 +611,9 @@ When no `pattern`s are specified, all the tests are run.
   a given module are run, as well as the list of passed modules.
 * If `recursive` is `true`, the tests for all the recursive submodules of
   the passed modules `mod` are also run.
+* The `static` keyword controls testsets filtering: if `true`, only testset
+  which are known to match "statically" the passed patterns, i.e. at filtering
+  time, are run. See docstring of [`interpolated`](@ref) for more details.
 * If `dup` is `true`, multiple toplevel testsets can have the same
   description. If `false`, only the last testset of a "duplicate group" is
   kept. The default is `false` in order to encourage having unique
@@ -657,10 +702,11 @@ function retest(@nospecialize(args::ArgType...);
                 id=nothing,
                 strict::Bool=true,
                 dup::Bool=false,
+                static::Bool=false,
                 )
 
-    dry, stats, shuffle, group, verbose, recursive, id, strict, dup =
-        update_keywords(args, dry, stats, shuffle, group, verbose, recursive, id, strict, dup)
+    dry, stats, shuffle, group, verbose, recursive, id, strict, dup, static =
+        update_keywords(args, dry, stats, shuffle, group, verbose, recursive, id, strict, dup, static)
 
     implicitmodules, modules, verbose = process_args(args, verbose, shuffle, recursive)
     overall = length(modules) > 1
@@ -668,7 +714,7 @@ function retest(@nospecialize(args::ArgType...);
 
     maxidw = Ref{Int}(0) # visual width for showing IDs (Ref for mutability in hack below)
     tests_descs_hasbrokens = fetchtests.(modules, verbose, overall, Ref(maxidw);
-                                         strict=strict, dup=dup)
+                                         strict=strict, dup=dup, static=static)
     isempty(tests_descs_hasbrokens) &&
         throw(ArgumentError("no modules using ReTest could be found"))
 
@@ -1059,7 +1105,7 @@ end
 
 # hidden feature, shortcuts for passing kwargs to retest
 function update_keywords(@nospecialize(args), dry, stats, shuffle, group, verbose,
-                         recursive, id, strict, dup)
+                         recursive, id, strict, dup, static)
     for arg in args
         if arg isa Symbol
             for c in string(arg)
@@ -1084,13 +1130,15 @@ function update_keywords(@nospecialize(args), dry, stats, shuffle, group, verbos
                     strict = val
                 elseif c == 'u'
                     dup = val
+                elseif c == 'c'
+                    static = val
                 else
                     error("bad keyword shortcut")
                 end
             end
         end
     end
-    dry, stats, shuffle, group, verbose, recursive, id, strict, dup
+    dry, stats, shuffle, group, verbose, recursive, id, strict, dup, static
 end
 
 function process_args(@nospecialize(args), verbose, shuffle, recursive)
@@ -1247,14 +1295,14 @@ function update_TESTED_MODULES!()
     filter!(m -> m ∉ (ReTest, ReTest.ReTestTest), TESTED_MODULES)
 end
 
-function fetchtests((mod, pat), verbose, overall, maxidw; strict, dup)
+function fetchtests((mod, pat), verbose, overall, maxidw; static, strict, dup)
     tests = updatetests!(mod, dup)
     descwidth = 0
     hasbroken = false
 
     id = 1
     for ts in tests
-        run, id = resolve!(mod, ts, pat, verbose=verbose, id=id, strict=strict)
+        run, id = resolve!(mod, ts, pat, verbose=verbose, id=id, strict=strict, static=static)
         run || continue
         descwidth = max(descwidth, ts.descwidth)
         hasbroken |= ts.hasbrokenrec
