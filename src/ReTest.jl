@@ -207,6 +207,31 @@ Main:
   outer |      2
     inner |      1
 ```
+
+One example of a rare case where a given testset is not in a single of the
+above three categories is as follows:
+
+```julia
+@testset "a" begin
+    x = 2
+    @testset "b\$(i==1 ? 1 : x)" for i=1:2
+        @testset "c" begin
+            # subject is "match" at first iteration and
+            # "undecidable" at second iteration
+            @test true
+        end
+    end
+end
+```
+
+One thing to understand is that the "identity" of a testset is determined
+by a given occurrence of the `@testset` macro. In the example above,
+for either the patterns "b" or "c", the two inner testsets are both
+"match" and "undecidable". In this case, the filtering algorithm
+selects a testset to run if at least one iteration would lead to
+this decision. Here, if `static=true` the first iteration
+would run, and if `static=false` the second iteration would run.
+This results in the same selection whatever the value of `static` is.
 """
 const interpolated = Interpolated()
 
@@ -422,6 +447,9 @@ function resolve!(mod::Module, ts::TestsetExpr, pat::Pattern;
     ts.run = force | (static !== false) & alwaysmatches(pat)
     ts.loopvalues = nothing # unnecessary ?
     ts.loopiters = nothing
+    if ts.id != 0
+        @assert ts.id == id
+    end
     ts.id = id
     id += 1
 
@@ -493,7 +521,7 @@ function resolve!(mod::Module, ts::TestsetExpr, pat::Pattern;
             !strict && ts.run && break
             new = str * "/" * desc # TODO: implement *(::Missing, ::Char) in Base ?
             hasmissing |= new === missing # comes either from desc or str
-            ts.run = decide(new)
+            ts.run = ts.run || decide(new)
             hasmissing && str === missing ||
                 push!(strings, new)
         end
@@ -525,7 +553,7 @@ function resolve!(mod::Module, ts::TestsetExpr, pat::Pattern;
         catch
             @assert xs == ()
             ts.descwidth = shown ? descwidth(missing) : 0
-            ts.run = decide(missing)
+            ts.run = ts.run || decide(missing)
         end
         hasmissing = false
         for x in xs # empty loop if eval above threw
@@ -544,9 +572,7 @@ function resolve!(mod::Module, ts::TestsetExpr, pat::Pattern;
                 !strict && ts.run && break
                 new = str * "/" * descx
                 hasmissing |= new === missing
-                if !ts.run
-                    ts.run = decide(new)
-                end
+                ts.run = ts.run || decide(new)
                 hasmissing && str === missing ||
                     push!(strings, new)
             end

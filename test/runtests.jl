@@ -647,6 +647,32 @@ end # InterpolateImpossible
     check(InterpolateImpossible, "", static=false, [])
 end
 
+# * Misc .....................................................................
+
+module MiscDuplicity # a testset is both "match" and "undecidable"
+using ReTest, ..Trace
+
+@testset "a" begin
+    x = 2
+    @testset "b$(i==1 ? 1 : x)" for i=1:2
+        @testset "c" begin
+            # subject is undecidable at second iteration, ts.run must not be
+            # overwritten at the 2nd iteration, but be the "or" `|` of each
+            # iteration decision
+            trace(i)
+            @test true
+        end
+    end
+end
+end # MiscDuplicity
+
+@chapter MiscDuplicity begin
+    check(MiscDuplicity, "c", static=true, 1:2)
+    check(MiscDuplicity, "c", static=false, 1:2)
+    check(MiscDuplicity, "b", static=true, 1:2)
+    check(MiscDuplicity, "b", static=false, 1:2)
+end
+
 
 # * Failing ..................................................................
 
