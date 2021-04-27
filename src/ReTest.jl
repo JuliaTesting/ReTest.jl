@@ -1490,8 +1490,13 @@ function dryrun(mod::Module, ts::TestsetExpr, pat::Pattern, align::Int=0, parent
             for (i, x) in enumerate(loopvalues)
                 descx = eval_desc(mod, ts, x)
                 if descx === missing
-                    @assert i == 1
-                    return dryrun_beginend(ts.desc, length(loopvalues))
+                    # we would usually have `i == 1`, but not in some rare cases;
+                    # once we find an uninterpolated description, we still assume
+                    # for simplicity that all remaining ones will also be uninterpolated,
+                    # so we add the "repeated" annotation
+                    # (it's certainly not worth it to bother being more precise about
+                    # exactly which iterations are uninterpolated)
+                    return dryrun_beginend(ts.desc, length(loopvalues)-i+1)
                 end
                 @assert descx !== missing # should be unnecessary, but there was a test below
                 dryrun_beginend(descx)

@@ -671,8 +671,9 @@ end # MiscDuplicity
     check(MiscDuplicity, "c", static=false, 1:2)
     check(MiscDuplicity, "b", static=true, 1:2)
     check(MiscDuplicity, "b", static=false, 1:2)
-end
 
+    retest(MiscDuplicity, "c", verbose=3, dry=true) # must not error
+end
 
 # * Failing ..................................................................
 
