@@ -1460,6 +1460,20 @@ function dryrun(mod::Module, ts::TestsetExpr, pat::Pattern, align::Int=0, parent
     else
         function dryrun_beginend(descx, repeated=nothing)
             # avoid repeating ourselves, transform this iteration into a "begin/end" testset
+            if descx isa Expr
+                @assert descx.head == :string
+                descx = Expr(:string, copy(descx.args)...)
+                replace!(descx.args) do arg
+                    if arg isa String || arg isa Symbol
+                        # TODO: unify with same function in previewer, which sets "?"
+                        # even for symbols
+                        arg
+                    else
+                        @assert arg isa Expr # just to have a chance to discover other possibilities
+                        "?"
+                    end
+                end
+            end
             beginend = TestsetExpr(ts.source, ts.mod, descx, ts.options, nothing,
                                    ts.parent, ts.children)
             beginend.run = true

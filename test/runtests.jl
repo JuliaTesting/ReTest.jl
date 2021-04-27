@@ -672,7 +672,18 @@ end # MiscDuplicity
     check(MiscDuplicity, "b", static=true, 1:2)
     check(MiscDuplicity, "b", static=false, 1:2)
 
-    retest(MiscDuplicity, "c", verbose=3, dry=true) # must not error
+    mktemp() do path, io
+        redirect_stdout(io) do
+            retest(MiscDuplicity, "c", verbose=3, dry=true, id=false) # must not error
+        end
+        seekstart(io)
+        @test readchomp(io) == """
+a
+  b1
+    c
+  "b?" (repeated 1 times)
+    c"""
+    end
 end
 
 # * Failing ..................................................................
