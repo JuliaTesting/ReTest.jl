@@ -190,17 +190,18 @@ by reversing the filtering pattern via [`not`](@ref).
 
 For example, to get the equivalent to the `not(interpolated)` example above,
 but with an effect which persists at run time (`dry = false`),
-you can use `static = false` together with the match-all string pattern `""`,
+you can use `static = false` together with the match-all regex pattern `r".*"`,
 which will mark the `"inner"` testset as "undecidable"
-(the algorithm doesn't inspect patterns and won't detect that `""` would
+(the algorithm inspects slightly patterns just to recognize the simple
+match-all patterns `""` and `r""`, but won't detect that `r".*"` would
 match `"\$(inner)"`):
 ```julia
-julia> retest("", static=false, dry=true)
+julia> retest(r".*", static=false, dry=true)
 Main
 1| outer
 2|   "\$(inner)"
 
-julia> retest("", static=false, dry=false)
+julia> retest(r".*", static=false, dry=false)
             Pass
 Main:
   outer |      2
@@ -237,7 +238,7 @@ matches(pat::Or, x, id) =
 matches(pat::Not, x, id) = !matches(pat.x, x, id)
 matches(::Interpolated, x::Union{Missing,String}, id) = x !== missing
 matches(rx::Regex, x, _) = occursin(rx, x)
-matches(rx::Regex, ::Missing, _) = missing
+matches(rx::Regex, ::Missing, _) = alwaysmatches(rx) | missing
 matches(pat::Integer, _, id) = pat >= 0 ? pat == id : pat != -id
 
 make_pattern(x::PatternX) = x
@@ -251,8 +252,14 @@ function make_pattern(str::AbstractString)
         end
     end
 
-    rx = VERSION >= v"1.3" ? r""i * str :
-                             Regex(str, "i")
+    rx =
+        if isempty(str)
+            r"" # in order to know to match unconditionally
+        elseif VERSION >= v"1.3"
+            r""i * str
+        else
+            Regex(str, "i")
+        end
     neg ? not(rx) : rx
 end
 

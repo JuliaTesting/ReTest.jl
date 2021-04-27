@@ -638,9 +638,13 @@ end # InterpolateImpossible
     check(InterpolateImpossible, static=nothing, 0:6)
     check(InterpolateImpossible, static=true, 0:6)
     check(InterpolateImpossible, static=false, [])
+    check(InterpolateImpossible, r".*", static=nothing, 0:6)
+    check(InterpolateImpossible, r".*", static=true, [0, 4])
+    check(InterpolateImpossible, r".*", static=false, 0:6)
+    # "" pattern is recognized as match-all
     check(InterpolateImpossible, "", static=nothing, 0:6)
-    check(InterpolateImpossible, "", static=true, [0, 4])
-    check(InterpolateImpossible, "", static=false, 0:6)
+    check(InterpolateImpossible, "", static=true, 0:6)
+    check(InterpolateImpossible, "", static=false, [])
 end
 
 
