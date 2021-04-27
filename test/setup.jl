@@ -13,7 +13,7 @@ end
 end
 
 function check(x...; runtests=false, verbose=true, stats=false, dry=false, strict::Bool=true,
-               recursive=true)
+               recursive=true, static=nothing)
     args = x[1:end-1]
     expected = x[end]
     if expected isa AbstractString
@@ -23,10 +23,10 @@ function check(x...; runtests=false, verbose=true, stats=false, dry=false, stric
     empty!(Trace.RUN)
     if runtests
         getfield(args[1], :runtests)(args[2:end]...; verbose=verbose, stats=stats, dry=dry,
-                                     strict=strict, recursive=recursive)
+                                     strict=strict, recursive=recursive, static=static)
     else
         retest(args...; verbose=verbose, stats=stats, dry=dry, strict=strict,
-               recursive=recursive)
+               recursive=recursive, static=static)
     end
     @test Trace.RUN == expected
 end

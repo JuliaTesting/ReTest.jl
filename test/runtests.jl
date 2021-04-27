@@ -595,6 +595,7 @@ end # Interpolate
     check(Interpolate, "4", 4:5)
     check(Interpolate, interpolated, 1:5)
     check(Interpolate, not(interpolated), [])
+    check(Interpolate, static=false, [])
 end
 
 module InterpolateImpossible
@@ -634,6 +635,12 @@ end # InterpolateImpossible
     check(InterpolateImpossible, "d", [0, 4, 5, 6])
     check(InterpolateImpossible, "d", interpolated, [4])
     check(InterpolateImpossible, "d", not(interpolated), [0, 4])
+    check(InterpolateImpossible, static=nothing, 0:6)
+    check(InterpolateImpossible, static=true, 0:6)
+    check(InterpolateImpossible, static=false, [])
+    check(InterpolateImpossible, "", static=nothing, 0:6)
+    check(InterpolateImpossible, "", static=true, [0, 4])
+    check(InterpolateImpossible, "", static=false, 0:6)
 end
 
 

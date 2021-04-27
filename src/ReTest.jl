@@ -146,8 +146,11 @@ Main:
   outer |      1
 ```
 
-The `static` keyword of `retest`, unlike `interpolated`, filters out only
-testsets which can't be proven to have to run at filtering time.
+### `static` keyword
+
+Unlike `interpolated`, the `static` keyword of `retest`, when `true`,
+filters out only testsets which can't be proven to have to run at filtering time,
+let's call them "undecidable".
 It can have sometimes the same effect as when using `interpolated`,
 e.g. `retest("other", dry=true, static=true)` and
 `retest("other", dry=true, interpolated)` give the same result.
@@ -170,6 +173,39 @@ The solution with `interpolated` is not what we want, as we specifically
 want testset `2` to run. Given the filtering specifications (`1:2` here),
 the filtering algorithm can determine that `2` should run even though
 its description is unknown at this point.
+
+Given a filtering specification, there are three kind of testsets:
+* "undecidable" (see above)
+* "match": they are known statically to have to run
+* "nomatch": they are known statically to not have to run
+
+The default value of the `static` keyword is `nothing`, which means
+to run testsets which are not known with certainty to not match,
+i.e. "match" and "undecidable" testsets.
+As seen above, when `static == true`, only "match" testsets are run.
+When `static == false`, the behavior is the opposite: only "undecidable"
+testsets are run.
+Of course, other combinations involving "nomatch" testsets can be had
+by reversing the filtering pattern via [`not`](@ref).
+
+For example, to get the equivalent to the `not(interpolated)` example above,
+but with an effect which persists at run time (`dry = false`),
+you can use `static = false` together with the match-all string pattern `""`,
+which will mark the `"inner"` testset as "undecidable"
+(the algorithm doesn't inspect patterns and won't detect that `""` would
+match `"\$(inner)"`):
+```julia
+julia> retest("", static=false, dry=true)
+Main
+1| outer
+2|   "\$(inner)"
+
+julia> retest("", static=false, dry=false)
+            Pass
+Main:
+  outer |      2
+    inner |      1
+```
 """
 const interpolated = Interpolated()
 
@@ -368,12 +404,15 @@ end
 # The drawback is more exhaustive tree walking and more string churn.
 
 function resolve!(mod::Module, ts::TestsetExpr, pat::Pattern;
-                  verbose::Int, id::Int64, strict::Bool, static::Bool, # external calls
-                  force::Bool=false, shown::Bool=true, depth::Int=0) # only recursive calls
+                  # external calls
+                  verbose::Int, id::Int64, strict::Bool,
+                  static::Union{Bool,Nothing},
+                   # only recursive calls
+                  force::Bool=false, shown::Bool=true, depth::Int=0)
 
     strings = empty!(ts.strings)
     desc = ts.desc
-    ts.run = force || alwaysmatches(pat)
+    ts.run = force | (static !== false) & alwaysmatches(pat)
     ts.loopvalues = nothing # unnecessary ?
     ts.loopiters = nothing
     ts.id = id
@@ -400,6 +439,31 @@ function resolve!(mod::Module, ts::TestsetExpr, pat::Pattern;
                       end
         end
 
+    function decide(subj)
+        m = matches(pat, subj, ts.id)
+        # For the curious, setting `s = something(static, missing)`, there are few
+        # "formulas" to compute the result without `if`, but using only
+        # `coalesce, |, &, ==, !=, ===, !==, (a,b) -> a, (a,b) -> b, (a,b) -> !a,
+        # (a,b) -> !b`. The shortest formulas involve 5 such
+        # functions `fi` and are of the form
+        # `f1(f2(s, m), f3(f4(s, m), f5(s, m)))`, there are about a dozen of them
+        # (with redundancy because of functions symmetry).
+        # All the solutions have `f1 == (===)`, and the 5 simplest involve
+        # `(a, b) -> b`, so only 4 fi functions are really needed:
+        # - coalesce(s == m, m) === s | m
+        # - (coalesce(s, m) == m) === s | m
+        # - coalesce(s, m) | !m === m
+        # - coalesce(s, m) | (s == m) === m
+        # - (coalesce(s, m) == (s | m))  === m
+        # Which one is the most understandable?
+        # cf. the file "misc/decide_formulas.jl" for the brute-force algorithm
+        if static === false
+            m === missing
+        else
+            coalesce(m, static !== true)
+        end
+    end
+
     loops = ts.loops
     if loops === nothing || desc isa String
         # TODO: maybe, for testset-for and !(desc isa String), still try this branch
@@ -422,7 +486,7 @@ function resolve!(mod::Module, ts::TestsetExpr, pat::Pattern;
             !strict && ts.run && break
             new = str * "/" * desc # TODO: implement *(::Missing, ::Char) in Base ?
             hasmissing |= new === missing # comes either from desc or str
-            ts.run = coalesce(matches(pat, new, ts.id), !static)
+            ts.run = decide(new)
             hasmissing && str === missing ||
                 push!(strings, new)
         end
@@ -454,7 +518,7 @@ function resolve!(mod::Module, ts::TestsetExpr, pat::Pattern;
         catch
             @assert xs == ()
             ts.descwidth = shown ? descwidth(missing) : 0
-            ts.run = coalesce(matches(pat, missing, ts.id), !static)
+            ts.run = decide(missing)
         end
         hasmissing = false
         for x in xs # empty loop if eval above threw
@@ -474,7 +538,7 @@ function resolve!(mod::Module, ts::TestsetExpr, pat::Pattern;
                 new = str * "/" * descx
                 hasmissing |= new === missing
                 if !ts.run
-                    ts.run = coalesce(matches(pat, new, ts.id), !static)
+                    ts.run = decide(new)
                 end
                 hasmissing && str === missing ||
                     push!(strings, new)
@@ -588,9 +652,10 @@ const ArgType = Union{Module,PatternX,AbstractString,AbstractArray,Tuple,Symbol,
                            <:Union{PatternX,AbstractString,AbstractArray,Tuple}}}
 
 """
-    retest(mod..., pattern...; dry::Bool=false, stats::Bool=false, verbose::Real=true,
-                               [id::Bool], shuffle::Bool=false, recursive::Bool=true,
-                               static::Bool=false, dup::Bool=false)
+    retest(mod..., pattern...;
+           dry::Bool=false, stats::Bool=false, verbose::Real=true,
+           [id::Bool], shuffle::Bool=false, recursive::Bool=true,
+           static::Union{Bool,Nothing}=nothing, dup::Bool=false)
 
 Run tests declared with [`@testset`](@ref) blocks, within modules `mod` if specified,
 or within all currently loaded modules otherwise.
@@ -611,7 +676,7 @@ When no `pattern`s are specified, all the tests are run.
   a given module are run, as well as the list of passed modules.
 * If `recursive` is `true`, the tests for all the recursive submodules of
   the passed modules `mod` are also run.
-* The `static` keyword controls testsets filtering: if `true`, only testset
+* The `static` keyword controls testsets filtering: if `true`, only testsets
   which are known to match "statically" the passed patterns, i.e. at filtering
   time, are run. See docstring of [`interpolated`](@ref) for more details.
 * If `dup` is `true`, multiple toplevel testsets can have the same
@@ -702,7 +767,7 @@ function retest(@nospecialize(args::ArgType...);
                 id=nothing,
                 strict::Bool=true,
                 dup::Bool=false,
-                static::Bool=false,
+                static::Union{Bool,Nothing}=nothing,
                 )
 
     dry, stats, shuffle, group, verbose, recursive, id, strict, dup, static =
