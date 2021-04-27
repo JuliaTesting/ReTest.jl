@@ -671,19 +671,34 @@ end # MiscDuplicity
     check(MiscDuplicity, "c", static=false, 1:2)
     check(MiscDuplicity, "b", static=true, 1:2)
     check(MiscDuplicity, "b", static=false, 1:2)
-
-    mktemp() do path, io
-        redirect_stdout(io) do
-            retest(MiscDuplicity, "c", verbose=3, dry=true, id=false) # must not error
-        end
-        seekstart(io)
-        @test readchomp(io) == """
+    check(MiscDuplicity, "c", verbose=3, dry=true, id=false, [], output= """
 a
   b1
     c
   "b?" (repeated 1 times)
-    c"""
+    c
+""")
+end
+
+module MV # MiscVerbose, but we want the name to be short to not have effect on alignment
+using ReTest
+
+@testset "outer" verbose=true begin # verbose must not be lost when computing alignment
+    @test true
+    inner = "inner"
+    @testset "$inner" begin
+        @test true
     end
+end
+end # MV
+
+@chapter MiscVerbose begin
+    check(MV, [], output = """
+               Pass
+Main.MV:
+  outer    |      2
+    inner  |      1
+""")
 end
 
 # * Failing ..................................................................

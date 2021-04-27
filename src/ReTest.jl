@@ -202,10 +202,10 @@ Main
 2|   "\$(inner)"
 
 julia> retest(r".*", static=false, dry=false)
-            Pass
+               Pass
 Main:
-  outer |      2
-    inner |      1
+  outer    |      2
+    inner  |      1
 ```
 
 One example of a rare case where a given testset is not in a single of the
@@ -465,13 +465,14 @@ function resolve!(mod::Module, ts::TestsetExpr, pat::Pattern;
             textwidth(desc) + 2*depth
         else
             # set width to a lower bound to reduce misalignment
-            2*depth + mapreduce(+, ts.desc.args) do part
-                          if part isa String
-                              textwidth(part)
-                          else
-                              4 # give 4 spaces for unknown string part
-                          end
-                      end
+            2*depth + max(6, # give at least 6 spaces for the common case of a unique part
+                          mapreduce(+, ts.desc.args) do part
+                              if part isa String
+                                  textwidth(part)
+                              else
+                                  4 # give 4 spaces for unknown string part
+                              end
+                          end)
         end
 
     function decide(subj)
@@ -592,7 +593,7 @@ function resolve!(mod::Module, ts::TestsetExpr, pat::Pattern;
             ts.hasbrokenrec |= tsc.hasbrokenrec
         end
     end
-    if !run || verbose <= 0
+    if !run || !shown
         ts.descwidth = 0
     end
     ts.run = run
