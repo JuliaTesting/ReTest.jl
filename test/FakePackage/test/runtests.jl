@@ -36,7 +36,15 @@ retest(Included)
 
 include("../../setup.jl")
 
+using ReTest: process_args, and
+
 ReTest.Test.@testset "retest: load" begin
+    @test process_args(()).modules == [
+        FakePackage => and(),
+        FakePackage.Sub1 => and(),
+        FakePackage.Sub2.SubSub => and(),
+        Main.Included => and(),
+    ]
     check([], dry=true, verbose=0, output = """
 FakePackage
 FakePackage.Sub1
@@ -58,4 +66,40 @@ Main.FakePackageTests.Sub.SubSub
 FakePackage
 Main.FakePackageTests
 """)
+
+    @test process_args((FakePackage, 2)).modules ==
+        [
+            FakePackage => and(2),
+            FakePackage.Sub1 => and(2),
+            FakePackage.Sub2.SubSub => and(2),
+        ]
+    @test process_args((FakePackage, 2), load=true, recursive=false).modules ==
+        [
+            FakePackage => and(2),
+            FakePackageTests => and(2),
+        ]
+    # cumulative patterns
+    @test process_args((FakePackage, 2, FakePackageTests => 3),
+                       load=true, recursive=false).modules ==
+        [
+            FakePackage => and(2),
+            FakePackageTests => and(3, 2),
+        ]
+    # specified pattern for test module
+    @test process_args((FakePackage => 2, FakePackageTests => 3),
+                       load=true, recursive=false).modules ==
+        [
+            FakePackage => and(2),
+            FakePackageTests => and(3),
+        ]
+    @test process_args((FakePackage => 2, FakePackageTests => 3),
+                       load=true, recursive=true).modules ==
+        [
+            FakePackage => and(2),
+            FakePackageTests => and(3),
+            FakePackage.Sub1 => and(2),
+            FakePackage.Sub2.SubSub => and(2),
+            FakePackageTests.Sub => and(3),
+            FakePackageTests.Sub.SubSub => and(3),
+        ]
 end

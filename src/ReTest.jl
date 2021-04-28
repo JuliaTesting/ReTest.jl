@@ -827,7 +827,8 @@ function retest(@nospecialize(args::ArgType...);
     dry, stats, shuffle, group, verbose, recursive, id, strict, dup, static =
         update_keywords(args, dry, stats, shuffle, group, verbose, recursive, id, strict, dup, static)
 
-    implicitmodules, modules, verbose = process_args(args, verbose, shuffle, recursive, load)
+    implicitmodules, modules, verbose = process_args(args; verbose=verbose, shuffle=shuffle,
+                                                     recursive=recursive, load=load)
     overall = length(modules) > 1
     root = Testset.ReTestSet("", "Overall", overall=true)
 
@@ -1260,7 +1261,11 @@ function update_keywords(@nospecialize(args), dry, stats, shuffle, group, verbos
     dry, stats, shuffle, group, verbose, recursive, id, strict, dup, static
 end
 
-function process_args(@nospecialize(args), verbose, shuffle, recursive, load::Bool)
+function process_args(@nospecialize(args);
+                      # defaults for keywords are added just for process_args to be more
+                      # easily called from test code
+                      # TODO: set defaults in global variables to help stay in sync?
+                      verbose=true, shuffle=false, recursive=true, load::Bool=false)
     ########## process args
     patterns = PatternX[] # list of standalone patterns
     modpats = Dict{Module,Any}() # pairs module => pattern
@@ -1405,7 +1410,8 @@ function process_args(@nospecialize(args), verbose, shuffle, recursive, load::Bo
     end
     verbose = Int(verbose)
 
-    implicitmodules, [mod => modpats[mod] for mod in modules], verbose
+    (implicitmodules=implicitmodules, modules=[mod => modpats[mod] for mod in modules],
+     verbose=verbose)
 end
 
 function update_TESTED_MODULES!(double_check=true)
