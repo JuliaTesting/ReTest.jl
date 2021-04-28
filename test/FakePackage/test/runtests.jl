@@ -33,3 +33,29 @@ end
 
 retest(Included)
 @test Included.RUN == (VERSION >= v"1.5" ? [0, 0, 0, 0] : [0, 0])
+
+include("../../setup.jl")
+
+ReTest.Test.@testset "retest: load" begin
+    check([], dry=true, verbose=0, output = """
+FakePackage
+FakePackage.Sub1
+FakePackage.Sub2.SubSub
+Main.Included
+""")
+
+    check([], dry=true, verbose=0, load=true, output = """
+FakePackage
+FakePackage.Sub1
+FakePackage.Sub2.SubSub
+Main.Included
+Main.FakePackageTests
+Main.FakePackageTests.Sub
+Main.FakePackageTests.Sub.SubSub
+""")
+
+    check(FakePackage, [], dry=true, verbose=0, load=true, recursive=false, output = """
+FakePackage
+Main.FakePackageTests
+""")
+end

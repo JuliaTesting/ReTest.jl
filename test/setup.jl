@@ -14,7 +14,7 @@ end
 
 function check(x...; runtests=false, output::Union{Nothing,String}=nothing,
                verbose=true, stats=false, dry=false, strict::Bool=true,
-               recursive=true, static=nothing, id=nothing)
+               recursive=true, static=nothing, id=nothing, load=false)
     @assert !(runtests & (output !== nothing)) "unimplemented"
     args = x[1:end-1]
     expected = x[end]
@@ -26,15 +26,15 @@ function check(x...; runtests=false, output::Union{Nothing,String}=nothing,
     if runtests
         getfield(args[1], :runtests)(args[2:end]...; verbose=verbose, stats=stats, dry=dry,
                                      strict=strict, recursive=recursive, static=static,
-                                     id=id)
+                                     id=id, load=load)
     elseif output === nothing
         retest(args...; verbose=verbose, stats=stats, dry=dry, strict=strict,
-               recursive=recursive, static=static, id=id)
+               recursive=recursive, static=static, id=id, load=load)
     else
         mktemp() do path, io
             redirect_stdout(io) do
                 retest(args...; verbose=verbose, stats=stats, dry=dry, strict=strict,
-                       recursive=recursive, static=static, id=id)
+                       recursive=recursive, static=static, id=id, load=load)
             end
             seekstart(io)
             printed = join(map(rstrip, split(readchomp(io), '\n')), '\n')

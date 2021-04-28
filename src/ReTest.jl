@@ -689,7 +689,8 @@ const ArgType = Union{Module,PatternX,AbstractString,AbstractArray,Tuple,Symbol,
     retest(mod..., pattern...;
            dry::Bool=false, stats::Bool=false, verbose::Real=true,
            [id::Bool], shuffle::Bool=false, recursive::Bool=true,
-           static::Union{Bool,Nothing}=nothing, dup::Bool=false)
+           static::Union{Bool,Nothing}=nothing, dup::Bool=false,
+           load::Bool=false)
 
 Run tests declared with [`@testset`](@ref) blocks, within modules `mod` if specified,
 or within all currently loaded modules otherwise.
@@ -719,6 +720,13 @@ When no `pattern`s are specified, all the tests are run.
   descriptions (useful for filtering) but also and mostly to play well with
   `Revise`. This keyword applies only to newly added testsets since the last
   run.
+* When `load` is `true`, for each package module `Mod` which is selected, `retest`
+  attempts to also select a corresponding `Main.ModTests` module with the
+  same pattern specification, unless such module is already explicitly
+  passed as an argument. If this test module doesn't already exist,
+  `retest` attempts first to include into `Main` the corresponding test file
+  "test/ModTests.jl" which is assumed, if it exists, to define `ModTests`.
+
 
 ### Filtering
 
@@ -802,12 +810,13 @@ function retest(@nospecialize(args::ArgType...);
                 strict::Bool=true,
                 dup::Bool=false,
                 static::Union{Bool,Nothing}=nothing,
+                load::Bool=false,
                 )
 
     dry, stats, shuffle, group, verbose, recursive, id, strict, dup, static =
         update_keywords(args, dry, stats, shuffle, group, verbose, recursive, id, strict, dup, static)
 
-    implicitmodules, modules, verbose = process_args(args, verbose, shuffle, recursive)
+    implicitmodules, modules, verbose = process_args(args, verbose, shuffle, recursive, load)
     overall = length(modules) > 1
     root = Testset.ReTestSet("", "Overall", overall=true)
 
@@ -1240,11 +1249,34 @@ function update_keywords(@nospecialize(args), dry, stats, shuffle, group, verbos
     dry, stats, shuffle, group, verbose, recursive, id, strict, dup, static
 end
 
-function process_args(@nospecialize(args), verbose, shuffle, recursive)
+function process_args(@nospecialize(args), verbose, shuffle, recursive, load::Bool)
     ########## process args
     patterns = PatternX[] # list of standalone patterns
     modpats = Dict{Module,Any}() # pairs module => pattern
     modules = Module[] # ordered list of keys from modpats
+    loaded_modules = Set{Module}(load ? values(Base.loaded_modules) : ())
+    toload = Dict{Module,Module}() # package => testmodule
+
+    function load_testmod(mod)::Union{Module,Nothing}
+        mod ∈ loaded_modules || return
+        mod in keys(toload) && return
+        stestmod = Symbol(mod, :Tests)
+        if !isdefined(Main, stestmod)
+            testfile = joinpath(dirname(pathof(mod)), "..", "test", string(stestmod, ".jl"))
+            isfile(testfile) || return
+            Base.include(Main, testfile)
+            if !isdefined(Main, stestmod)
+                @warn "test file $testfile loaded but it did not define module $stestmod"
+                return
+            end
+        end
+        testmod = getfield(Main, stestmod)
+        if !(testmod isa Module)
+            @warn "$testmod exists but is not a module"
+            return
+        end
+        toload[mod] = testmod
+    end
 
     # first we initialize modpats with the given patterns for "module-patterns"
     # standalone are added at a later stage, because we want to add them only
@@ -1255,16 +1287,28 @@ function process_args(@nospecialize(args), verbose, shuffle, recursive)
             # if arg was already seen, it already has pattern And() added, so nothing to do
             get!(modpats, arg, And())
             arg ∉ modules && push!(modules, arg)
+            load_testmod(arg)
         elseif arg isa Pair{Module}
             mod = first(arg)
             pat = get!(modpats, mod, And())
             push!(pat.xs, make_pattern(last(arg)))
             mod ∉ modules && push!(modules, mod)
+            load_testmod(mod)
         elseif arg isa Symbol
             # ignored, already processed in update_keywords
         else
             push!(patterns, make_pattern(arg))
         end
+    end
+
+    # register testmods
+    for (mod, testmod) in toload
+        testmod in modules && continue
+        @assert !(testmod in keys(modpats))
+        modpats[testmod] = deepcopy(modpats[mod])
+        # TODO: avoid deepcopy? this is currently added as otherwise `patterns`
+        # might be added multiple times at the end of module processing below
+        push!(modules, testmod)
     end
 
     ########## process modules
@@ -1275,6 +1319,15 @@ function process_args(@nospecialize(args), verbose, shuffle, recursive)
         update_TESTED_MODULES!()
     end
     if implicitmodules
+        for mod in @view(TESTED_MODULES[1:end])
+            # we iterate only on the current state of TESTED_MODULES (hence the use of a
+            # @view), because we don't need to call load_testmod on newly loaded test modules
+            load_testmod(mod) # might update TESTED_MODULES with submodules
+        end
+        update_TESTED_MODULES!(false)
+        # TODO: update_TESTED_MODULES!() might need to be called, if a module is
+        # replaced by itself within a newly loaded test module? We should add a test
+        @assert isempty(modules)
         append!(modules, TESTED_MODULES)
         for mod in modules
             modpats[mod] = And(patterns)
@@ -1344,7 +1397,7 @@ function process_args(@nospecialize(args), verbose, shuffle, recursive)
     implicitmodules, [mod => modpats[mod] for mod in modules], verbose
 end
 
-function update_TESTED_MODULES!()
+function update_TESTED_MODULES!(double_check=true)
     # TESTED_MODULES might have "duplicate" entries, i.e. modules which were
     # "replaced", when one overwrites itself by being redefined; in this case,
     # let's just delete older entries. We must also take into account the possibility
@@ -1360,31 +1413,33 @@ function update_TESTED_MODULES!()
     end
     filter!(x -> x !== nothing, TESTED_MODULES)
 
-    # What is below is obsolete as we now reliably register modules in TESTED_MODULES.
-    # We still keep it for a while just to check this assumption.
-    # TODO: delete
-    #
-    # TESTED_MODULES is not up-to-date w.r.t. package modules which have
-    # precompilation, so we have to also look in Base.loaded_modules
-    for mod in values(Base.loaded_modules)
-        # exclude modules from Main, which presumably already had a chance to get
-        # registered in TESTED_MODULES at runtime
-        mod ∈ (ReTest, Main, Base) && continue # TODO: should exclude stdlibs too
-        str = string(mod)
-        if str ∉ seen
-            push!(seen, str) # probably unnecessary, if str are all unique in this loop
-            for sub in recsubmodules(mod)
-                # new version: just check the assumption
-                nameof(sub) == INLINE_TEST && continue
-                if isdefined(sub, INLINE_TEST)
-                    @assert sub in TESTED_MODULES
+    if double_check
+        # What is below is obsolete as we now reliably register modules in TESTED_MODULES.
+        # We still keep it for a while just to check this assumption.
+        # TODO: delete
+        #
+        # TESTED_MODULES is not up-to-date w.r.t. package modules which have
+        # precompilation, so we have to also look in Base.loaded_modules
+        for mod in values(Base.loaded_modules)
+            # exclude modules from Main, which presumably already had a chance to get
+            # registered in TESTED_MODULES at runtime
+            mod ∈ (ReTest, Main, Base) && continue # TODO: should exclude stdlibs too
+            str = string(mod)
+            if str ∉ seen
+                push!(seen, str) # probably unnecessary, if str are all unique in this loop
+                for sub in recsubmodules(mod)
+                    # new version: just check the assumption
+                    nameof(sub) == INLINE_TEST && continue
+                    if isdefined(sub, INLINE_TEST)
+                        @assert sub in TESTED_MODULES
+                    end
+                    # old effective version:
+                    # if isdefined(sub, INLINE_TEST) && sub ∉ TESTED_MODULES
+                    #     # sub might be a submodule of a Main-like module mod (e.g. via a
+                    #     # REPL "contextual module"), in which case it already got registered
+                    #     push!(TESTED_MODULES, sub)
+                    # end
                 end
-                # old effective version:
-                # if isdefined(sub, INLINE_TEST) && sub ∉ TESTED_MODULES
-                #     # sub might be a submodule of a Main-like module mod (e.g. via a
-                #     # REPL "contextual module"), in which case it already got registered
-                #     push!(TESTED_MODULES, sub)
-                # end
             end
         end
     end
