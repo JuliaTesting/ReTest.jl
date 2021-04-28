@@ -63,12 +63,14 @@ CurrentModule = ReTest
 * [`not`](@ref)
 * [`interpolated`](@ref)
 * [`@testset`](@ref)
+* [`load`](@ref)
 
 ```@docs
 retest
 not
 interpolated
 @testset
+load
 ```
 
 
@@ -139,6 +141,9 @@ This means that running "runtests.jl" will have the same net effect as before.
 The "MyPackageTests.jl" file can now be `include`d in your REPL session
 (`include("MyPackageTests.jl")`), and you can run all or some of its tests (e.g.
 `MyPackageTests.runtests("addition")`).
+This test file can also be included via the [`ReTest.load`](@ref) function
+or via the `load` keyword of `retest`.
+
 
 Wrapping the tests in `MyPackageTests` allows to not pollute `Main` and keeps
 the tests of different packages separated. Also, you can

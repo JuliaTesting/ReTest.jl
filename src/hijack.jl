@@ -1,4 +1,22 @@
 """
+    ReTest.load(Mod::Module, testfile::AbstractString="ModTests.jl";
+                parentmodule::Module=Main)
+
+Given a package `Mod`, include into `parentmodule`
+the corresponding tests from file `testfile`, which is assumed to be
+located in the "test" directory of the package.
+"""
+function load(packagemod::Module, testfile::Union{Nothing,AbstractString}=nothing;
+              parentmodule::Module=Main)
+    packagepath = pathof(packagemod)
+    packagepath === nothing && error("$packagemod is not a package")
+    testfile = something(testfile, string(packagemod, "Tests.jl"))
+    testpath = joinpath(dirname(dirname(packagepath)), "test", testfile)
+    isfile(testpath) || error("file $testpath does not exist")
+    Base.include(parentmodule, testpath)
+end
+
+"""
     ReTest.hijack(source, [modname];
                   parentmodule::Module=Main, lazy=false, testset::Bool=false,
                   revise::Bool=false)

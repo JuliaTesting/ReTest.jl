@@ -1,4 +1,5 @@
 using Pkg
+import Test
 
 Pkg.activate("ReTest")
 Pkg.develop(PackageSpec(path="../InlineTest"))
@@ -877,14 +878,38 @@ end
 
 # * InlineTest ...............................................................
 
+using Pkg
+# TODO: put the following 3 lines within chapters InlineTest and load, but for load,
+# it should be enabled only if it was not already run from InlineTest
+Pkg.activate("./FakePackage")
+Pkg.develop(PackageSpec(path="../InlineTest"))
+Pkg.develop(PackageSpec(path="..")) # ReTest
+
 @chapter InlineTest begin
-    using Pkg
-    Pkg.activate("./FakePackage")
-    Pkg.develop(PackageSpec(path="../InlineTest"))
-    Pkg.develop(PackageSpec(path="..")) # ReTest
     Pkg.test("FakePackage")
 end
 
+# * ReTest.load ..............................................................
+
+using ReTest: process_args
+
+@chapter load begin
+    using FakePackage
+    @assert !isdefined(Main, :FakePackageTests)
+
+    Test.@testset "ReTest.load" begin
+        ReTest.load(FakePackage)
+        @test isdefined(Main, :FakePackageTests)
+        @test first.(process_args((FakePackageTests,)).modules) ==
+            [FakePackageTests, FakePackageTests.Sub, FakePackageTests.Sub.SubSub]
+        ReTest.load(FakePackage, "FakePackageTests2.jl", parentmodule=Main)
+        @test first.(process_args((AlternateFakePackageTests,)).modules) ==
+            [AlternateFakePackageTests]
+        @test_throws ErrorException ReTest.load(FakePackage, "notafile.jl")
+        @test_throws ErrorException ReTest.load(Base)
+        @test_throws ErrorException ReTest.load(Pkg)
+    end
+end
 
 # * Hijack ...................................................................
 
