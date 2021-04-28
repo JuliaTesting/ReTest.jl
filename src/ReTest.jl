@@ -4,6 +4,7 @@ export retest, @testset, not, interpolated
 
 using Distributed
 using Base.Threads: nthreads
+import Base: ==
 using Random: shuffle!, randstring
 
 # from Test:
@@ -56,14 +57,24 @@ struct And <: Pattern
 end
 
 And() = And(PatternX[])
+and(xs...) = And(PatternX[make_pattern(x) for x in xs])
+
+==(a::And, b::And) = a.xs == b.xs
 
 struct Or <: Pattern
     xs::AbstractArray{<:PatternX}
 end
 
+Or() = Or(PatternX[])
+or(xs...) = Or(PatternX[make_pattern(x) for x in xs])
+
+==(a::Or, b::Or) = a.xs == b.xs
+
 struct Not <: Pattern
     x::PatternX
 end
+
+==(a::Not, b::Not) = a.x == b.x
 
 """
     not(pattern)

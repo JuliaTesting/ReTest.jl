@@ -6,6 +6,7 @@ Pkg.develop(PackageSpec(path="../InlineTest"))
 using ReTest # must be after develop of InlineTest, so as to not load a registered version
 include("setup.jl")
 
+include("test_patterns.jl")
 
 # * M ........................................................................
 
