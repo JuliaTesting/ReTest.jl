@@ -1,19 +1,51 @@
 """
     ReTest.load(Mod::Module, testfile::AbstractString="ModTests.jl";
-                parentmodule::Module=Main)
+                parentmodule::Module=Main, revise::Bool=false)
 
 Given a package `Mod`, include into `parentmodule`
 the corresponding tests from file `testfile`, which is assumed to be
 located in the "test" directory of the package.
+
+If `revise` is `true`, `Revise`, which must be loaded beforehand in your
+Julia session, is used to track the test files (in particular testsets).
+This uses the same mechanism as in [`ReTest.hijack`](@ref) and is
+rather brittle. It's recommended instead to load your test module
+via `using ModTests` which allows `Revise` to work more robustly.
+
+!!! compat "Julia 1.5"
+    This function requires at least Julia 1.5 when `revise` is `true`.
 """
 function load(packagemod::Module, testfile::Union{Nothing,AbstractString}=nothing;
-              parentmodule::Module=Main)
+              parentmodule::Module=Main, revise::Bool=false)
+    revise && VERSION < v"1.5" &&
+        error("the `revise` keyword requires at least Julia 1.5")
+    Revise = get_revise(revise)
     packagepath = pathof(packagemod)
     packagepath === nothing && error("$packagemod is not a package")
     testfile = something(testfile, string(packagemod, "Tests.jl"))
     testpath = joinpath(dirname(dirname(packagepath)), "test", testfile)
     isfile(testpath) || error("file $testpath does not exist")
-    Base.include(parentmodule, testpath)
+    if Revise === nothing
+        Base.include(parentmodule, testpath)
+    else
+        files = Any[testpath]
+        substitute!(x) = substitute_retest!(x, false, false, files, dirname(testpath);
+                                            ishijack=false)
+        mod = Base.include(substitute!, parentmodule, testpath)
+        if !(mod isa Module)
+            modname = Symbol(packagemod, :Tests)
+            if isdefined(parentmodule, modname)
+                mod = getfield(parentmodule, modname)
+                # this heuristic fails in case an unrelated module `modname`
+                # already exists before the call to `load`, and the newly
+                # created module via include is something else; TODO: we could
+                # maybe try to track that by checking for such a name before
+                # include, and checking afterwards that it was overwritten
+            end
+            mod isa Module || error("could not determine test module name")
+        end
+        revise_track(Revise, mod, files)
+    end
 end
 
 """
@@ -85,7 +117,10 @@ to not declare new testsets when parent testsets are run.
 
 The `revise` keyword specifies whether `Revise` should be used to track
 the test files (in particular the testsets). If `true`, `Revise` must
-be loaded beforehand in your Julia session.
+be loaded beforehand in your Julia session. Note that this uses
+the `Revise.track` function in a rather basic way, and works only
+in relatively simple scenarii.
+Expertise is very welcome to help improving the `revise` feature!
 
 !!! compat "Julia 1.5"
     This function requires at least Julia 1.5.
@@ -121,15 +156,19 @@ function populate_mod!(mod, path; lazy, Revise, testset)
     end
 
     if Revise !== nothing
-        filepaths = @eval mod begin
-            __revise_mode__ = :eval
-            [$(files...)]
-        end
-        for filepath in filepaths
-            if isfile(filepath) # some files might not exist when they are conditionally
-                                # included
-                Revise.track(mod, filepath)
-            end
+        revise_track(Revise, mod, files)
+    end
+end
+
+function revise_track(Revise, mod, files)
+    filepaths = @eval mod begin
+        __revise_mode__ = :eval
+        [$(files...)]
+    end
+    for filepath in filepaths
+        if isfile(filepath) # some files might not exist when they are conditionally
+            # included
+            Revise.track(mod, filepath)
         end
     end
 end
@@ -157,10 +196,12 @@ function hijack(packagemod::Module, modname=nothing; parentmodule::Module=Main,
     end
 end
 
-function substitute_retest!(ex, lazy, testset, files=nothing, root=nothing)
-    substitute!(x) = substitute_retest!(x, lazy, testset, files, root)
+function substitute_retest!(ex, lazy, testset, files=nothing, root=nothing;
+                            ishijack::Bool=true)
+    substitute!(x) = substitute_retest!(x, lazy, testset, files, root, ishijack=ishijack)
 
     if Meta.isexpr(ex, :using)
+        ishijack || return ex
         for used in ex.args
             if Meta.isexpr(used, :., 1) && used.args[1] == :ReTest
                 throw(ArgumentError("ReTest is already used"))
@@ -183,6 +224,7 @@ function substitute_retest!(ex, lazy, testset, files=nothing, root=nothing)
         @assert Meta.isexpr(ex.args[3], :block)
         substitute!.(ex.args[3].args)
     elseif Meta.isexpr(ex, :macrocall)
+        ishijack || return ex
         if lazy != false && ex.args[1] ∈ TEST_MACROS
             empty_expr!(ex)
         elseif testset && ex.args[1] == Symbol("@testset")

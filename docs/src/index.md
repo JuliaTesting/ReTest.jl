@@ -265,11 +265,13 @@ testsets by putting `__revise_mode__ = :eval` in the enclosing module.
 
 When files are included recursively, plain `includet` won't work
 (it is currently documented to be "deliberately non-recursive").
-There are two work-arounds:
+There are three work-arounds, of which the first is recommended:
 1. load `MyPackageTests` as a module, i.e. via `using MyPackageTests` instead
    of `include("test/MyPackageTests.jl")` (this might involve updating your
    `LOAD_PATH` to include "test/" and making sure the required packages are
    found)
+3. load `MyPackageTests` via [`ReTest.load(MyPackage, revise=true)`](@ref), but this works
+   only in "simple enough" situations
 2. use the [following `recursive_includet`](https://github.com/timholy/Revise.jl/issues/518#issuecomment-667097500)
    function instead of `includet`:
 ```julia

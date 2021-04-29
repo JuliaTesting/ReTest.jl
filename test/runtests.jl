@@ -892,6 +892,7 @@ end
 # * ReTest.load ..............................................................
 
 using ReTest: process_args
+module Load end
 
 @chapter load begin
     using FakePackage
@@ -902,6 +903,7 @@ using ReTest: process_args
         @test isdefined(Main, :FakePackageTests)
         @test first.(process_args((FakePackageTests,)).modules) ==
             [FakePackageTests, FakePackageTests.Sub, FakePackageTests.Sub.SubSub]
+
         ReTest.load(FakePackage, "FakePackageTests2.jl", parentmodule=Main)
         @test first.(process_args((AlternateFakePackageTests,)).modules) ==
             [AlternateFakePackageTests]
@@ -930,11 +932,32 @@ end
         @test_throws ErrorException ReTest.hijack(Hijack, :HijackTests2, revise=true)
 
         using Revise
+
+        Test.@testset "load(revise=true)" begin
+            # big hack, this should belong to the FakePackage chapter, but we can't load
+            # Revise then, because we @test_throws above for Revise not loaded
+            ReTest.load(Hijack, "../../FakePackage/test/FakePackageTests2.jl",
+                        parentmodule=Load, revise=true)
+            @test first.(process_args((Load.AlternateFakePackageTests,)).modules) ==
+                [Load.AlternateFakePackageTests]
+
+            # throws, as "load_revise2.jl" doesn't return a module, and doesn't define
+            # a predictable module name in Load: Load.HijackTests won't be defined
+            @test_throws ErrorException ReTest.load(Hijack, "load_revise2.jl",
+                                                    revise=true, parentmodule=Load)
+
+            # here, Load.HijackTests gets defined
+            ReTest.load(Hijack, "load_revise.jl", revise=true, parentmodule=Load)
+            @test first.(process_args((Load.HijackTests,)).modules) == [Load.HijackTests]
+            Load.HijackTests.check(Load.HijackTests, [1])
+        end
+
         ReTest.hijack(Hijack, :HijackTests2, revise=true)
         retest(HijackTests2)
         @test Hijack.RUN == [1, 5, 4]
         empty!(Hijack.RUN)
 
+        # EDIT FILE 1
         cp("./Hijack/test/subdir/sub.jl",
            "./Hijack/test/subdir/sub.orig.jl", force=true)
 
@@ -948,13 +971,29 @@ end
     push!(Hijack.RUN, 2)
 end
 """)
+        # EDIT FILE 2
+        let load_revise = "./Hijack/test/load_revise.jl"
+            cp(load_revise, "./Hijack/test/load_revise.orig.jl", force=true)
+            lines = readlines("./Hijack/test/load_revise.jl")
+            @assert endswith(lines[9], "@test true")
+            @assert endswith(lines[10], "trace(1)")
+            insert!(lines, 11, "@test true")
+            insert!(lines, 12, "trace(2)")
+            write("./Hijack/test/load_revise.jl", join(lines, '\n'))
+        end
+
         Revise.revise()
         try
-            retest(HijackTests2)
-            @test Hijack.RUN == [2, 5, 4]
+            Test.@testset "revise works" begin
+                retest(HijackTests2)
+                @test Hijack.RUN == [2, 5, 4]
+                Load.HijackTests.check(Load.HijackTests, [1, 2])
+            end
         finally
             mv("./Hijack/test/subdir/sub.orig.jl",
                "./Hijack/test/subdir/sub.jl", force=true)
+            mv("./Hijack/test/load_revise.orig.jl",
+               "./Hijack/test/load_revise.jl", force=true)
         end
 
         # test lazy=true
