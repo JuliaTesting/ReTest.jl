@@ -29,7 +29,7 @@ function load(packagemod::Module, testfile::Union{Nothing,AbstractString}=nothin
         Base.include(parentmodule, testpath)
     else
         files = Any[testpath]
-        substitute!(x) = substitute_retest!(x, false, false, files, dirname(testpath);
+        substitute!(x) = substitute_retest!(x, false, false, files;
                                             ishijack=false)
         mod = Base.include(substitute!, parentmodule, testpath)
         if !(mod isa Module)
@@ -147,8 +147,8 @@ function populate_mod!(mod, path; lazy, Revise, testset)
     lazy ∈ (true, false, :brutal) ||
         throw(ArgumentError("the `lazy` keyword must be `true`, `false` or `:brutal`"))
 
-    files = Any[path]
-    substitute!(x) = substitute_retest!(x, lazy, testset, files, dirname(path))
+    files = Revise === nothing ? nothing : Any[path]
+    substitute!(x) = substitute_retest!(x, lazy, testset, files)
 
     @eval mod begin
         using ReTest # for files which don't have `using Test`
@@ -196,9 +196,9 @@ function hijack(packagemod::Module, modname=nothing; parentmodule::Module=Main,
     end
 end
 
-function substitute_retest!(ex, lazy, testset, files=nothing, root=nothing;
+function substitute_retest!(ex, lazy, testset, files=nothing;
                             ishijack::Bool=true)
-    substitute!(x) = substitute_retest!(x, lazy, testset, files, root, ishijack=ishijack)
+    substitute!(x) = substitute_retest!(x, lazy, testset, files, ishijack=ishijack)
 
     if Meta.isexpr(ex, :using)
         ishijack || return ex
@@ -214,11 +214,17 @@ function substitute_retest!(ex, lazy, testset, files=nothing, root=nothing;
             throw(ArgumentError("cannot handle include with two arguments"))
         else
             if files !== nothing
-                newfile = :(joinpath($root, $(ex.args[2])))
-                push!(files, newfile)
-                root = :(dirname($newfile))
+                newfile = ex.args[2]
+                ex2 = :(let
+                            push!($files, $_include_dependency($newfile))
+                            include($substitute!, $newfile)
+                        end)
+                # TODO: add `copy!(::Expr, ::Expr)` to Base
+                ex.head = ex2.head
+                copy!(ex.args, ex2.args)
+            else
+                insert!(ex.args, 2, substitute!)
             end
-            insert!(ex.args, 2, substitute!)
         end
     elseif Meta.isexpr(ex, :module)
         @assert Meta.isexpr(ex.args[3], :block)
@@ -258,6 +264,22 @@ function empty_expr!(ex)
     ex.head = :block
     empty!(ex.args)
     ex
+end
+
+# from Base, but without touching _track_dependencies
+# this allows to get the absolute path from within included files,
+# and to update the list of tracked files
+# - bare abspath won't work directly, as it's based on CWD
+# - @__DIR__ won't work as it will refer to this file if used bare,
+#   and if constructed via `Expr(:macrocall, ...)`, a LineNumberNode
+#   is required to be passed, which defeats the purpose
+function _include_dependency(_path::AbstractString)
+    prev = Base.source_path(nothing)
+    if prev === nothing
+        abspath(_path)
+    else
+        normpath(joinpath(dirname(prev), _path))
+    end
 end
 
 const TEST_MACROS = Symbol.(["@test", "@test_throws", "@test_broken", "@test_skip",

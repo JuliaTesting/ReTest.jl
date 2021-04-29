@@ -14,7 +14,11 @@ begin
                 for i=1:1
                     while i==1
                         try
-                            include("included.jl")
+                            for my_test in ["included.jl"]
+                                let my_test2 = my_test
+                                    include(my_test2)
+                                end
+                            end
                             error(":)")
                         catch
                             include("simple.jl")
