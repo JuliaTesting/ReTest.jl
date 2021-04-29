@@ -9,11 +9,16 @@ located in the "test" directory of the package.
 If `revise` is `true`, `Revise`, which must be loaded beforehand in your
 Julia session, is used to track the test files (in particular testsets).
 This uses the same mechanism as in [`ReTest.hijack`](@ref) and is
-rather brittle. It's recommended instead to load your test module
-via `using ModTests` which allows `Revise` to work more robustly.
+probably brittle. It's recommended instead to load your test module
+via `using ModTests`.
 
 !!! compat "Julia 1.5"
     This function requires at least Julia 1.5 when `revise` is `true`.
+
+!!! compat "Julia 1.6"
+    On Julia 1.5, when `revise` is `true`, this function doesn't support
+    tracking files included from within a nested submodule (you will get
+    `LoadError: UndefVarError: @testset not defined`).
 """
 function load(packagemod::Module, testfile::Union{Nothing,AbstractString}=nothing;
               parentmodule::Module=Main, revise::Bool=false)
@@ -28,9 +33,8 @@ function load(packagemod::Module, testfile::Union{Nothing,AbstractString}=nothin
     if Revise === nothing
         Base.include(parentmodule, testpath)
     else
-        files = Any[testpath]
-        substitute!(x) = substitute_retest!(x, false, false, files;
-                                            ishijack=false)
+        files = Dict{String,Module}()
+        substitute!(x) = substitute_retest!(x, false, false, files; ishijack=false)
         mod = Base.include(substitute!, parentmodule, testpath)
         if !(mod isa Module)
             modname = Symbol(packagemod, :Tests)
@@ -44,7 +48,9 @@ function load(packagemod::Module, testfile::Union{Nothing,AbstractString}=nothin
             end
             mod isa Module || error("could not determine test module name")
         end
-        revise_track(Revise, mod, files)
+        @assert !haskey(files, testpath)
+        files[testpath] = mod
+        revise_track(Revise, files, mod)
     end
 end
 
@@ -118,12 +124,16 @@ to not declare new testsets when parent testsets are run.
 The `revise` keyword specifies whether `Revise` should be used to track
 the test files (in particular the testsets). If `true`, `Revise` must
 be loaded beforehand in your Julia session. Note that this uses
-the `Revise.track` function in a rather basic way, and works only
-in relatively simple scenarii.
-Expertise is very welcome to help improving the `revise` feature!
+the `Revise.track` function in a rather basic way, and might not work
+in all cases.
 
 !!! compat "Julia 1.5"
     This function requires at least Julia 1.5.
+
+!!! compat "Julia 1.6"
+    On Julia 1.5, when `revise` is `true`, this function doesn't support
+    tracking files included from within a nested submodule (you will get
+    `LoadError: UndefVarError: @testset not defined`).
 """
 function hijack end
 
@@ -143,33 +153,33 @@ function hijack(path::AbstractString, modname=nothing; parentmodule::Module=Main
     newmod
 end
 
-function populate_mod!(mod, path; lazy, Revise, testset)
+function populate_mod!(mod::Module, path; lazy, Revise, testset)
     lazy ∈ (true, false, :brutal) ||
         throw(ArgumentError("the `lazy` keyword must be `true`, `false` or `:brutal`"))
 
-    files = Revise === nothing ? nothing : Any[path]
+    files = Revise === nothing ? nothing : Dict(path => mod)
     substitute!(x) = substitute_retest!(x, lazy, testset, files)
 
     @eval mod begin
         using ReTest # for files which don't have `using Test`
         include($substitute!, $path)
-    end
-
-    if Revise !== nothing
-        revise_track(Revise, mod, files)
-    end
-end
-
-function revise_track(Revise, mod, files)
-    @eval mod begin
         if !@isdefined __revise_mode__
             __revise_mode__ = :eval
         end
     end
-    for filepath in files
+
+    if Revise !== nothing
+        revise_track(Revise, files, mod)
+    end
+end
+
+function revise_track(Revise, files, uniquemod)
+    # uniquemod serves in v1.5 to make hijack w/ revise still work in many cases,
+    # when there aren't nested submodules/includes
+    for (filepath, mod) in files
         if isfile(filepath) # some files might not exist when they are conditionally
                             # included
-            Revise.track(mod, filepath)
+            Revise.track(VERSION >= v"1.6" ? mod : uniquemod, filepath)
         end
     end
 end
@@ -216,10 +226,22 @@ function substitute_retest!(ex, lazy, testset, files=nothing;
         else
             if files !== nothing
                 newfile = ex.args[2]
-                ex2 = :(let
-                            push!($files, $_include_dependency($newfile))
-                            include($substitute!, $newfile)
-                        end)
+                ex2 = if VERSION >= v"1.6"
+                    :(let newfile = $_include_dependency($newfile)
+                          haskey($files, newfile) &&
+                              error("file belong to multiple modules, currently not supported")
+                          $files[newfile] = @__MODULE__
+                          include($substitute!, $newfile)
+                      end)
+                else # v1.5 doesn't play well with @__MODULE__, the let expression simply... vanishes
+                    :(let newfile = $_include_dependency($newfile)
+                          haskey($files, newfile) &&
+                              error("file belong to multiple modules, currently not supported")
+                          $files[newfile] = $ReTest # dummy value, it will be replaced by root module
+                                                    # in revise_track
+                          include($substitute!, $newfile)
+                      end)
+                end
                 # TODO: add `copy!(::Expr, ::Expr)` to Base
                 ex.head = ex2.head
                 copy!(ex.args, ex2.args)

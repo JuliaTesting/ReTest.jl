@@ -963,6 +963,9 @@ end
         retest(SubMod1)
         @test SubMod1.RUN == [1]; empty!(SubMod1.RUN)
         @test SubMod1.SubModule.RUN == [1]; empty!(SubMod1.SubModule.RUN)
+        if VERSION >= v"1.6"
+            @test SubMod1.SubModule.Sub.RUN == [1]; empty!(SubMod1.SubModule.Sub.RUN)
+        end
 
         ## UPDATING ######
 
@@ -1000,14 +1003,14 @@ end
             join(lines, '\n')
         end
 
-        # EDIT FILES 3 & 4
+        # EDIT FILES 3 & 4 & 5
         mod_revise = "Hijack/test/submodules_tests.jl"
-        update_file!(mod_revise) do content
-            replace(content, "push!(RUN, 1)" => "push!(RUN, 2)")
-        end
         submod_revise = "Hijack/test/submodule.jl"
-        update_file!(submod_revise) do content
-            replace(content, "push!(RUN, 1)" => "push!(RUN, 2)")
+        subsubmod_revise = "Hijack/test/subsubmodule.jl"
+        for sub in (mod_revise, submod_revise, subsubmod_revise)
+            update_file!(sub) do content
+                replace(content, "push!(RUN, 1)" => "push!(RUN, 2)")
+            end
         end
 
         Revise.revise()
@@ -1019,12 +1022,16 @@ end
                 retest(SubMod1)
                 @test SubMod1.RUN == [2]; empty!(SubMod1.RUN)
                 @test SubMod1.SubModule.RUN == [2]; empty!(SubMod1.SubModule.RUN)
+                if VERSION >= v"1.6"
+                    @test SubMod1.SubModule.Sub.RUN == [2]; empty!(SubMod1.SubModule.Sub.RUN)
+                end
             end
         finally
             restore_file!(sub_file)
             restore_file!(load_revise)
             restore_file!(mod_revise)
             restore_file!(submod_revise)
+            restore_file!(subsubmod_revise)
         end
 
         # test lazy=true
