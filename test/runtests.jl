@@ -931,7 +931,8 @@ end
 
         @test_throws ErrorException ReTest.hijack(Hijack, :HijackTests2, revise=true)
 
-        using Revise
+
+        using Revise ###############################
 
         Test.@testset "load(revise=true)" begin
             # big hack, this should belong to the FakePackage chapter, but we can't load
@@ -957,12 +958,27 @@ end
         @test Hijack.RUN == [1, 5, 4]
         empty!(Hijack.RUN)
 
-        # EDIT FILE 1
-        cp("./Hijack/test/subdir/sub.jl",
-           "./Hijack/test/subdir/sub.orig.jl", force=true)
+        # Submodules
+        ReTest.hijack("Hijack/test/submodules_tests.jl", :SubMod1, revise=true)
+        retest(SubMod1)
+        @test SubMod1.RUN == [1]; empty!(SubMod1.RUN)
+        @test SubMod1.SubModule.RUN == [1]; empty!(SubMod1.SubModule.RUN)
 
-        write("./Hijack/test/subdir/sub.jl",
-              """
+        ## UPDATING ######
+
+        orig(file) = let s = splitext(file)
+            join([s[1], ".orig", s[2]])
+        end
+        function update_file!(f, file)
+            cp(file, orig(file), force=true)
+            write(file, f(chomp(read(file, String))))
+        end
+        restore_file!(file) = mv(orig(file), file, force=true)
+
+        # EDIT FILE 1
+        sub_file = "./Hijack/test/subdir/sub.jl"
+        update_file!(sub_file) do _
+            """
 @test true
 
 @testset "sub" begin
@@ -970,16 +986,28 @@ end
     @test true
     push!(Hijack.RUN, 2)
 end
-""")
+"""
+        end
+
         # EDIT FILE 2
-        let load_revise = "./Hijack/test/load_revise.jl"
-            cp(load_revise, "./Hijack/test/load_revise.orig.jl", force=true)
-            lines = readlines("./Hijack/test/load_revise.jl")
+        load_revise = "./Hijack/test/load_revise.jl"
+        update_file!(load_revise) do content
+            lines = split(content, r"\n|\r\n") # cf. https://github.com/JuliaLang/julia/pull/20390
             @assert endswith(lines[9], "@test true")
             @assert endswith(lines[10], "trace(1)")
             insert!(lines, 11, "@test true")
             insert!(lines, 12, "trace(2)")
-            write("./Hijack/test/load_revise.jl", join(lines, '\n'))
+            join(lines, '\n')
+        end
+
+        # EDIT FILES 3 & 4
+        mod_revise = "Hijack/test/submodules_tests.jl"
+        update_file!(mod_revise) do content
+            replace(content, "push!(RUN, 1)" => "push!(RUN, 2)")
+        end
+        submod_revise = "Hijack/test/submodule.jl"
+        update_file!(submod_revise) do content
+            replace(content, "push!(RUN, 1)" => "push!(RUN, 2)")
         end
 
         Revise.revise()
@@ -988,12 +1016,15 @@ end
                 retest(HijackTests2)
                 @test Hijack.RUN == [2, 5, 4]
                 Load.HijackTests.check(Load.HijackTests, [1, 2])
+                retest(SubMod1)
+                @test SubMod1.RUN == [2]; empty!(SubMod1.RUN)
+                @test SubMod1.SubModule.RUN == [2]; empty!(SubMod1.SubModule.RUN)
             end
         finally
-            mv("./Hijack/test/subdir/sub.orig.jl",
-               "./Hijack/test/subdir/sub.jl", force=true)
-            mv("./Hijack/test/load_revise.orig.jl",
-               "./Hijack/test/load_revise.jl", force=true)
+            restore_file!(sub_file)
+            restore_file!(load_revise)
+            restore_file!(mod_revise)
+            restore_file!(submod_revise)
         end
 
         # test lazy=true

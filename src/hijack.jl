@@ -161,13 +161,14 @@ function populate_mod!(mod, path; lazy, Revise, testset)
 end
 
 function revise_track(Revise, mod, files)
-    filepaths = @eval mod begin
-        __revise_mode__ = :eval
-        [$(files...)]
+    @eval mod begin
+        if !@isdefined __revise_mode__
+            __revise_mode__ = :eval
+        end
     end
-    for filepath in filepaths
+    for filepath in files
         if isfile(filepath) # some files might not exist when they are conditionally
-            # included
+                            # included
             Revise.track(mod, filepath)
         end
     end
@@ -227,8 +228,12 @@ function substitute_retest!(ex, lazy, testset, files=nothing;
             end
         end
     elseif Meta.isexpr(ex, :module)
-        @assert Meta.isexpr(ex.args[3], :block)
-        substitute!.(ex.args[3].args)
+        body = ex.args[3]
+        @assert Meta.isexpr(body, :block)
+        substitute!.(body.args)
+        push!(body.args, :(if !@isdefined __revise_mode__
+                               __revise_mode__ = :eval
+                           end))
     elseif Meta.isexpr(ex, :macrocall)
         ishijack || return ex
         if lazy != false && ex.args[1] ∈ TEST_MACROS
