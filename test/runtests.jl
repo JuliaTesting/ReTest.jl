@@ -947,14 +947,12 @@ end
                         ) ReTest.load(Hijack, "load_revise2.jl",
                                       revise=true, parentmodule=Load)
 
-            if VERSION >= v"1.6"
-                # here, Load.HijackTests gets defined
-                ReTest.load(Hijack, "load_revise.jl", revise=true, parentmodule=Load)
-                @test Load.load_revise_function() == 1
-                @test Load.HijackTests.load_revise_function() == 1
-                @test first.(process_args((Load.HijackTests,)).modules) == [Load.HijackTests]
-                Load.HijackTests.check(Load.HijackTests, [1])
-            end
+            # here, Load.HijackTests gets defined
+            ReTest.load(Hijack, "load_revise.jl", revise=true, parentmodule=Load)
+            @test Load.load_revise_function() == 1
+            @test Load.HijackTests.load_revise_function() == 1
+            @test first.(process_args((Load.HijackTests,)).modules) == [Load.HijackTests]
+            Load.HijackTests.check(Load.HijackTests, [1])
         end
 
         ReTest.hijack(Hijack, :HijackTests2, revise=true)
@@ -967,9 +965,7 @@ end
         retest(SubMod1)
         @test SubMod1.RUN == [1]; empty!(SubMod1.RUN)
         @test SubMod1.SubModule.RUN == [1]; empty!(SubMod1.SubModule.RUN)
-        if VERSION >= v"1.6"
-            @test SubMod1.SubModule.Sub.RUN == [1]; empty!(SubMod1.SubModule.Sub.RUN)
-        end
+        @test SubMod1.SubModule.Sub.RUN == [1]; empty!(SubMod1.SubModule.Sub.RUN)
 
         ## UPDATING ######
 
@@ -1024,17 +1020,13 @@ end
             Test.@testset "revise works" begin
                 retest(HijackTests2)
                 @test Hijack.RUN == [2, 5, 4]
-                if VERSION >= v"1.6"
-                    Load.HijackTests.check(Load.HijackTests, [1, 2])
-                    @test Load.load_revise_function() == 2
-                    @test Load.HijackTests.load_revise_function() == 2
-                end
+                Load.HijackTests.check(Load.HijackTests, [1, 2])
+                @test Load.load_revise_function() == 2
+                @test Load.HijackTests.load_revise_function() == 2
                 retest(SubMod1)
                 @test SubMod1.RUN == [2]; empty!(SubMod1.RUN)
                 @test SubMod1.SubModule.RUN == [2]; empty!(SubMod1.SubModule.RUN)
-                if VERSION >= v"1.6"
-                    @test SubMod1.SubModule.Sub.RUN == [2]; empty!(SubMod1.SubModule.Sub.RUN)
-                end
+                @test SubMod1.SubModule.Sub.RUN == [2]; empty!(SubMod1.SubModule.Sub.RUN)
             end
         finally
             restore_file!(sub_file)

@@ -6,19 +6,13 @@ Given a package `Mod`, include into `parentmodule`
 the corresponding tests from file `testfile`, which is assumed to be
 located in the "test" directory of the package.
 
-If `revise` is `true`, `Revise`, which must be loaded beforehand in your
-Julia session, is used to track the test files (in particular testsets).
-This uses the same mechanism as in [`ReTest.hijack`](@ref) and is
-probably brittle. It's recommended instead to load your test module
+If `revise` is `true`, `Revise`, which must be loaded beforehand in your Julia
+session, is used to track the test files (in particular testsets). Note that
+this might be brittle, and it's recommended instead to load your test module
 via `using ModTests`.
 
 !!! compat "Julia 1.5"
     This function requires at least Julia 1.5 when `revise` is `true`.
-
-!!! compat "Julia 1.6"
-    On Julia 1.5, when `revise` is `true`, this function doesn't support
-    tracking files included from within a nested submodule (you will get
-    `LoadError: UndefVarError: @testset not defined`).
 """
 function load(packagemod::Module, testfile::Union{Nothing,AbstractString}=nothing;
               parentmodule::Module=Main, revise::Bool=false,
@@ -62,7 +56,7 @@ function load(packagemod::Module, testfile::Union{Nothing,AbstractString}=nothin
         files = Dict{String,Module}(testpath => parentmodule)
         substitute!(x) = substitute_retest!(x, false, false, files; ishijack=false)
         mod = detect_module(Base.include(substitute!, parentmodule, testpath))
-        revise_track(Revise, files, parentmodule)
+        revise_track(Revise, files)
         mod
     end
 end
@@ -136,17 +130,11 @@ to not declare new testsets when parent testsets are run.
 
 The `revise` keyword specifies whether `Revise` should be used to track
 the test files (in particular the testsets). If `true`, `Revise` must
-be loaded beforehand in your Julia session. Note that this uses
-the `Revise.track` function in a rather basic way, and might not work
-in all cases.
+be loaded beforehand in your Julia session. Note that this might be brittle
+and not work in all cases.
 
 !!! compat "Julia 1.5"
     This function requires at least Julia 1.5.
-
-!!! compat "Julia 1.6"
-    On Julia 1.5, when `revise` is `true`, this function doesn't support
-    tracking files included from within a nested submodule (you will get
-    `LoadError: UndefVarError: @testset not defined`).
 """
 function hijack end
 
@@ -166,6 +154,12 @@ function hijack(path::AbstractString, modname=nothing; parentmodule::Module=Main
     newmod
 end
 
+# this is just a work-around for v"1.5", where @__MODULE__ can't be used in
+# expressions; root_module[] is set equal to @__MODULE__ within modules
+const root_module = Ref{Symbol}()
+
+__init__() = root_module[] = gensym("MODULE")
+
 function populate_mod!(mod::Module, path; lazy, Revise, testset)
     lazy ∈ (true, false, :brutal) ||
         throw(ArgumentError("the `lazy` keyword must be `true`, `false` or `:brutal`"))
@@ -175,6 +169,7 @@ function populate_mod!(mod::Module, path; lazy, Revise, testset)
 
     @eval mod begin
         using ReTest # for files which don't have `using Test`
+        const $(root_module[]) = $mod
         include($substitute!, $path)
         if !@isdefined __revise_mode__
             __revise_mode__ = :eval
@@ -182,17 +177,17 @@ function populate_mod!(mod::Module, path; lazy, Revise, testset)
     end
 
     if Revise !== nothing
-        revise_track(Revise, files, mod)
+        revise_track(Revise, files)
     end
 end
 
-function revise_track(Revise, files, uniquemod)
+function revise_track(Revise, files)
     # uniquemod serves in v1.5 to make hijack w/ revise still work in many cases,
     # when there aren't nested submodules/includes
     for (filepath, mod) in files
         if isfile(filepath) # some files might not exist when they are conditionally
                             # included
-            Revise.track(VERSION >= v"1.6" ? mod : uniquemod, filepath)
+            Revise.track(mod, filepath)
         end
     end
 end
@@ -239,21 +234,17 @@ function substitute_retest!(ex, lazy, testset, files=nothing;
         else
             if files !== nothing
                 newfile = ex.args[2]
-                ex2 = if VERSION >= v"1.6"
+                ex2 =
                     :(let newfile = $_include_dependency($newfile)
                           haskey($files, newfile) &&
                               error("file belong to multiple modules, currently not supported")
-                          $files[newfile] = @__MODULE__
                           include($substitute!, $newfile)
+                          $files[newfile] = $(root_module[])
                       end)
-                else # v1.5 doesn't play well with @__MODULE__, the let expression simply... vanishes
-                    :(let newfile = $_include_dependency($newfile)
-                          haskey($files, newfile) &&
-                              error("file belong to multiple modules, currently not supported")
-                          $files[newfile] = $ReTest # dummy value, it will be replaced by root module
-                                                    # in revise_track
-                          include($substitute!, $newfile)
-                      end)
+                if VERSION >= v"1.6"
+                    # v1.5 doesn't play well with @__MODULE__, the let expression
+                    # simply... vanishes; so we have to use root_module instead
+                    push!(ex2.args[2].args, :(@assert $(root_module[]) == @__MODULE__))
                 end
                 # TODO: add `copy!(::Expr, ::Expr)` to Base
                 ex.head = ex2.head
@@ -266,6 +257,9 @@ function substitute_retest!(ex, lazy, testset, files=nothing;
         body = ex.args[3]
         @assert Meta.isexpr(body, :block)
         substitute!.(body.args)
+        insert!(body.args, 2, :(const $(root_module[]) = $(ex.args[2])))
+        # ^^^ we insert between two LineNumberNode, not sure if this is the way: 1st one
+        # seems to relate to the `module` line, while the 2nd relates to next expression
         push!(body.args, :(if !@isdefined __revise_mode__
                                __revise_mode__ = :eval
                            end))
