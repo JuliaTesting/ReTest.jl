@@ -44,6 +44,7 @@ function matches end
 include("utils.jl")
 include("testset.jl")
 include("hijack.jl")
+include("watch.jl")
 
 using .Testset: Testset, Format
 

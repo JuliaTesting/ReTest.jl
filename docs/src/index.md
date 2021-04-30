@@ -64,6 +64,7 @@ CurrentModule = ReTest
 * [`interpolated`](@ref)
 * [`@testset`](@ref)
 * [`load`](@ref)
+* [`watch`](@ref)
 
 ```@docs
 retest
@@ -71,6 +72,7 @@ not
 interpolated
 @testset
 load
+watch
 ```
 
 
