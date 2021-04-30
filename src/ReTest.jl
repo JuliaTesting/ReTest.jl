@@ -1440,7 +1440,7 @@ function update_TESTED_MODULES!(double_check=true)
         for mod in values(Base.loaded_modules)
             # exclude modules from Main, which presumably already had a chance to get
             # registered in TESTED_MODULES at runtime
-            mod ∈ (ReTest, Main, Base) && continue # TODO: should exclude stdlibs too
+            mod ∈ (Main, Base) && continue # TODO: should exclude stdlibs too
             str = string(mod)
             if str ∉ seen
                 push!(seen, str) # probably unnecessary, if str are all unique in this loop
@@ -1463,7 +1463,6 @@ function update_TESTED_MODULES!(double_check=true)
 
     @assert all(m -> m isa Module, TESTED_MODULES)
     @assert allunique(TESTED_MODULES)
-    filter!(m -> m ∉ (ReTest, ReTest.ReTestTest), TESTED_MODULES)
 end
 
 function fetchtests((mod, pat), verbose, overall, maxidw; static, strict, dup)
@@ -1590,21 +1589,6 @@ function dryrun(mod::Module, ts::TestsetExpr, pat::Pattern, align::Int=0, parent
             end
         end
     end
-end
-
-module ReTestTest
-
-using ..ReTest
-@testset "test Test in sub-module" begin
-    @test 1 == 1
-end
-
-end # module ReTestTest
-
-@testset "self test" begin
-    @assert typeof(@__MODULE__) == Module
-    @test 1 != 2
-    retest(ReTestTest)
 end
 
 end # module ReTest
