@@ -59,15 +59,10 @@ function load(packagemod::Module, testfile::Union{Nothing,AbstractString}=nothin
     if Revise === nothing
         detect_module(Base.include(parentmodule, testpath))
     else
-        files = Dict{String,Module}()
+        files = Dict{String,Module}(testpath => parentmodule)
         substitute!(x) = substitute_retest!(x, false, false, files; ishijack=false)
         mod = detect_module(Base.include(substitute!, parentmodule, testpath))
-        if mod === nothing
-            maybe ? (return nothing) : error("could not determine test module name")
-        end
-        @assert !haskey(files, testpath)
-        files[testpath] = mod
-        revise_track(Revise, files, mod)
+        revise_track(Revise, files, parentmodule)
         mod
     end
 end

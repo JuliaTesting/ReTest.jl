@@ -942,15 +942,19 @@ end
             @test first.(process_args((Load.AlternateFakePackageTests,)).modules) ==
                 [Load.AlternateFakePackageTests]
 
-            # throws, as "load_revise2.jl" doesn't return a module, and doesn't define
-            # a predictable module name in Load: Load.HijackTests won't be defined
-            @test_throws ErrorException ReTest.load(Hijack, "load_revise2.jl",
-                                                    revise=true, parentmodule=Load)
+            @test_logs (:warn,
+                        r"test file .*load_revise2.jl loaded but it did not define module HijackTests"
+                        ) ReTest.load(Hijack, "load_revise2.jl",
+                                      revise=true, parentmodule=Load)
 
-            # here, Load.HijackTests gets defined
-            ReTest.load(Hijack, "load_revise.jl", revise=true, parentmodule=Load)
-            @test first.(process_args((Load.HijackTests,)).modules) == [Load.HijackTests]
-            Load.HijackTests.check(Load.HijackTests, [1])
+            if VERSION >= v"1.6"
+                # here, Load.HijackTests gets defined
+                ReTest.load(Hijack, "load_revise.jl", revise=true, parentmodule=Load)
+                @test Load.load_revise_function() == 1
+                @test Load.HijackTests.load_revise_function() == 1
+                @test first.(process_args((Load.HijackTests,)).modules) == [Load.HijackTests]
+                Load.HijackTests.check(Load.HijackTests, [1])
+            end
         end
 
         ReTest.hijack(Hijack, :HijackTests2, revise=true)
@@ -995,11 +999,13 @@ end
         # EDIT FILE 2
         load_revise = "./Hijack/test/load_revise.jl"
         update_file!(load_revise) do content
+            content = replace(content,
+                              "load_revise_function() = 1" => "load_revise_function() = 2")
             lines = split(content, r"\n|\r\n") # cf. https://github.com/JuliaLang/julia/pull/20390
-            @assert endswith(lines[9], "@test true")
-            @assert endswith(lines[10], "trace(1)")
-            insert!(lines, 11, "@test true")
-            insert!(lines, 12, "trace(2)")
+            @assert endswith(lines[14], "@test true")
+            @assert endswith(lines[15], "trace(1)")
+            insert!(lines, 16, "@test true")
+            insert!(lines, 17, "trace(2)")
             join(lines, '\n')
         end
 
@@ -1018,7 +1024,11 @@ end
             Test.@testset "revise works" begin
                 retest(HijackTests2)
                 @test Hijack.RUN == [2, 5, 4]
-                Load.HijackTests.check(Load.HijackTests, [1, 2])
+                if VERSION >= v"1.6"
+                    Load.HijackTests.check(Load.HijackTests, [1, 2])
+                    @test Load.load_revise_function() == 2
+                    @test Load.HijackTests.load_revise_function() == 2
+                end
                 retest(SubMod1)
                 @test SubMod1.RUN == [2]; empty!(SubMod1.RUN)
                 @test SubMod1.SubModule.RUN == [2]; empty!(SubMod1.SubModule.RUN)
