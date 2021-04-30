@@ -1278,19 +1278,18 @@ function process_args(@nospecialize(args);
         mod ∈ loaded_modules || return
         mod in keys(toload) && return
         stestmod = Symbol(mod, :Tests)
-        if !isdefined(Main, stestmod)
-            testfile = joinpath(dirname(pathof(mod)), "..", "test", string(stestmod, ".jl"))
-            isfile(testfile) || return
-            Base.include(Main, testfile)
-            if !isdefined(Main, stestmod)
-                @warn "test file $testfile loaded but it did not define module $stestmod"
+        if isdefined(Main, stestmod)
+            testmod = getfield(Main, stestmod)
+            if !(testmod isa Module)
+                @warn "$testmod exists but is not a module"
                 return
             end
-        end
-        testmod = getfield(Main, stestmod)
-        if !(testmod isa Module)
-            @warn "$testmod exists but is not a module"
-            return
+        else
+            testmod = ReTest.load(mod, maybe=true)
+            testmod isa Module || return
+            # TODO: this is sketchy, as if testmod's name is not stestmod, then this
+            # will be reloaded each time retest is called with `load=true`. We should
+            # probably cache the mod => testmod relation
         end
         toload[mod] = testmod
     end

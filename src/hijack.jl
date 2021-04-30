@@ -21,21 +21,22 @@ via `using ModTests`.
     `LoadError: UndefVarError: @testset not defined`).
 """
 function load(packagemod::Module, testfile::Union{Nothing,AbstractString}=nothing;
-              parentmodule::Module=Main, revise::Bool=false)
+              parentmodule::Module=Main, revise::Bool=false,
+              maybe::Bool=false)
     revise && VERSION < v"1.5" &&
         error("the `revise` keyword requires at least Julia 1.5")
     Revise = get_revise(revise)
     packagepath = pathof(packagemod)
-    packagepath === nothing && error("$packagemod is not a package")
+    if packagepath === nothing
+        maybe ? (return nothing) : error("$packagemod is not a package")
+    end
     testfile = something(testfile, string(packagemod, "Tests.jl"))
     testpath = joinpath(dirname(dirname(packagepath)), "test", testfile)
-    isfile(testpath) || error("file $testpath does not exist")
-    if Revise === nothing
-        Base.include(parentmodule, testpath)
-    else
-        files = Dict{String,Module}()
-        substitute!(x) = substitute_retest!(x, false, false, files; ishijack=false)
-        mod = Base.include(substitute!, parentmodule, testpath)
+    if !isfile(testpath)
+        maybe ? (return nothing) : error("file $testpath does not exist")
+    end
+
+    function detect_module(mod)
         if !(mod isa Module)
             modname = Symbol(packagemod, :Tests)
             if isdefined(parentmodule, modname)
@@ -46,11 +47,28 @@ function load(packagemod::Module, testfile::Union{Nothing,AbstractString}=nothin
                 # maybe try to track that by checking for such a name before
                 # include, and checking afterwards that it was overwritten
             end
-            mod isa Module || error("could not determine test module name")
+        end
+        if !(mod isa Module)
+            @warn "test file $testpath loaded but it did not define module $modname"
+            nothing
+        else
+            mod
+        end
+    end
+
+    if Revise === nothing
+        detect_module(Base.include(parentmodule, testpath))
+    else
+        files = Dict{String,Module}()
+        substitute!(x) = substitute_retest!(x, false, false, files; ishijack=false)
+        mod = detect_module(Base.include(substitute!, parentmodule, testpath))
+        if mod === nothing
+            maybe ? (return nothing) : error("could not determine test module name")
         end
         @assert !haskey(files, testpath)
         files[testpath] = mod
         revise_track(Revise, files, mod)
+        mod
     end
 end
 
