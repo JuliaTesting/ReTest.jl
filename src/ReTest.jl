@@ -737,7 +737,10 @@ When no `pattern`s are specified, all the tests are run.
   same pattern specification, unless such module is already explicitly
   passed as an argument. If this test module doesn't already exist,
   `retest` attempts first to include into `Main` the corresponding test file
-  "test/ModTests.jl" which is assumed, if it exists, to define `ModTests`.
+  "test/ModTests.jl" which is assumed, if it exists, to define
+  one or more test modules (typically `ModTests`); these new test modules
+  are associated to `Mod` (they inherit its pattern specification as
+  above), and are cached and used again on subsequent invocations.
 
 
 ### Filtering
@@ -1272,26 +1275,29 @@ function process_args(@nospecialize(args);
     modpats = Dict{Module,Any}() # pairs module => pattern
     modules = Module[] # ordered list of keys from modpats
     loaded_modules = Set{Module}(load ? values(Base.loaded_modules) : ())
-    toload = Dict{Module,Module}() # package => testmodule
+    toload = Dict{Module,Vector{Module}}() # package => testmodules
 
-    function load_testmod(mod)::Maybe{Module}
+    function load_testmod(mod)::Maybe{Vector{Module}}
         mod ∈ loaded_modules || return
         mod in keys(toload) && return
         stestmod = Symbol(mod, :Tests)
-        if isdefined(Main, stestmod)
+
+        testmods = get(loaded_testmodules, mod, nothing)
+        if testmods === nothing && isdefined(Main, stestmod)
             testmod = getfield(Main, stestmod)
-            if !(testmod isa Module)
-                @warn "$testmod exists but is not a module"
-                return
+            # TODO: test this branch
+            if testmod isa Module
+                testmods = [testmod]
+            else
+                @warn "$stestmod exists but is not a module"
             end
-        else
-            testmod = ReTest.load(mod, maybe=true)
-            testmod isa Module || return
-            # TODO: this is sketchy, as if testmod's name is not stestmod, then this
-            # will be reloaded each time retest is called with `load=true`. We should
-            # probably cache the mod => testmod relation
         end
-        toload[mod] = testmod
+        if testmods === nothing
+            testmods = ReTest.load(mod, maybe=true)
+        end
+        if !isempty(testmods)
+            toload[mod] = testmods
+        end
     end
 
     # first we initialize modpats with the given patterns for "module-patterns"
@@ -1318,13 +1324,15 @@ function process_args(@nospecialize(args);
     end
 
     # register testmods
-    for (mod, testmod) in toload
-        testmod in modules && continue
-        @assert !(testmod in keys(modpats))
-        modpats[testmod] = deepcopy(modpats[mod])
-        # TODO: avoid deepcopy? this is currently added as otherwise `patterns`
-        # might be added multiple times at the end of module processing below
-        push!(modules, testmod)
+    for (mod, testmods) in toload
+        for testmod in testmods
+            testmod in modules && continue
+            @assert !(testmod in keys(modpats))
+            modpats[testmod] = deepcopy(modpats[mod])
+            # TODO: avoid deepcopy? this is currently added as otherwise `patterns`
+            # might be added multiple times at the end of module processing below
+            push!(modules, testmod)
+        end
     end
 
     ########## process modules

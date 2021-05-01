@@ -948,6 +948,20 @@ end
     else
 
         using Hijack
+        @test !haskey(ReTest.loaded_testmodules, Hijack)
+        @test first.(process_args((Hijack,), load=true).modules) ==
+            [
+                HijackLoadTrueTests,
+                HijackLoadTrueTests2
+            ]
+        Hijack_testmodules = ReTest.loaded_testmodules[Hijack]
+        @test Hijack_testmodules == [HijackLoadTrueTests, HijackLoadTrueTests2]
+        @test first.(process_args((Hijack,), load=true).modules) ==
+            [
+                HijackLoadTrueTests,
+                HijackLoadTrueTests2
+            ] == Hijack_testmodules # to be sure no module was overwritten
+
         ReTest.hijack(Hijack, testset=false) # testset: just check that this method
                                              # also accepts this kw (TODO: test it!)
         retest(HijackTests)

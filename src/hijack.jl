@@ -26,13 +26,16 @@ function load(packagemod::Module, testfile::Maybe{AbstractString}=nothing;
         error("the `revise` keyword requires at least Julia 1.5")
     Revise = get_revise(revise)
     packagepath = pathof(packagemod)
+    newly_loaded = Module[]
+
     if packagepath === nothing
-        maybe ? (return nothing) : error("$packagemod is not a package")
+        maybe ? (return newly_loaded) : error("$packagemod is not a package")
     end
-    testfile = something(testfile, string(packagemod, "Tests.jl"))
+    default_testfile = string(packagemod, "Tests.jl")
+    testfile = something(testfile, default_testfile)
     testpath = joinpath(dirname(dirname(packagepath)), "test", testfile)
     if !isfile(testpath)
-        maybe ? (return nothing) : error("file $testpath does not exist")
+        maybe ? (return newly_loaded) : error("file $testpath does not exist")
     end
 
     old_loaded = copy(update_TESTED_MODULES!())
@@ -47,7 +50,6 @@ function load(packagemod::Module, testfile::Maybe{AbstractString}=nothing;
     end
 
     newly_loadedpars = parentmodules.(setdiff(update_TESTED_MODULES!(), old_loaded))
-    newly_loaded = Module[]
     for lpars in newly_loadedpars
         idx = findlast(==(parentmodule), lpars)
         if idx === nothing
@@ -59,7 +61,10 @@ function load(packagemod::Module, testfile::Maybe{AbstractString}=nothing;
             root ∈ newly_loaded || push!(newly_loaded, root)
         end
     end
-    if length(newly_loaded) == 1
+    if testfile == default_testfile
+        loaded_testmodules[packagemod] = newly_loaded
+    end
+    if !maybe && length(newly_loaded) == 1
         newly_loaded[1]
     else
         isempty(newly_loaded) &&
@@ -67,6 +72,8 @@ function load(packagemod::Module, testfile::Maybe{AbstractString}=nothing;
         newly_loaded
     end
 end
+
+const loaded_testmodules = Dict{Module,Vector{Module}}()
 
 """
     ReTest.hijack(source, [modname];
