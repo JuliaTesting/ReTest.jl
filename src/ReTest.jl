@@ -1332,7 +1332,7 @@ function process_args(@nospecialize(args);
 
     implicitmodules = isempty(modpats)
     if implicitmodules || recursive
-        update_TESTED_MODULES!()
+        update_TESTED_MODULES!(true)
     end
     if implicitmodules
         for mod in @view(TESTED_MODULES[1:end])
@@ -1414,7 +1414,7 @@ function process_args(@nospecialize(args);
      verbose=verbose)
 end
 
-function update_TESTED_MODULES!(double_check=true)
+function update_TESTED_MODULES!(double_check::Bool=false)
     # TESTED_MODULES might have "duplicate" entries, i.e. modules which were
     # "replaced", when one overwrites itself by being redefined; in this case,
     # let's just delete older entries. We must also take into account the possibility
@@ -1463,6 +1463,7 @@ function update_TESTED_MODULES!(double_check=true)
 
     @assert all(m -> m isa Module, TESTED_MODULES)
     @assert allunique(TESTED_MODULES)
+    TESTED_MODULES
 end
 
 function fetchtests((mod, pat), verbose, overall, maxidw; static, strict, dup)

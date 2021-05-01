@@ -5,6 +5,10 @@
 Given a package `Mod`, include into `parentmodule`
 the corresponding tests from file `testfile`, which is assumed to be
 located in the "test" directory of the package.
+It is expected that a unique new test module is created within `parentmodule`
+after the inclusion, which is then returned.
+Otherwise, the list of all newly created test modules is returned, triggering
+a warning if it's empty.
 
 If `revise` is `true`, `Revise`, which must be loaded beforehand in your Julia
 session, is used to track the test files (in particular testsets). Note that
@@ -31,34 +35,36 @@ function load(packagemod::Module, testfile::Maybe{AbstractString}=nothing;
         maybe ? (return nothing) : error("file $testpath does not exist")
     end
 
-    function detect_module(mod)
-        if !(mod isa Module)
-            modname = Symbol(packagemod, :Tests)
-            if isdefined(parentmodule, modname)
-                mod = getfield(parentmodule, modname)
-                # this heuristic fails in case an unrelated module `modname`
-                # already exists before the call to `load`, and the newly
-                # created module via include is something else; TODO: we could
-                # maybe try to track that by checking for such a name before
-                # include, and checking afterwards that it was overwritten
-            end
-        end
-        if !(mod isa Module)
-            @warn "test file $testpath loaded but it did not define module $modname"
-            nothing
-        else
-            mod
-        end
-    end
+    old_loaded = copy(update_TESTED_MODULES!())
 
     if Revise === nothing
-        detect_module(Base.include(parentmodule, testpath))
+        Base.include(parentmodule, testpath)
     else
         files = Dict{String,Module}(testpath => parentmodule)
         substitute!(x) = substitute_retest!(x, false, false, files; ishijack=false)
-        mod = detect_module(Base.include(substitute!, parentmodule, testpath))
+        Base.include(substitute!, parentmodule, testpath)
         revise_track(Revise, files)
-        mod
+    end
+
+    newly_loadedpars = parentmodules.(setdiff(update_TESTED_MODULES!(), old_loaded))
+    newly_loaded = Module[]
+    for lpars in newly_loadedpars
+        idx = findlast(==(parentmodule), lpars)
+        if idx === nothing
+            @warn "test module $(first(lpars)) was defined but is not a (recursive) submodule of $parentmodule"
+        elseif idx == 1
+            @warn "testsets were added directly into module $parentmodule"
+        else
+            root = lpars[idx-1]
+            root ∈ newly_loaded || push!(newly_loaded, root)
+        end
+    end
+    if length(newly_loaded) == 1
+        newly_loaded[1]
+    else
+        isempty(newly_loaded) &&
+            @warn "test file $testpath loaded but it did not define any test module within $parentmodule"
+        newly_loaded
     end
 end
 

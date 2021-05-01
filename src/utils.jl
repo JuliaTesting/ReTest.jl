@@ -41,3 +41,14 @@ function is_replaced(mod::Module)
     end
     false
 end
+
+# list of recursive parent modules of mod, starting with mod
+function parentmodules(mod::Module)
+    pars = [mod]
+    while true
+        par = parentmodule(mod)
+        par == mod && return pars
+        push!(pars, par)
+        mod = par
+    end
+end

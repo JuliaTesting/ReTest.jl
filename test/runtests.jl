@@ -893,14 +893,16 @@ end
 
 using ReTest: process_args
 module Load end
+module Load2 end
 
 @chapter load begin
     using FakePackage
     @assert !isdefined(Main, :FakePackageTests)
 
     Test.@testset "ReTest.load" begin
-        ReTest.load(FakePackage, revise=false) # just stating the default for revise
+        FT = ReTest.load(FakePackage, revise=false) # just stating the default for revise
         @test isdefined(Main, :FakePackageTests)
+        @test FT === FakePackageTests
         @test first.(process_args((FakePackageTests,)).modules) ==
             [FakePackageTests, FakePackageTests.Sub, FakePackageTests.Sub.SubSub]
 
@@ -910,6 +912,25 @@ module Load end
         @test_throws ErrorException ReTest.load(FakePackage, "notafile.jl")
         @test_throws ErrorException ReTest.load(Base)
         @test_throws ErrorException ReTest.load(Pkg)
+
+
+        @test isempty(
+            @test_logs (:warn,
+                    r"test file .*load_noretest.jl loaded but it did not define any test module within Main.Load"
+                    ) ReTest.load(FakePackage, "load_noretest.jl", parentmodule=Load))
+        @test isempty(
+            @test_logs (:warn,
+                    "testsets were added directly into module $Load"
+                    ) (:warn,
+                       r"test file .*load_nomodule.jl loaded but it did not define any test module within Main.Load"
+                       ) ReTest.load(FakePackage, "load_nomodule.jl", parentmodule=Load))
+
+        @test isempty(
+            @test_logs (:warn,
+                    "test module Main.Load2.AltModule was defined but is not a (recursive) submodule of $Load"
+                    ) (:warn,
+                    r"test file .*load_altmodule.jl loaded but it did not define any test module within Main.Load"
+                    ) ReTest.load(FakePackage, "load_altmodule.jl", parentmodule=Load))
     end
 end
 
@@ -945,22 +966,25 @@ end
         Test.@testset "load(revise=true)" begin
             # big hack, this should belong to the FakePackage chapter, but we can't load
             # Revise then, because we @test_throws above for Revise not loaded
-            ReTest.load(Hijack, "../../FakePackage/test/FakePackageTests2.jl",
-                        parentmodule=Load, revise=true)
+            @test ReTest.load(Hijack, "../../FakePackage/test/FakePackageTests2.jl",
+                              parentmodule=Load, revise=true) ==
+                                  Load.AlternateFakePackageTests
             @test first.(process_args((Load.AlternateFakePackageTests,)).modules) ==
                 [Load.AlternateFakePackageTests]
 
-            @test_logs (:warn,
-                        r"test file .*load_revise2.jl loaded but it did not define module HijackTests"
-                        ) ReTest.load(Hijack, "load_revise2.jl",
-                                      revise=true, parentmodule=Load)
-
             # here, Load.HijackTests gets defined
-            ReTest.load(Hijack, "load_revise.jl", parentmodule=Load) # revise=true
+            @test ReTest.load(Hijack, "load_revise.jl", parentmodule=Load) == # revise=true
+                Load.HijackTests
             @test Load.load_revise_function() == 1
             @test Load.HijackTests.load_revise_function() == 1
             @test first.(process_args((Load.HijackTests,)).modules) == [Load.HijackTests]
             Load.HijackTests.check(Load.HijackTests, [1])
+
+            HL = ReTest.load(Hijack, "HijackTestsLoad123.jl", parentmodule=Load)
+            @test HL == [Load.HijackTestsLoad1, Load.HijackTestsLoad2]
+            @test HL[1].f() == 1
+            @test HL[2].f() == 1
+            @test Load.HijackTestsLoad3.f() == 1
         end
 
         ReTest.hijack(Hijack, :HijackTests2) # revise=true by default
@@ -1023,6 +1047,12 @@ end
             end
         end
 
+        # EDIT FILE 6
+        load_hijack123 = "Hijack/test/HijackTestsLoad123.jl"
+        update_file!(load_hijack123) do content
+            replace(content, "f() = 1" => "f() = 2")
+        end
+
         Revise.revise()
         try
             Test.@testset "revise works" begin
@@ -1035,6 +1065,11 @@ end
                 @test SubMod1.RUN == [2]; empty!(SubMod1.RUN)
                 @test SubMod1.SubModule.RUN == [2]; empty!(SubMod1.SubModule.RUN)
                 @test SubMod1.SubModule.Sub.RUN == [2]; empty!(SubMod1.SubModule.Sub.RUN)
+
+                @test Load.HijackTestsLoad1.f() == 2
+                @test Load.HijackTestsLoad2.f() == 2
+                @test Load.HijackTestsLoad3.f() == 2
+
             end
         finally
             restore_file!(sub_file)
@@ -1042,6 +1077,7 @@ end
             restore_file!(mod_revise)
             restore_file!(submod_revise)
             restore_file!(subsubmod_revise)
+            restore_file!(load_hijack123)
         end
 
         # test lazy=true
