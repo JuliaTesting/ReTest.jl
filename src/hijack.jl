@@ -1,4 +1,43 @@
 """
+    ReTest.load(testpath::AbstractString;
+                parentmodule::Module=Main, [revise::Bool])
+
+Include file `testpath` into `parentmodule`. If `revise` is `true`, `Revise`,
+which must be loaded beforehand in your Julia session, is used to track all
+recursively included files (in particular testsets). The `revise` keyword
+defaults to `true` when `Revise` is loaded and `VERSION >= v"1.5"`, and to
+`false` otherwise.
+
+The point of using this function is when `revise` is `true` and in particular
+when files are included recursively.
+If `revise` is false, this is equivalent to `parentmodule.include(testpath)`,
+and if there are no recursively included files, this should be equivalent
+to `Revise.includet(testpath)`, provided `parentmodule == Main` and
+all `@testset`s defined in `testpath` are in a module defining
+ `__revise_mode__ = :eval`.
+
+!!! compat "Julia 1.5"
+    This function requires at least Julia 1.5 when `revise` is `true`.
+"""
+function load(testpath::AbstractString;
+              parentmodule::Module=Main, revise::Maybe{Bool}=nothing)
+
+    revise === true && VERSION < v"1.5" &&
+        error("the `revise` keyword requires at least Julia 1.5")
+    Revise = get_revise(revise)
+
+    if Revise === nothing
+        Base.include(parentmodule, testpath)
+    else
+        files = Dict{String,Module}(testpath => parentmodule)
+        substitute!(x) = substitute_retest!(x, false, false, files; ishijack=false)
+        res = Base.include(substitute!, parentmodule, testpath)
+        revise_track(Revise, files)
+        res
+    end
+end
+
+"""
     ReTest.load(Mod::Module, testfile::AbstractString="ModTests.jl";
                 parentmodule::Module=Main, [revise::Bool])
 
@@ -13,8 +52,8 @@ a warning if it's empty.
 If `revise` is `true`, `Revise`, which must be loaded beforehand in your Julia
 session, is used to track the test files (in particular testsets). Note that
 this might be brittle, and it's recommended instead to load your test module
-via `using ModTests`. `revise` defaults to `true` when `Revise` is loaded
-and `VERSION >= v"1.5"`, and to `false` otherwise.
+via `using ModTests`. The `revise` keyword defaults to `true` when `Revise` is
+loaded and `VERSION >= v"1.5"`, and to `false` otherwise.
 
 !!! compat "Julia 1.5"
     This function requires at least Julia 1.5 when `revise` is `true`.
@@ -22,12 +61,9 @@ and `VERSION >= v"1.5"`, and to `false` otherwise.
 function load(packagemod::Module, testfile::Maybe{AbstractString}=nothing;
               parentmodule::Module=Main, revise::Maybe{Bool}=nothing,
               maybe::Bool=false)
-    revise === true && VERSION < v"1.5" &&
-        error("the `revise` keyword requires at least Julia 1.5")
-    Revise = get_revise(revise)
-    packagepath = pathof(packagemod)
-    newly_loaded = Module[]
 
+    newly_loaded = Module[]
+    packagepath = pathof(packagemod)
     if packagepath === nothing
         maybe ? (return newly_loaded) : error("$packagemod is not a package")
     end
@@ -39,16 +75,7 @@ function load(packagemod::Module, testfile::Maybe{AbstractString}=nothing;
     end
 
     old_loaded = copy(update_TESTED_MODULES!())
-
-    if Revise === nothing
-        Base.include(parentmodule, testpath)
-    else
-        files = Dict{String,Module}(testpath => parentmodule)
-        substitute!(x) = substitute_retest!(x, false, false, files; ishijack=false)
-        Base.include(substitute!, parentmodule, testpath)
-        revise_track(Revise, files)
-    end
-
+    load(testpath; parentmodule=parentmodule, revise=revise)
     newly_loadedpars = parentmodules.(setdiff(update_TESTED_MODULES!(), old_loaded))
     for lpars in newly_loadedpars
         idx = findlast(==(parentmodule), lpars)

@@ -931,6 +931,12 @@ module Load2 end
                     ) (:warn,
                     r"test file .*load_altmodule.jl loaded but it did not define any test module within Main.Load"
                     ) ReTest.load(FakePackage, "load_altmodule.jl", parentmodule=Load))
+
+        lpf = ReTest.load("Hijack/test/load_path.jl")
+        @test Main.load_path_function() == 1
+        @test lpf === Main.load_path_function
+        @test_throws ErrorException ReTest.load("Hijack/test/load_path.jl",
+                                                revise=true)
     end
 end
 
@@ -999,6 +1005,10 @@ end
             @test HL[1].f() == 1
             @test HL[2].f() == 1
             @test Load.HijackTestsLoad3.f() == 1
+
+            lpf = ReTest.load("Hijack/test/load_path.jl", parentmodule=Load2)
+            @test Load2.load_path_function() == 1
+            @test lpf == Load2.load_path_function
         end
 
         ReTest.hijack(Hijack, :HijackTests2) # revise=true by default
@@ -1067,6 +1077,12 @@ end
             replace(content, "f() = 1" => "f() = 2")
         end
 
+        # EDIT FILE 7
+        load_path_file = "Hijack/test/load_path.jl"
+        update_file!(load_path_file) do content
+            replace(content, "load_path_function() = 1" => "load_path_function() = 2")
+        end
+
         Revise.revise()
         try
             Test.@testset "revise works" begin
@@ -1083,7 +1099,7 @@ end
                 @test Load.HijackTestsLoad1.f() == 2
                 @test Load.HijackTestsLoad2.f() == 2
                 @test Load.HijackTestsLoad3.f() == 2
-
+                @test Load2.load_path_function() == 2
             end
         finally
             restore_file!(sub_file)
@@ -1092,6 +1108,7 @@ end
             restore_file!(submod_revise)
             restore_file!(subsubmod_revise)
             restore_file!(load_hijack123)
+            restore_file!(load_path_file)
         end
 
         # test lazy=true
