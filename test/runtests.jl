@@ -899,7 +899,7 @@ module Load end
     @assert !isdefined(Main, :FakePackageTests)
 
     Test.@testset "ReTest.load" begin
-        ReTest.load(FakePackage)
+        ReTest.load(FakePackage, revise=false) # just stating the default for revise
         @test isdefined(Main, :FakePackageTests)
         @test first.(process_args((FakePackageTests,)).modules) ==
             [FakePackageTests, FakePackageTests.Sub, FakePackageTests.Sub.SubSub]
@@ -920,7 +920,11 @@ end
     Pkg.develop(PackageSpec(path="..")) # ReTest
     Pkg.test("Hijack")
 
-    if VERSION >= v"1.5"
+    if VERSION < v"1.5"
+        using Revise
+        @test ReTest.get_revise(nothing) === nothing
+
+    else
 
         using Hijack
         ReTest.hijack(Hijack, testset=false) # testset: just check that this method
@@ -930,9 +934,13 @@ end
         empty!(Hijack.RUN)
 
         @test_throws ErrorException ReTest.hijack(Hijack, :HijackTests2, revise=true)
+        # Revise not loaded || VERSION < v"1.5"
+        @test_throws ErrorException ReTest.load(Hijack, "load_revise.jl",
+                                                revise=true, parentmodule=Load)
 
 
         using Revise ###############################
+        @test nameof(ReTest.get_revise(nothing)) == :Revise
 
         Test.@testset "load(revise=true)" begin
             # big hack, this should belong to the FakePackage chapter, but we can't load
@@ -948,14 +956,14 @@ end
                                       revise=true, parentmodule=Load)
 
             # here, Load.HijackTests gets defined
-            ReTest.load(Hijack, "load_revise.jl", revise=true, parentmodule=Load)
+            ReTest.load(Hijack, "load_revise.jl", parentmodule=Load) # revise=true
             @test Load.load_revise_function() == 1
             @test Load.HijackTests.load_revise_function() == 1
             @test first.(process_args((Load.HijackTests,)).modules) == [Load.HijackTests]
             Load.HijackTests.check(Load.HijackTests, [1])
         end
 
-        ReTest.hijack(Hijack, :HijackTests2, revise=true)
+        ReTest.hijack(Hijack, :HijackTests2) # revise=true by default
         retest(HijackTests2)
         @test Hijack.RUN == [1, 5, 4]
         empty!(Hijack.RUN)

@@ -1,6 +1,6 @@
 """
     ReTest.load(Mod::Module, testfile::AbstractString="ModTests.jl";
-                parentmodule::Module=Main, revise::Bool=false)
+                parentmodule::Module=Main, [revise::Bool])
 
 Given a package `Mod`, include into `parentmodule`
 the corresponding tests from file `testfile`, which is assumed to be
@@ -9,15 +9,16 @@ located in the "test" directory of the package.
 If `revise` is `true`, `Revise`, which must be loaded beforehand in your Julia
 session, is used to track the test files (in particular testsets). Note that
 this might be brittle, and it's recommended instead to load your test module
-via `using ModTests`.
+via `using ModTests`. `revise` defaults to `true` when `Revise` is loaded
+and `VERSION >= v"1.5"`, and to `false` otherwise.
 
 !!! compat "Julia 1.5"
     This function requires at least Julia 1.5 when `revise` is `true`.
 """
 function load(packagemod::Module, testfile::Union{Nothing,AbstractString}=nothing;
-              parentmodule::Module=Main, revise::Bool=false,
+              parentmodule::Module=Main, revise::Union{Nothing,Bool}=nothing,
               maybe::Bool=false)
-    revise && VERSION < v"1.5" &&
+    revise === true && VERSION < v"1.5" &&
         error("the `revise` keyword requires at least Julia 1.5")
     Revise = get_revise(revise)
     packagepath = pathof(packagemod)
@@ -64,7 +65,7 @@ end
 """
     ReTest.hijack(source, [modname];
                   parentmodule::Module=Main, lazy=false, testset::Bool=false,
-                  revise::Bool=false)
+                  [revise::Bool])
 
 Given test files defined in `source` using the `Test` package, try to load
 them by replacing `Test` with `ReTest`, wrapping them in a module `modname`
@@ -131,7 +132,8 @@ to not declare new testsets when parent testsets are run.
 The `revise` keyword specifies whether `Revise` should be used to track
 the test files (in particular the testsets). If `true`, `Revise` must
 be loaded beforehand in your Julia session. Note that this might be brittle
-and not work in all cases.
+and not work in all cases. `revise` defaults to `true` when `Revise` is loaded,
+and to `false` otherwise.
 
 !!! compat "Julia 1.5"
     This function requires at least Julia 1.5.
@@ -139,7 +141,7 @@ and not work in all cases.
 function hijack end
 
 function hijack(path::AbstractString, modname=nothing; parentmodule::Module=Main,
-                lazy=false, testset::Bool=false, revise::Bool=false)
+                lazy=false, testset::Bool=false, revise::Union{Bool,Nothing}=nothing)
 
     # do first, to error early if necessary
     Revise = get_revise(revise)
@@ -193,7 +195,7 @@ function revise_track(Revise, files)
 end
 
 function hijack(packagemod::Module, modname=nothing; parentmodule::Module=Main,
-                lazy=false, testset::Bool=false, revise::Bool=false)
+                lazy=false, testset::Bool=false, revise::Union{Nothing,Bool}=nothing)
     packagepath = pathof(packagemod)
     packagepath === nothing && packagemod !== Base &&
         throw(ArgumentError("$packagemod is not a package"))
@@ -323,7 +325,7 @@ const TEST_MACROS = Symbol.(["@test", "@test_throws", "@test_broken", "@test_ski
 
 """
     hijack_base(tests, [modname];
-                parentmodule::Module=Main, lazy=false, revise::Bool=false)
+                parentmodule::Module=Main, lazy=false, [revise::Bool])
 
 Similar to `ReTest.hijack`, but specifically for `Base` and stdlib tests.
 `tests` speficies which test files should be loaded, in the exact same format
@@ -353,7 +355,7 @@ are known to fail.
     This function requires at least Julia 1.5.
 """
 function hijack_base(tests, modname=nothing; parentmodule::Module=Main, lazy=false,
-                     base=:BaseTests, stdlib=:StdLibTests, revise::Bool=false)
+                     base=:BaseTests, stdlib=:StdLibTests, revise::Union{Nothing,Bool}=nothing)
 
     Revise = get_revise(revise)
     if isa(tests, AbstractString)
@@ -420,9 +422,9 @@ function hijack_base(tests, modname=nothing; parentmodule::Module=Main, lazy=fal
 end
 
 get_revise(revise) =
-    if revise
+    if revise === true || revise === nothing && VERSION >= v"1.5"
         Revise = get(Base.loaded_modules, revise_pkgid(), nothing)
-        Revise === nothing &&
+        Revise === nothing && revise === true &&
             error("Revise is not loaded")
         Revise
     end
