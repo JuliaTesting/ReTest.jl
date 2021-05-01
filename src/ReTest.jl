@@ -327,8 +327,8 @@ mutable struct TestsetExpr
     options::Options
     # loops: the original loop expression, if any, but where each `x=...` is
     # pulled out into a vector
-    loops::Union{Vector{Expr},Nothing}
-    parent::Union{TestsetExpr,Nothing}
+    loops::Maybe{Vector{Expr}}
+    parent::Maybe{TestsetExpr}
     children::Vector{TestsetExpr}
     strings::Vector{Union{String,Missing}}
     # loopvalues & loopiters: when successful in evaluating loop values in resolve!,
@@ -336,7 +336,7 @@ mutable struct TestsetExpr
     # containing tuples of values, and loopiters the tuples of variables to which the
     # values are assigned
     loopvalues::Union{Nothing,Vector{Any}}
-    loopiters::Union{Nothing,Expr}
+    loopiters::Maybe{Expr}
     hasbroken::Bool
     hasbrokenrec::Bool # recursive hasbroken, transiently
     run::Bool
@@ -450,7 +450,7 @@ end
 function resolve!(mod::Module, ts::TestsetExpr, pat::Pattern;
                   # external calls
                   verbose::Int, id::Int64, strict::Bool,
-                  static::Union{Bool,Nothing},
+                  static::Maybe{Bool},
                    # only recursive calls
                   force::Bool=false, shown::Bool=true, depth::Int=0)
 
@@ -821,7 +821,7 @@ function retest(@nospecialize(args::ArgType...);
                 id=nothing,
                 strict::Bool=true,
                 dup::Bool=false,
-                static::Union{Bool,Nothing}=nothing,
+                static::Maybe{Bool}=nothing,
                 load::Bool=false,
                 )
 
@@ -905,7 +905,7 @@ function retest(@nospecialize(args::ArgType...);
             todo = fill(true, length(tests))
         end
 
-        outchan = RemoteChannel(() -> Channel{Union{Nothing,Testset.ReTestSet}}(0))
+        outchan = RemoteChannel(() -> Channel{Maybe{Testset.ReTestSet}}(0))
         computechan = nprocs() == 1 ?
             Channel{Nothing}(1) : # to not interrupt printer task
             nothing
@@ -924,7 +924,7 @@ function retest(@nospecialize(args::ArgType...);
         printlock = ReentrantLock()
         previewchan =
             if stdout isa Base.TTY && (nthreads() > 1 || nprocs() > 1)
-                RemoteChannel(() -> Channel{Union{String,Nothing}}(Inf))
+                RemoteChannel(() -> Channel{Maybe{String}}(Inf))
                 # needs to be "remote" in the case nprocs() == 2, as then nworkers() == 1,
                 # which means the one remote worker will put descriptions on previewchan
                 # (if nworkers() > 1, descriptions are not put because we can't predict
@@ -1274,7 +1274,7 @@ function process_args(@nospecialize(args);
     loaded_modules = Set{Module}(load ? values(Base.loaded_modules) : ())
     toload = Dict{Module,Module}() # package => testmodule
 
-    function load_testmod(mod)::Union{Module,Nothing}
+    function load_testmod(mod)::Maybe{Module}
         mod ∈ loaded_modules || return
         mod in keys(toload) && return
         stestmod = Symbol(mod, :Tests)

@@ -15,8 +15,8 @@ and `VERSION >= v"1.5"`, and to `false` otherwise.
 !!! compat "Julia 1.5"
     This function requires at least Julia 1.5 when `revise` is `true`.
 """
-function load(packagemod::Module, testfile::Union{Nothing,AbstractString}=nothing;
-              parentmodule::Module=Main, revise::Union{Nothing,Bool}=nothing,
+function load(packagemod::Module, testfile::Maybe{AbstractString}=nothing;
+              parentmodule::Module=Main, revise::Maybe{Bool}=nothing,
               maybe::Bool=false)
     revise === true && VERSION < v"1.5" &&
         error("the `revise` keyword requires at least Julia 1.5")
@@ -141,7 +141,7 @@ and to `false` otherwise.
 function hijack end
 
 function hijack(path::AbstractString, modname=nothing; parentmodule::Module=Main,
-                lazy=false, testset::Bool=false, revise::Union{Bool,Nothing}=nothing)
+                lazy=false, testset::Bool=false, revise::Maybe{Bool}=nothing)
 
     # do first, to error early if necessary
     Revise = get_revise(revise)
@@ -195,7 +195,7 @@ function revise_track(Revise, files)
 end
 
 function hijack(packagemod::Module, modname=nothing; parentmodule::Module=Main,
-                lazy=false, testset::Bool=false, revise::Union{Nothing,Bool}=nothing)
+                lazy=false, testset::Bool=false, revise::Maybe{Bool}=nothing)
     packagepath = pathof(packagemod)
     packagepath === nothing && packagemod !== Base &&
         throw(ArgumentError("$packagemod is not a package"))
@@ -355,7 +355,7 @@ are known to fail.
     This function requires at least Julia 1.5.
 """
 function hijack_base(tests, modname=nothing; parentmodule::Module=Main, lazy=false,
-                     base=:BaseTests, stdlib=:StdLibTests, revise::Union{Nothing,Bool}=nothing)
+                     base=:BaseTests, stdlib=:StdLibTests, revise::Maybe{Bool}=nothing)
 
     Revise = get_revise(revise)
     if isa(tests, AbstractString)

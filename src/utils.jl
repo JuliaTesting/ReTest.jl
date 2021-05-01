@@ -1,3 +1,5 @@
+Maybe{T} = Union{T,Nothing}
+
 issubmodule(m::Module, s) = s isa Module && parentmodule(s) == m && m != s
 
 function submodules(m::Module)
