@@ -512,6 +512,19 @@ function resolve!(mod::Module, ts::TestsetExpr, pat::Pattern;
         end
     end
 
+    # hasmissing might be set to true if parentstrs has missing, but we don't bother
+    function decide_testset!(desc, hasmissing)
+        for str in parentstrs
+            !strict && ts.run && break
+            new = str * "/" * desc
+            hasmissing && new === missing ||
+                push!(strings, new)
+            hasmissing |= new === missing # comes either from desc or str
+            ts.run = ts.run || decide(new)
+        end
+        hasmissing
+    end
+
     loops = ts.loops
     if loops === nothing || desc isa String
         # TODO: maybe, for testset-for and !(desc isa String), still try this branch
@@ -529,15 +542,8 @@ function resolve!(mod::Module, ts::TestsetExpr, pat::Pattern;
         if shown
             ts.descwidth = descwidth(desc)
         end
-        hasmissing = false # might be true if parentstrs has missing, but we don't bother
-        for str in parentstrs
-            !strict && ts.run && break
-            new = str * "/" * desc
-            hasmissing && new === missing ||
-                push!(strings, new)
-            hasmissing |= new === missing # comes either from desc or str
-            ts.run = ts.run || decide(new)
-        end
+        decide_testset!(desc, false)
+
     else # we have a testset-for with description which needs interpolation
         xs = ()
         loopiters = Expr(:tuple, (arg.args[1] for arg in loops)...)
@@ -582,14 +588,7 @@ function resolve!(mod::Module, ts::TestsetExpr, pat::Pattern;
                     continue
                 end
             end
-            for str in parentstrs
-                !strict && ts.run && break
-                new = str * "/" * descx
-                hasmissing && new === missing ||
-                    push!(strings, new)
-                hasmissing |= new === missing
-                ts.run = ts.run || decide(new)
-            end
+            hasmissing = decide_testset!(descx, hasmissing)
         end
     end
 
