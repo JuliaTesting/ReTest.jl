@@ -529,14 +529,14 @@ function resolve!(mod::Module, ts::TestsetExpr, pat::Pattern;
         if shown
             ts.descwidth = descwidth(desc)
         end
-        hasmissing = false
+        hasmissing = false # might be true if parentstrs has missing, but we don't bother
         for str in parentstrs
             !strict && ts.run && break
-            new = str * "/" * desc # TODO: implement *(::Missing, ::Char) in Base ?
+            new = str * "/" * desc
+            hasmissing && new === missing ||
+                push!(strings, new)
             hasmissing |= new === missing # comes either from desc or str
             ts.run = ts.run || decide(new)
-            hasmissing && str === missing ||
-                push!(strings, new)
         end
     else # we have a testset-for with description which needs interpolation
         xs = ()
@@ -567,6 +567,7 @@ function resolve!(mod::Module, ts::TestsetExpr, pat::Pattern;
             @assert xs == ()
             ts.descwidth = shown ? descwidth(missing) : 0
             ts.run = ts.run || decide(missing)
+            push!(strings, missing)
         end
         hasmissing = false
         for x in xs # empty loop if eval above threw
@@ -584,10 +585,10 @@ function resolve!(mod::Module, ts::TestsetExpr, pat::Pattern;
             for str in parentstrs
                 !strict && ts.run && break
                 new = str * "/" * descx
+                hasmissing && new === missing ||
+                    push!(strings, new)
                 hasmissing |= new === missing
                 ts.run = ts.run || decide(new)
-                hasmissing && str === missing ||
-                    push!(strings, new)
             end
         end
     end

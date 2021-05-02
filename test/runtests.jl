@@ -463,6 +463,44 @@ end # Loops1
                            # unresolvable descriptions, we can filter out stuff
                            # (i.e. here, we don't run "loops 1" just in case "local$i" would
                            # be run, as we can determine from pattern 9:9 that nothing must run)
+    check(Loops1, interpolated, "",  dry=true, verbose=9, id=false, output = "loops 1")
+    check(Loops1, not(interpolated), "",  dry=true, verbose=9, id=false, output = """
+loops 1
+  "local\$(i)" (repeated)
+    sub
+      final
+""")
+
+end
+
+# same as Loops1, but the iterator can be statically computed, only descriptions can't
+module Loops1bis
+using ReTest, ..Trace
+
+@testset "loops 1 bis" begin
+    trace(9)
+    a = 0
+    @testset "local $a $i" for i in (1, 2)
+        trace(i)
+        @testset "sub" begin
+            trace(0)
+
+            @testset "final" begin
+                trace(-1)
+            end
+        end
+    end
+end
+end # Loops1bis
+
+@chapter Loops begin
+    check(Loops1bis, interpolated, "",  dry=true, verbose=9, id=false, output = "loops 1 bis")
+    check(Loops1bis, not(interpolated), "",  dry=true, verbose=9, id=false, output = """
+loops 1 bis
+  "local \$(a) \$(i)" (repeated 2 times)
+    sub
+      final
+""")
 end
 
 module Loops2
