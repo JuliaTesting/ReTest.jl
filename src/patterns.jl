@@ -41,6 +41,8 @@ struct Reachable <: Pattern
     x::PatternX
 end
 
+==(a::Reachable, b::Reachable) = a.x == b.x
+
 
 ### Interpolated
 
