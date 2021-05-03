@@ -62,6 +62,7 @@ mutable struct ReTestSet <: AbstractTestSet
     mod::String # enclosing module
     description::AbstractString
     id::Int64
+    ids::Vector{Int64} # shared instance in an id stack
     overall::Bool # TODO: could be conveyed by having self.mod == ""
     results::Vector
     n_passed::Int
@@ -71,8 +72,8 @@ mutable struct ReTestSet <: AbstractTestSet
     exception::Union{TestSetException,Nothing}
 end
 
-ReTestSet(mod, desc, id::Integer=0; overall=false, verbose = true) =
-    ReTestSet(mod, desc, id, overall, [], 0, false, verbose, NamedTuple(), nothing)
+ReTestSet(mod, desc, id::Integer=0; ids=Int64[], overall=false, verbose=true) =
+    ReTestSet(mod, desc, id, ids, overall, [], 0, false, verbose, NamedTuple(), nothing)
 
 # For a non-passed result, simply store the result
 record(ts::ReTestSet, t::Union{Broken,Fail,Error}) = (push!(ts.results, t); t)
@@ -434,9 +435,11 @@ default_rng() = isdefined(Random, :default_rng) ?
     Random.default_rng() :
     Random.GLOBAL_RNG
 
-function get_testset_string(remove_last=false)
-    testsets = get(task_local_storage(), :__BASETESTNEXT__, Test.AbstractTestSet[])
-    join('/' * ts.description for ts in (remove_last ? testsets[1:end-1] : testsets))
+function get_testset_ids_string(remove_last=false)
+    _testsets = get(task_local_storage(), :__BASETESTNEXT__, Test.AbstractTestSet[])
+    testsets = @view _testsets[1:end-remove_last]
+    (isempty(testsets) ? Int64[] : resize!(testsets[end].ids, length(testsets)),
+     join('/' * ts.description for ts in testsets))
 end
 
 # HACK: we re-use the same macro name `@testset` for actual execution (like in `Test`)
@@ -477,13 +480,13 @@ function testset_beginend(mod::String, isfinal::Bool, pat::Pattern, id::Int64, d
     # action (such as reporting the results)
     desc = esc(desc)
     ex = quote
-        local current_str
-        if $isfinal
-            current_str = string(get_testset_string(), '/', $desc)
-        end
-        if !$isfinal || matches($pat, current_str, $id)
+        local ids, current_str = get_testset_ids_string()
+        current_str = string(current_str, '/', $desc)
+        push!(ids, $id)
+        if !$isfinal || matches($pat, current_str, ids)
             local ret
-            local ts = ReTestSet($mod, $desc, $id; verbose=$(options.transient_verbose))
+            local ts = ReTestSet($mod, $desc, $id; verbose=$(options.transient_verbose),
+                                 ids=ids)
             if nworkers() == 1 && get_testset_depth() == 0 && $(chan.preview) !== nothing
                 put!($(chan.preview), $desc)
             end
@@ -530,11 +533,11 @@ function testset_forloop(mod::String, isfinal::Bool, pat::Pattern, id::Int64,
 
     desc = esc(desc)
     blk = quote
-        local current_str
-        if $isfinal
-            current_str = string(get_testset_string(!first_iteration), '/', $desc)
-        end
-        if !$isfinal || matches($pat, current_str, $id)
+        local ids, current_str = get_testset_ids_string(!first_iteration)
+        current_str = string(current_str, '/', $desc)
+        push!(ids, $id)
+
+        if !$isfinal || matches($pat, current_str, ids)
             # Trick to handle `break` and `continue` in the test code before
             # they can be handled properly by `finally` lowering.
             if !first_iteration
@@ -543,7 +546,8 @@ function testset_forloop(mod::String, isfinal::Bool, pat::Pattern, id::Int64,
                 # it's 1000 times faster to copy from tmprng rather than calling Random.seed!
                 copy!(RNG, tmprng)
             end
-            ts = ReTestSet($mod, $desc, $id; verbose=$(options.transient_verbose))
+            ts = ReTestSet($mod, $desc, $id; verbose=$(options.transient_verbose),
+                           ids=ids)
             if nworkers() == 1 && get_testset_depth() == 0 && $(chan.preview) !== nothing
                 put!($(chan.preview), ts.description)
             end

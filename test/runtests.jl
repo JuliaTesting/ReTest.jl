@@ -150,6 +150,20 @@ end # N
     check(N, 1, "i")
     check(N, 1, "i", strict=true)
     check(N, 1, "i j l1", strict=false)
+
+    # reachable
+    if VERSION >= v"1.3"
+        check(N, reachable(1), " i j k l1 m")
+        check(N, reachable(1), dry=true, id=false, verbose=3, "", output = """
+i
+  j
+    k
+  l1
+    m
+""")
+        check(N, reachable("l1"), " i l1 m")
+        check(N, not(reachable("l1")), " i j k")
+    end
 end
 
 # * P ........................................................................
@@ -470,7 +484,19 @@ loops 1
     sub
       final
 """)
-
+    if VERSION >= v"1.3"
+        check(Loops1, reachable("loops 1"), verbose=9, [9, 1, 0, -1, 2, 0, -1])
+        check(Loops1, reachable("loops 1"), verbose=9, dry=true, id=false, [], output=raw"""
+loops 1
+  "local$(i)" (repeated)
+    sub
+      final
+""")
+        check(Loops1, reachable("loops 1"), verbose=9, dry=true, id=false, static=true, [],
+              output="loops 1")
+        check(Loops1, reachable(interpolated), verbose=9, dry=true, id=false, [],
+              output="loops 1")
+    end
 end
 
 # same as Loops1, but the iterator can be statically computed, only descriptions can't

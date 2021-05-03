@@ -1,6 +1,6 @@
 module ReTest
 
-export retest, @testset, not, interpolated
+export retest, @testset, not, interpolated, reachable
 
 using Distributed
 using Base.Threads: nthreads
@@ -88,6 +88,105 @@ For example `not("a")` matches any testset whose subject doesn't contain `"a"`,
 and `not(1:3)` matches all the testsets but the first three of a module.
 """
 not(x) = Not(make_pattern(x))
+
+
+struct Reachable <: Pattern
+    x::PatternX
+end
+
+"""
+    reachable(pattern)
+
+Create a filtering pattern which matches any testset matching `pattern`
+or whose parent testset, if any, matches `reachable(pattern)`.
+In other words, if a testset matches `pattern`, all its recursive
+nested testsets will also match.
+
+When `pattern::String`, `reachable(pattern)` has the same effect as
+`pattern`, because the subject of a testset is contained in the
+subjects of all its nested testsets. So `reachable` is typically
+useful when `pattern` is an integer.
+
+# Examples
+```julia
+julia> module T
+       using ReTest
+       @testset "a" verbose=true begin
+           @test true
+           @testset "b" begin
+               @test true
+           end
+       end
+       @testset "c" begin
+           @test true
+       end
+       end;
+
+julia> retest(T, reachable(1), dry=true)
+1| a
+2|   b
+
+julia> retest(T, not(reachable(1)), dry=true)
+3| c
+```
+
+Note that the algorithm for `reachable` is currently not optimized, i.e.
+it will match `pattern` against all parents of a testset until success,
+even when this match was already performed earlier (i.e. the result
+of matching against `pattern` is not cached).
+
+Also, in the current implementation, the subject of a parent testset is
+inferred from the subject of a testset, by chopping off the last component,
+determined by the last occurrence of `'/'`. This has two consequences. It will
+produce incorrect results if the description of a testset contains `'/'`, and
+also, with [`interpolated`](@ref) when the subject is "unknown" due to
+un-interpolated descriptions. Consider the following example:
+
+```julia
+julia> module Fail
+       using ReTest
+       @testset "a" begin
+           x = 1
+           @testset "b\$x" begin
+               @testset "c" begin end
+           end
+       end
+       end;
+
+julia> retest(Fail, reachable(1), verbose=9, dry=true)
+1| a
+2|   "b\$(x)"
+3|     c
+
+julia> retest(Fail, reachable(interpolated), verbose=9, dry=true)
+1| a
+```
+
+Here, both testsets with id `2` and `3` have an unknown subject (at
+filtering time), which prevents the algorithm to detect that one of their
+parents (testset `1`) actually has an "interpolated" description.
+
+On the other hand, even with these unknown subjects, something like
+`reachable("a")` would work as expected:
+
+```julia
+julia> retest(Fail, reachable("a"), verbose=9, dry=true)
+1| a
+2|   "b\$(x)"
+3|     c
+
+julia> retest(Fail, reachable("a"), verbose=9, dry=true, static=true)
+1| a
+```
+
+!!! compat "Julia 1.3"
+    This function requires at least Julia 1.3.
+"""
+function reachable end
+
+if VERSION >= v"1.3"
+    reachable(x) = Reachable(make_pattern(x))
+end
 
 struct Interpolated <: Pattern end
 
@@ -262,21 +361,41 @@ alwaysmatches(::Not) = false
 alwaysmatches(::Interpolated) = false
 alwaysmatches(rx::Regex) = isempty(rx.pattern)
 alwaysmatches(id::Integer) = false
+alwaysmatches(pat::Reachable) = alwaysmatches(pat.x)
 
-matches(pat::And, x, id) = all(p -> matches(p, x, id), pat.xs)
+matches(pat::And, x, ids) = all(p -> matches(p, x, ids), pat.xs)
 
-matches(pat::Or, x, id) =
+matches(pat::Or, x, ids) =
     if pat.xs isa AbstractUnitRange{<:Integer} && minimum(pat.xs) >= 0
-        id ∈ pat.xs # this is optimised, i.e. it's not O(n)
+        ids[end] ∈ pat.xs # this is optimised, i.e. it's not O(n)
     else
-        any(p -> matches(p, x, id), pat.xs)
+        any(p -> matches(p, x, ids), pat.xs)
     end
 
-matches(pat::Not, x, id) = !matches(pat.x, x, id)
-matches(::Interpolated, x::Union{Missing,String}, id) = x !== missing
+matches(pat::Not, x, ids) = !matches(pat.x, x, ids)
+matches(::Interpolated, x::Union{Missing,AbstractString}, ids) = x !== missing
 matches(rx::Regex, x, _) = occursin(rx, x)
 matches(rx::Regex, ::Missing, _) = alwaysmatches(rx) | missing
-matches(pat::Integer, _, id) = pat >= 0 ? pat == id : pat != -id
+matches(pat::Integer, _, ids) =
+    @inbounds pat >= 0 ?
+        pat == ids[end] :
+        pat != -ids[end]
+
+function matches(pat::Reachable, desc, ids::Vector{Int64})
+    if desc !== missing
+        desc = SubString(desc)
+    end
+    m = false
+    for d = length(ids):-1:1
+        @inbounds id = ids[d]
+        m |= matches(pat.x, desc, @view ids[1:d])
+        m === true && return true
+        if desc !== missing
+            desc = SubString(desc, 1, findlast('/', desc)-1)
+        end
+    end
+    m
+end
 
 make_pattern(x::PatternX) = x
 
@@ -310,6 +429,7 @@ hasinteger(::Integer) = true
 hasinteger(pat::Union{And,Or}) = any(hasinteger, pat.xs)
 hasinteger(pat::Not) = hasinteger(pat.x)
 hasinteger(::Interpolated) = false
+hasinteger(pat::Reachable) = hasinteger(pat.x)
 
 
 # * TestsetExpr
@@ -449,8 +569,8 @@ end
 
 function resolve!(mod::Module, ts::TestsetExpr, pat::Pattern;
                   # external calls
-                  verbose::Int, id::Int64, strict::Bool,
-                  static::Maybe{Bool},
+                  verbose::Int, id::Int64, strict::Bool, static::Maybe{Bool},
+                  ids::Vector{Int64},
                    # only recursive calls
                   force::Bool=false, shown::Bool=true, depth::Int=0)
 
@@ -463,6 +583,7 @@ function resolve!(mod::Module, ts::TestsetExpr, pat::Pattern;
         @assert ts.id == id
     end
     ts.id = id
+    push!(ids, id)
     id += 1
 
     parentstrs = ts.parent === nothing ? [""] : ts.parent.strings
@@ -488,7 +609,7 @@ function resolve!(mod::Module, ts::TestsetExpr, pat::Pattern;
         end
 
     function decide(subj)
-        m = matches(pat, subj, ts.id)
+        m = matches(pat, subj, ids)
         # For the curious, setting `s = something(static, missing)`, there are few
         # "formulas" to compute the result without `if`, but using only
         # `coalesce, |, &, ==, !=, ===, !==, (a,b) -> a, (a,b) -> b, (a,b) -> !a,
@@ -598,13 +719,15 @@ function resolve!(mod::Module, ts::TestsetExpr, pat::Pattern;
     for tsc in ts.children
         runc, id = resolve!(mod, tsc, pat, force = !strict && ts.run,
                             shown=shown & ts.options.transient_verbose, static=static,
-                            depth=depth+1, verbose=verbose-1, id=id, strict=strict)
+                            depth=depth+1, verbose=verbose-1, id=id, strict=strict,
+                            ids=ids)
         run |= runc
         ts.descwidth = max(ts.descwidth, tsc.descwidth)
         if tsc.run
             ts.hasbrokenrec |= tsc.hasbrokenrec
         end
     end
+    pop!(ids)
     if !run || !shown
         ts.descwidth = 0
     end
@@ -1480,8 +1603,10 @@ function fetchtests((mod, pat), verbose, overall, maxidw; static, strict, dup)
     hasbroken = false
 
     id = 1
+    ids = Int64[]
     for ts in tests
-        run, id = resolve!(mod, ts, pat, verbose=verbose, id=id, strict=strict, static=static)
+        run, id = resolve!(mod, ts, pat, verbose=verbose, id=id, strict=strict,
+                           static=static, ids=ids)
         run || continue
         descwidth = max(descwidth, ts.descwidth)
         hasbroken |= ts.hasbrokenrec
@@ -1502,11 +1627,14 @@ end
 isindented(verbose, overall, many) = (verbose > 0) & (overall | !many)
 
 function dryrun(mod::Module, ts::TestsetExpr, pat::Pattern, align::Int=0, parentsubj=""
-                ; evaldesc=true, repeated=nothing, verbose, maxidw::Int)
+                ; verbose, maxidw::Int, # external calls
+                # only recursive calls:
+                evaldesc=true, repeated=nothing, ids::Vector{Int64}=Int64[])
     ts.run && verbose || return
     desc = ts.desc
 
     if ts.loops === nothing
+        push!(ids, ts.id)
         if evaldesc && !(desc isa String)
             try
                 desc = Core.eval(mod, desc)
@@ -1517,8 +1645,9 @@ function dryrun(mod::Module, ts::TestsetExpr, pat::Pattern, align::Int=0, parent
         subject = nothing
         if parentsubj isa String && desc isa String
             subject = parentsubj * '/' * desc
-            if isfinal(ts)
-                matches(pat, subject, ts.id) || return
+            if isfinal(ts) && !matches(pat, subject, ids)
+                pop!(ids)
+                return
             end
         end
 
@@ -1536,8 +1665,10 @@ function dryrun(mod::Module, ts::TestsetExpr, pat::Pattern, align::Int=0, parent
         end
         for tsc in ts.children
             dryrun(mod, tsc, pat, align + 2, subject, verbose=ts.options.transient_verbose,
-                   maxidw=maxidw)
+                   maxidw=maxidw, ids=ids)
         end
+        pop!(ids)
+        nothing
     else
         function dryrun_beginend(descx, repeated=nothing)
             # avoid repeating ourselves, transform this iteration into a "begin/end" testset
@@ -1560,7 +1691,7 @@ function dryrun(mod::Module, ts::TestsetExpr, pat::Pattern, align::Int=0, parent
             beginend.run = true
             beginend.id = ts.id
             dryrun(mod, beginend, pat, align, parentsubj; evaldesc=false,
-                   repeated=repeated, verbose=verbose, maxidw=maxidw)
+                   repeated=repeated, verbose=verbose, maxidw=maxidw, ids=ids)
         end
 
         loopvalues = ts.loopvalues
