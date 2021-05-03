@@ -1,5 +1,9 @@
 const PatternX = Union{Pattern, Regex, Integer}
 
+## Patterns
+
+### And
+
 struct And <: Pattern
     xs::Vector{PatternX}
 end
@@ -8,6 +12,9 @@ And() = And(PatternX[])
 and(xs...) = And(PatternX[make_pattern(x) for x in xs])
 
 ==(a::And, b::And) = a.xs == b.xs
+
+
+### Or
 
 struct Or <: Pattern
     xs::AbstractArray{<:PatternX}
@@ -18,11 +25,127 @@ or(xs...) = Or(PatternX[make_pattern(x) for x in xs])
 
 ==(a::Or, b::Or) = a.xs == b.xs
 
+
+### Not
+
 struct Not <: Pattern
     x::PatternX
 end
 
 ==(a::Not, b::Not) = a.x == b.x
+
+
+### Reachable
+
+struct Reachable <: Pattern
+    x::PatternX
+end
+
+
+### Interpolated
+
+struct Interpolated <: Pattern end
+
+
+## alwaysmatches
+
+alwaysmatches(pat::And) = all(alwaysmatches, pat.xs)
+
+alwaysmatches(pat::Or) =
+    if pat.xs isa AbstractArray{<:Integer}
+        false # special case for huge unit ranges; locally, this optimization seems
+              # unnecessary, i.e. alwaysmatches(Or(1:10...0)) is constant time anyway,
+              # but on CI, the any(...) below takes tooooo long
+    else
+        any(alwaysmatches, pat.xs)
+    end
+
+alwaysmatches(::Not) = false
+alwaysmatches(::Interpolated) = false
+alwaysmatches(rx::Regex) = isempty(rx.pattern)
+alwaysmatches(id::Integer) = false
+alwaysmatches(pat::Reachable) = alwaysmatches(pat.x)
+
+
+## matches
+
+matches(pat::And, x, ids) = all(p -> matches(p, x, ids), pat.xs)
+
+matches(pat::Or, x, ids) =
+    if pat.xs isa AbstractUnitRange{<:Integer} && minimum(pat.xs) >= 0
+        ids[end] ∈ pat.xs # this is optimised, i.e. it's not O(n)
+    else
+        any(p -> matches(p, x, ids), pat.xs)
+    end
+
+matches(pat::Not, x, ids) = !matches(pat.x, x, ids)
+matches(::Interpolated, x::Union{Missing,AbstractString}, ids) = x !== missing
+matches(rx::Regex, x, _) = occursin(rx, x)
+matches(rx::Regex, ::Missing, _) = alwaysmatches(rx) | missing
+matches(pat::Integer, _, ids) =
+    @inbounds pat >= 0 ?
+        pat == ids[end] :
+        pat != -ids[end]
+
+function matches(pat::Reachable, desc, ids::Vector{Int64})
+    if desc !== missing
+        desc = SubString(desc)
+    end
+    m = false
+    for d = length(ids):-1:1
+        @inbounds id = ids[d]
+        m |= matches(pat.x, desc, @view ids[1:d])
+        m === true && return true
+        if desc !== missing
+            desc = SubString(desc, 1, findlast('/', desc)-1)
+        end
+    end
+    m
+end
+
+
+## make_pattern
+
+make_pattern(x::PatternX) = x
+
+function make_pattern(str::AbstractString)
+    neg = false
+    if startswith(str, '-')
+        str = chop(str, head=1, tail=0)
+        if !startswith(str, '-')
+            neg = true
+        end
+    end
+
+    rx =
+        if isempty(str)
+            r"" # in order to know to match unconditionally
+        elseif VERSION >= v"1.3"
+            r""i * str
+        else
+            Regex(str, "i")
+        end
+    neg ? not(rx) : rx
+end
+
+make_pattern(pat::AbstractArray) = Or(PatternX[make_pattern(p) for p in pat])
+# special case for optimizing unit-ranges:
+make_pattern(pat::AbstractArray{<:Integer}) = Or(pat)
+make_pattern(@nospecialize(pat::Tuple)) = And(PatternX[make_pattern(p) for p in pat])
+
+
+## hasinteger
+
+hasinteger(::Regex) = false
+hasinteger(::Integer) = true
+hasinteger(pat::Union{And,Or}) = any(hasinteger, pat.xs)
+hasinteger(pat::Not) = hasinteger(pat.x)
+hasinteger(::Interpolated) = false
+hasinteger(pat::Reachable) = hasinteger(pat.x)
+
+
+## exported pattern functions & singletons
+
 
 """
     not(pattern)
@@ -36,106 +159,6 @@ and `not(1:3)` matches all the testsets but the first three of a module.
 """
 not(x) = Not(make_pattern(x))
 
-
-struct Reachable <: Pattern
-    x::PatternX
-end
-
-"""
-    reachable(pattern)
-
-Create a filtering pattern which matches any testset matching `pattern`
-or whose parent testset, if any, matches `reachable(pattern)`.
-In other words, if a testset matches `pattern`, all its recursive
-nested testsets will also match.
-
-When `pattern::String`, `reachable(pattern)` has the same effect as
-`pattern`, because the subject of a testset is contained in the
-subjects of all its nested testsets. So `reachable` is typically
-useful when `pattern` is an integer.
-
-# Examples
-```julia
-julia> module T
-       using ReTest
-       @testset "a" verbose=true begin
-           @test true
-           @testset "b" begin
-               @test true
-           end
-       end
-       @testset "c" begin
-           @test true
-       end
-       end;
-
-julia> retest(T, reachable(1), dry=true)
-1| a
-2|   b
-
-julia> retest(T, not(reachable(1)), dry=true)
-3| c
-```
-
-Note that the algorithm for `reachable` is currently not optimized, i.e.
-it will match `pattern` against all parents of a testset until success,
-even when this match was already performed earlier (i.e. the result
-of matching against `pattern` is not cached).
-
-Also, in the current implementation, the subject of a parent testset is
-inferred from the subject of a testset, by chopping off the last component,
-determined by the last occurrence of `'/'`. This has two consequences. It will
-produce incorrect results if the description of a testset contains `'/'`, and
-also, with [`interpolated`](@ref) when the subject is "unknown" due to
-un-interpolated descriptions. Consider the following example:
-
-```julia
-julia> module Fail
-       using ReTest
-       @testset "a" begin
-           x = 1
-           @testset "b\$x" begin
-               @testset "c" begin end
-           end
-       end
-       end;
-
-julia> retest(Fail, reachable(1), verbose=9, dry=true)
-1| a
-2|   "b\$(x)"
-3|     c
-
-julia> retest(Fail, reachable(interpolated), verbose=9, dry=true)
-1| a
-```
-
-Here, both testsets with id `2` and `3` have an unknown subject (at
-filtering time), which prevents the algorithm to detect that one of their
-parents (testset `1`) actually has an "interpolated" description.
-
-On the other hand, even with these unknown subjects, something like
-`reachable("a")` would work as expected:
-
-```julia
-julia> retest(Fail, reachable("a"), verbose=9, dry=true)
-1| a
-2|   "b\$(x)"
-3|     c
-
-julia> retest(Fail, reachable("a"), verbose=9, dry=true, static=true)
-1| a
-```
-
-!!! compat "Julia 1.3"
-    This function requires at least Julia 1.3.
-"""
-function reachable end
-
-if VERSION >= v"1.3"
-    reachable(x) = Reachable(make_pattern(x))
-end
-
-struct Interpolated <: Pattern end
 
 """
     interpolated
@@ -293,87 +316,97 @@ This results in the same selection whatever the value of `static` is.
 """
 const interpolated = Interpolated()
 
-alwaysmatches(pat::And) = all(alwaysmatches, pat.xs)
 
-alwaysmatches(pat::Or) =
-    if pat.xs isa AbstractArray{<:Integer}
-        false # special case for huge unit ranges; locally, this optimization seems
-              # unnecessary, i.e. alwaysmatches(Or(1:10...0)) is constant time anyway,
-              # but on CI, the any(...) below takes tooooo long
-    else
-        any(alwaysmatches, pat.xs)
-    end
+"""
+    reachable(pattern)
 
-alwaysmatches(::Not) = false
-alwaysmatches(::Interpolated) = false
-alwaysmatches(rx::Regex) = isempty(rx.pattern)
-alwaysmatches(id::Integer) = false
-alwaysmatches(pat::Reachable) = alwaysmatches(pat.x)
+Create a filtering pattern which matches any testset matching `pattern`
+or whose parent testset, if any, matches `reachable(pattern)`.
+In other words, if a testset matches `pattern`, all its recursive
+nested testsets will also match.
 
-matches(pat::And, x, ids) = all(p -> matches(p, x, ids), pat.xs)
+When `pattern::String`, `reachable(pattern)` has the same effect as
+`pattern`, because the subject of a testset is contained in the
+subjects of all its nested testsets. So `reachable` is typically
+useful when `pattern` is an integer.
 
-matches(pat::Or, x, ids) =
-    if pat.xs isa AbstractUnitRange{<:Integer} && minimum(pat.xs) >= 0
-        ids[end] ∈ pat.xs # this is optimised, i.e. it's not O(n)
-    else
-        any(p -> matches(p, x, ids), pat.xs)
-    end
+# Examples
+```julia
+julia> module T
+       using ReTest
+       @testset "a" verbose=true begin
+           @test true
+           @testset "b" begin
+               @test true
+           end
+       end
+       @testset "c" begin
+           @test true
+       end
+       end;
 
-matches(pat::Not, x, ids) = !matches(pat.x, x, ids)
-matches(::Interpolated, x::Union{Missing,AbstractString}, ids) = x !== missing
-matches(rx::Regex, x, _) = occursin(rx, x)
-matches(rx::Regex, ::Missing, _) = alwaysmatches(rx) | missing
-matches(pat::Integer, _, ids) =
-    @inbounds pat >= 0 ?
-        pat == ids[end] :
-        pat != -ids[end]
+julia> retest(T, reachable(1), dry=true)
+1| a
+2|   b
 
-function matches(pat::Reachable, desc, ids::Vector{Int64})
-    if desc !== missing
-        desc = SubString(desc)
-    end
-    m = false
-    for d = length(ids):-1:1
-        @inbounds id = ids[d]
-        m |= matches(pat.x, desc, @view ids[1:d])
-        m === true && return true
-        if desc !== missing
-            desc = SubString(desc, 1, findlast('/', desc)-1)
-        end
-    end
-    m
+julia> retest(T, not(reachable(1)), dry=true)
+3| c
+```
+
+Note that the algorithm for `reachable` is currently not optimized, i.e.
+it will match `pattern` against all parents of a testset until success,
+even when this match was already performed earlier (i.e. the result
+of matching against `pattern` is not cached).
+
+Also, in the current implementation, the subject of a parent testset is
+inferred from the subject of a testset, by chopping off the last component,
+determined by the last occurrence of `'/'`. This has two consequences. It will
+produce incorrect results if the description of a testset contains `'/'`, and
+also, with [`interpolated`](@ref) when the subject is "unknown" due to
+un-interpolated descriptions. Consider the following example:
+
+```julia
+julia> module Fail
+       using ReTest
+       @testset "a" begin
+           x = 1
+           @testset "b\$x" begin
+               @testset "c" begin end
+           end
+       end
+       end;
+
+julia> retest(Fail, reachable(1), verbose=9, dry=true)
+1| a
+2|   "b\$(x)"
+3|     c
+
+julia> retest(Fail, reachable(interpolated), verbose=9, dry=true)
+1| a
+```
+
+Here, both testsets with id `2` and `3` have an unknown subject (at
+filtering time), which prevents the algorithm to detect that one of their
+parents (testset `1`) actually has an "interpolated" description.
+
+On the other hand, even with these unknown subjects, something like
+`reachable("a")` would work as expected:
+
+```julia
+julia> retest(Fail, reachable("a"), verbose=9, dry=true)
+1| a
+2|   "b\$(x)"
+3|     c
+
+julia> retest(Fail, reachable("a"), verbose=9, dry=true, static=true)
+1| a
+```
+
+!!! compat "Julia 1.3"
+    This function requires at least Julia 1.3.
+"""
+function reachable end
+
+if VERSION >= v"1.3"
+    reachable(x) = Reachable(make_pattern(x))
 end
-
-make_pattern(x::PatternX) = x
-
-function make_pattern(str::AbstractString)
-    neg = false
-    if startswith(str, '-')
-        str = chop(str, head=1, tail=0)
-        if !startswith(str, '-')
-            neg = true
-        end
-    end
-
-    rx =
-        if isempty(str)
-            r"" # in order to know to match unconditionally
-        elseif VERSION >= v"1.3"
-            r""i * str
-        else
-            Regex(str, "i")
-        end
-    neg ? not(rx) : rx
-end
-
-make_pattern(pat::AbstractArray) = Or(PatternX[make_pattern(p) for p in pat])
-# special case for optimizing unit-ranges:
-make_pattern(pat::AbstractArray{<:Integer}) = Or(pat)
-make_pattern(@nospecialize(pat::Tuple)) = And(PatternX[make_pattern(p) for p in pat])
-
-hasinteger(::Regex) = false
-hasinteger(::Integer) = true
-hasinteger(pat::Union{And,Or}) = any(hasinteger, pat.xs)
-hasinteger(pat::Not) = hasinteger(pat.x)
-hasinteger(::Interpolated) = false
-hasinteger(pat::Reachable) = hasinteger(pat.x)
