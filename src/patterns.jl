@@ -44,6 +44,13 @@ end
 ==(a::Reachable, b::Reachable) = a.x == b.x
 
 
+### depth
+
+struct Depth <: Pattern
+    d::Int
+end
+
+
 ### Interpolated
 
 struct Interpolated <: Pattern end
@@ -51,22 +58,23 @@ struct Interpolated <: Pattern end
 
 ## alwaysmatches
 
-alwaysmatches(pat::And) = all(alwaysmatches, pat.xs)
+alwaysmatches(pat::And, d) = all(p -> alwaysmatches(p, d), pat.xs)
 
-alwaysmatches(pat::Or) =
+alwaysmatches(pat::Or, d) =
     if pat.xs isa AbstractArray{<:Integer}
         false # special case for huge unit ranges; locally, this optimization seems
               # unnecessary, i.e. alwaysmatches(Or(1:10...0)) is constant time anyway,
               # but on CI, the any(...) below takes tooooo long
     else
-        any(alwaysmatches, pat.xs)
+        any(p -> alwaysmatches(p, d), pat.xs)
     end
 
-alwaysmatches(::Not) = false
-alwaysmatches(::Interpolated) = false
-alwaysmatches(rx::Regex) = isempty(rx.pattern)
-alwaysmatches(id::Integer) = false
-alwaysmatches(pat::Reachable) = alwaysmatches(pat.x)
+alwaysmatches(::Not, _) = false
+alwaysmatches(::Interpolated, _) = false
+alwaysmatches(rx::Regex, _) = isempty(rx.pattern)
+alwaysmatches(id::Integer, _) = false
+alwaysmatches(pat::Reachable, d) = alwaysmatches(pat.x, d)
+alwaysmatches(dep::Depth, d) = dep.d == d
 
 
 ## matches
@@ -83,7 +91,7 @@ matches(pat::Or, x, ids) =
 matches(pat::Not, x, ids) = !matches(pat.x, x, ids)
 matches(::Interpolated, x::Union{Missing,AbstractString}, ids) = x !== missing
 matches(rx::Regex, x, _) = occursin(rx, x)
-matches(rx::Regex, ::Missing, _) = alwaysmatches(rx) | missing
+matches(rx::Regex, ::Missing, ids) = alwaysmatches(rx, length(ids)) | missing
 matches(pat::Integer, _, ids) =
     @inbounds pat >= 0 ?
         pat == ids[end] :
@@ -104,6 +112,8 @@ function matches(pat::Reachable, desc, ids::Vector{Int64})
     end
     m
 end
+
+matches(d::Depth, _, ids) = d.d == length(ids)
 
 
 ## make_pattern
@@ -144,6 +154,7 @@ hasinteger(pat::Union{And,Or}) = any(hasinteger, pat.xs)
 hasinteger(pat::Not) = hasinteger(pat.x)
 hasinteger(::Interpolated) = false
 hasinteger(pat::Reachable) = hasinteger(pat.x)
+hasinteger(::Depth) = false
 
 
 ## exported pattern functions & singletons
@@ -412,3 +423,48 @@ function reachable end
 if VERSION >= v"1.3"
     reachable(x) = Reachable(make_pattern(x))
 end
+
+"""
+    depth(d::Integer)
+
+Create a pattern which matches testsets at "depth" `d`.
+Toplevel testsets have depth `1`, their direct children
+(nested testsets) depth `2`, and so on.
+
+# Examples
+
+```julia
+julia> module Depth
+       using ReTest
+       @testset "1" begin
+           @testset "2" begin
+               @testset "3" begin end
+           end
+           @testset "4" begin end
+       end
+       end;
+
+julia> Depth.runtests(dry=true, verbose=3, depth(2))
+1| 1
+2|   2
+4|   4
+
+julia> Depth.runtests(dry=true, verbose=3, depth(3))
+1| 1
+2|   2
+3|     3
+
+julia> Depth.runtests(dry=true, verbose=3, reachable(depth(2)))
+1| 1
+2|   2
+3|     3
+4|   4
+
+julia> Depth.runtests(dry=true, verbose=3, depth.(2:3))
+1| 1
+2|   2
+3|     3
+4|   4
+```
+"""
+depth(x::Integer) = Depth(Int(x))

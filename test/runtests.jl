@@ -205,6 +205,35 @@ end # P
     check(P, r"d&E"i, "D&E")
 end
 
+
+# * Depth
+
+module Depth
+using ReTest, ..Trace
+@testset "1" begin
+    trace(1)
+    @testset "2" begin
+        trace(2)
+        @testset "3" begin
+            trace(3)
+        end
+    end
+    @testset "4" begin
+        trace(4)
+    end
+end
+end
+
+@chapter Depth begin
+    check(Depth, depth(2), [1, 2, 4])
+    check(Depth, depth(3), [1, 2, 3])
+    check(Depth, depth.(2:3), [1, 2, 3, 4])
+    if VERSION >= v"1.3"
+        check(Depth, reachable(depth(2)), [1, 2, 3, 4])
+    end
+end
+
+
 # * retest can be called on parent modules
 
 module Parent

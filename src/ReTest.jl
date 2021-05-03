@@ -1,6 +1,6 @@
 module ReTest
 
-export retest, @testset, not, interpolated, reachable
+export retest, @testset, not, interpolated, reachable, depth
 
 using Distributed
 using Base.Threads: nthreads
@@ -194,7 +194,6 @@ function resolve!(mod::Module, ts::TestsetExpr, pat::Pattern;
 
     strings = empty!(ts.strings)
     desc = ts.desc
-    ts.run = force | (static !== false) & alwaysmatches(pat)
     ts.loopvalues = nothing # unnecessary ?
     ts.loopiters = nothing
     if ts.id != 0
@@ -203,6 +202,7 @@ function resolve!(mod::Module, ts::TestsetExpr, pat::Pattern;
     ts.id = id
     push!(ids, id)
     id += 1
+    ts.run = force | (static !== false) & alwaysmatches(pat, length(ids))
 
     parentstrs = ts.parent === nothing ? [""] : ts.parent.strings
     ts.descwidth = 0
@@ -504,7 +504,8 @@ which allows to exclude testsets from being run.
 As a special case, the negation of an integer can be expressed as its arithmetic
 negation, e.g. `not(3)` is equivalent to `-3`.
 
-A pattern can also be the [`interpolated`](@ref) singleton object, cf. its docstring.
+Patterns can also be created via [`reachable`](@ref), [`interpolated`](@ref) and
+[`depth`](@ref).
 
 ### `Regex` filtering
 

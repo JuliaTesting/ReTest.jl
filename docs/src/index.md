@@ -62,6 +62,8 @@ CurrentModule = ReTest
 * [`retest`](@ref)
 * [`not`](@ref)
 * [`interpolated`](@ref)
+* [`reachable`](@ref)
+* [`depth`](@ref)
 * [`@testset`](@ref)
 * [`load`](@ref)
 * [`watch`](@ref)
@@ -70,6 +72,8 @@ CurrentModule = ReTest
 retest
 not
 interpolated
+reachable
+depth
 @testset
 load
 watch
