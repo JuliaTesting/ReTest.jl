@@ -193,10 +193,10 @@ struct Interpolated <: Pattern end
 """
     interpolated
 
-Singleton pattern which matches any testset whose description can be interpolated
+Singleton pattern which matches any testset whose subject can be interpolated
 "statically", i.e. at filtering time before testset are actually run.
-Non-inferrable descriptions include those containing interpolated values
-which can't be known until run time.
+Non-inferrable subjects include those constructed from descriptions
+containing interpolated values which can't be known until run time.
 This pattern has an effect closely related to that of the `static` keyword
 of [`retest`](@ref), discussed below, which is probably more generally useful.
 
@@ -243,7 +243,7 @@ have to run.
 
 So again, `interpolated` doesn't have the same effect at filtering time (like when
 `dry=true`) and at run time.
-For example, one can see the list of non-interpolated descriptions as follows with
+For example, one can see the list of non-interpolated subjects as follows with
 `dry=true`, but not run them (because everything is interpolated at run time):
 
 ```julia
@@ -267,9 +267,9 @@ e.g. `retest("other", dry=true, static=true)` and
 `retest("other", dry=true, interpolated)` give the same result.
 
 But in some cases we might want to filter out noisy testsets whose
-description can't be interpolated, but still include those which are
+subjects can't be interpolated, but still include those which are
 relevant. For example, assume we want to run testsets `1` and `2`,
-while excluding other testsets with uninterpolated descriptions:
+while excluding other testsets with uninterpolated subjects:
 ```julia
 julia> retest(1:2, dry=true, interpolated)
 Main
@@ -283,7 +283,7 @@ Main
 The solution with `interpolated` is not what we want, as we specifically
 want testset `2` to run. Given the filtering specifications (`1:2` here),
 the filtering algorithm can determine that `2` should run even though
-its description is unknown at this point.
+its subject is unknown at this point.
 
 Given a filtering specification, there are three kind of testsets:
 * "undecidable" (see above)
