@@ -65,6 +65,7 @@ CurrentModule = ReTest
 * [`reachable`](@ref)
 * [`depth`](@ref)
 * [`@testset`](@ref)
+* [`@testset_macro`](@ref)
 * [`load`](@ref)
 * [`watch`](@ref)
 
@@ -75,6 +76,7 @@ interpolated
 reachable
 depth
 @testset
+@testset_macro
 load
 watch
 ```

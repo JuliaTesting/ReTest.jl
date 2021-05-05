@@ -59,7 +59,7 @@ end
 Format(stats, desc_align) = Format(stats, desc_align, 0, 0, 0,0 ,0)
 
 mutable struct ReTestSet <: AbstractTestSet
-    mod::String # enclosing module
+    mod::Module # enclosing module
     description::AbstractString
     id::Int64
     ids::Vector{Int64} # shared instance in an id stack
@@ -453,17 +453,17 @@ end
 # regularly leads to confusing behavior
 
 # try to not mess up first three arguments!
-macro testset(mod::String, isfinal::Bool, pat::Pattern, x...)
+macro testset(mod::Module, isfinal::Bool, pat::Pattern, x...)
     error("invalid arguments")
 end
 
 # non-inline testset with regex filtering support
-macro testset(mod::String, isfinal::Bool, pat::Pattern, id::Int64, desc::Union{String,Expr}, options,
+macro testset(mod::Module, isfinal::Bool, pat::Pattern, id::Int64, desc::Union{String,Expr}, options,
               stats::Bool, chan, body)
     Testset.testset_beginend(mod, isfinal, pat, id, desc, options, stats, chan,  body, __source__)
 end
 
-macro testset(mod::String, isfinal::Bool, pat::Pattern, id::Int64, desc::Union{String,Expr}, options,
+macro testset(mod::Module, isfinal::Bool, pat::Pattern, id::Int64, desc::Union{String,Expr}, options,
               stats::Bool, chan, loops, body)
     Testset.testset_forloop(mod, isfinal, pat, id, desc, options,
                             stats, chan, loops, body, __source__)
@@ -472,7 +472,7 @@ end
 """
 Generate the code for a `@testset` with a `begin`/`end` argument
 """
-function testset_beginend(mod::String, isfinal::Bool, pat::Pattern, id::Int64, desc, options,
+function testset_beginend(mod::Module, isfinal::Bool, pat::Pattern, id::Int64, desc, options,
                           stats::Bool, chan, tests, source)
     # Generate a block of code that initializes a new testset, adds
     # it to the task local storage, evaluates the test(s), before
@@ -528,7 +528,7 @@ end
 """
 Generate the code for a `@testset` with a `for` loop argument
 """
-function testset_forloop(mod::String, isfinal::Bool, pat::Pattern, id::Int64,
+function testset_forloop(mod::Module, isfinal::Bool, pat::Pattern, id::Int64,
                          desc::Union{String,Expr}, options, stats, chan, loops, tests, source)
 
     desc = esc(desc)

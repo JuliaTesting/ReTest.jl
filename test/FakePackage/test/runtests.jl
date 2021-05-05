@@ -1,4 +1,7 @@
 using FakePackage, ReTest
+using ReTest: process_args, and
+import ReTest: Test
+include("../../setup.jl")
 
 retest(FakePackage, recursive=false)
 @test FakePackage.RUN == [1, 2]
@@ -17,7 +20,37 @@ retest(FakePackage, recursive=true)
 retest(FakePackage) # equivalent to recursive=true
 @test FakePackage.RUN == [1, 2, 1, 2, 1, 2, 3, 4, 1, 2, 3, 4]
 
-module Included
+Test.@testset "test macros" begin
+    empty!(FakePackage.FakeMacro.RUN)
+    retest(FakePackage, "test macro", verbose=9)
+    @test FakePackage.FakeMacro.RUN == [4, 2, 3]
+end
+
+# in the following, in FakePackage (not FakePackage.FakeMacro), the line `x = 3` is
+# shown because statically, we don't know that 4!=2, which is the condition for not
+# running the same macro on 3
+check(FakePackage, "test macro", verbose=9, id=false, dry=true, [], output="""
+FakePackage
+  test macro
+    inner
+      macro begin x = 4
+      macro for 1
+        plus
+      macro begin x = 3
+      macro for 1
+        plus
+
+FakePackage.FakeMacro
+  test macro
+    macro begin x = 2
+    macro for 1
+      plus
+    macro begin x = 3
+    macro for 1
+      plus
+""")
+
+module Included ############################################
 using ReTest
 RUN = []
 
@@ -29,24 +62,22 @@ RUN = []
         include(identity, joinpath(@__DIR__, "included.jl"))
     end
 end
-end
+end # Included ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 retest(Included)
 @test Included.RUN == (VERSION >= v"1.5" ? [0, 0, 0, 0] : [0, 0])
 
-include("../../setup.jl")
-
-using ReTest: process_args, and
-
 ReTest.Test.@testset "retest: load" begin
     @test process_args(()).modules == [
         FakePackage => and(),
+        FakePackage.FakeMacro => and(),
         FakePackage.Sub1 => and(),
         FakePackage.Sub2.SubSub => and(),
         Main.Included => and(),
     ]
     check([], dry=true, verbose=0, output = """
 FakePackage
+FakePackage.FakeMacro
 FakePackage.Sub1
 FakePackage.Sub2.SubSub
 Main.Included
@@ -54,6 +85,7 @@ Main.Included
 
     check([], dry=true, verbose=0, load=true, output = """
 FakePackage
+FakePackage.FakeMacro
 FakePackage.Sub1
 FakePackage.Sub2.SubSub
 Main.Included
@@ -70,6 +102,7 @@ Main.FakePackageTests
     @test process_args((FakePackage, 2)).modules ==
         [
             FakePackage => and(2),
+            FakePackage.FakeMacro => and(2),
             FakePackage.Sub1 => and(2),
             FakePackage.Sub2.SubSub => and(2),
         ]
@@ -97,6 +130,7 @@ Main.FakePackageTests
         [
             FakePackage => and(2),
             FakePackageTests => and(3),
+            FakePackage.FakeMacro => and(2),
             FakePackage.Sub1 => and(2),
             FakePackage.Sub2.SubSub => and(2),
             FakePackageTests.Sub => and(3),

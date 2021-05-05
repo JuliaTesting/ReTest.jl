@@ -1,6 +1,6 @@
 module ReTest
 
-export retest, @testset, not, interpolated, reachable, depth
+export retest, @testset, @testset_macro, not, interpolated, reachable, depth
 
 using Distributed
 using Base.Threads: nthreads
@@ -28,8 +28,8 @@ if isdefined(Test, :GenericOrder)
     using Test: GenericOrder
 end
 
-using InlineTest: @testset, InlineTest, TESTED_MODULES, INLINE_TEST
-import InlineTest: retest
+using InlineTest: @testset, InlineTest, TESTED_MODULES, TESTSET_MACROS, INLINE_TEST
+import InlineTest: retest, @testset_macro
 
 # * Pattern (pre)
 
@@ -60,7 +60,7 @@ end
 mutable struct TestsetExpr
     id::Int64 # unique ID per module (64 bits to be on the safe side)
     source::LineNumberNode
-    mod::String # enclosing module
+    mod::Module # enclosing module
     desc::Union{String,Expr}
     options::Options
     # loops: the original loop expression, if any, but where each `x=...` is
@@ -90,13 +90,23 @@ isfinal(ts::TestsetExpr) = isempty(ts.children)
 
 # replace unqualified `@testset` by TestsetExpr
 function replace_ts(source, mod, x::Expr, parent)
-    if x.head === :macrocall && x.args[1] === Symbol("@testset")
-        @assert x.args[2] isa LineNumberNode
-        ts, hasbroken = parse_ts(source, mod, Tuple(x.args[3:end]), parent)
-        parent !== nothing && push!(parent.children, ts)
-        ts, false # hasbroken counts only "proper" @test_broken, not recursive ones
-    elseif x.head === :macrocall && x.args[1] === Symbol("@test_broken")
-        x, true
+    if x.head === :macrocall
+        name = x.args[1]
+        if name === Symbol("@testset")
+            @assert x.args[2] isa LineNumberNode
+            ts, hasbroken = parse_ts(source, mod, Tuple(x.args[3:end]), parent)
+            parent !== nothing && push!(parent.children, ts)
+            ts, false # hasbroken counts only "proper" @test_broken, not recursive ones
+        elseif name === Symbol("@test_broken")
+            x, true
+        elseif name !== Symbol("@test") && name ∈ TESTSET_MACROS
+            # `@test` is generally called a lot, so it's probably worth it to skip
+            # the containment test in this case
+            x = macroexpand(mod, x, recursive=false)
+            replace_ts(source, mod, x, parent)
+        else
+            @goto default
+        end
     elseif x.head == :call && x.args[1] == :include
         path = x.args[end]
         sourcepath = dirname(string(source.file))
@@ -104,7 +114,7 @@ function replace_ts(source, mod, x::Expr, parent)
             joinpath(sourcepath, path) :
             :(joinpath($sourcepath, $path))
         x, false
-    else
+    else @label default
         body_br = map(z -> replace_ts(source, mod, z, parent), x.args)
         Expr(x.head, first.(body_br)...), any(last.(body_br))
     end
@@ -409,7 +419,7 @@ function updatetests!(mod::Module, dup::Bool)
     #      unless dup is true; if later on dup is false, we overwrite only
     #      the last version; should we delete all of the versions in this case?
     for (tsargs, source) in news
-        ts, hasbroken = parse_ts(source, string(mod), tsargs)
+        ts, hasbroken = parse_ts(source, mod, tsargs)
         idx = get!(map, ts.desc, length(tests) + 1)
         if idx == length(tests) + 1
             push!(tests, ts)
@@ -576,7 +586,7 @@ function retest(@nospecialize(args::ArgType...);
     implicitmodules, modules, verbose = process_args(args; verbose=verbose, shuffle=shuffle,
                                                      recursive=recursive, load=load)
     overall = length(modules) > 1
-    root = Testset.ReTestSet("", "Overall", overall=true)
+    root = Testset.ReTestSet(Main, "Overall", overall=true)
 
     maxidw = Ref{Int}(0) # visual width for showing IDs (Ref for mutability in hack below)
     tests_descs_hasbrokens = fetchtests.(modules, verbose, overall, Ref(maxidw);
@@ -661,7 +671,7 @@ function retest(@nospecialize(args::ArgType...);
         exception = Ref{Exception}()
         interrupted = Threads.Atomic{Bool}(false)
 
-        module_ts = Testset.ReTestSet("", string(mod) * ':', overall=true)
+        module_ts = Testset.ReTestSet(Main, string(mod) * ':', overall=true)
         push!(root.results, module_ts)
 
         many = length(tests) > 1 || isfor(tests[1]) # FIXME: isfor when only one iteration

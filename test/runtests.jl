@@ -969,6 +969,30 @@ end # DryRun2
 end
 
 
+# * @testset_macro ...........................................................
+
+
+macro ts_macro(x)
+    quote
+        @testset "ts_macro" begin
+            @test $x isa Int
+        end
+    end
+end
+@testset_macro @ts_macro
+@testset "toplevel: ts_macro" begin
+    @ts_macro 2
+end
+
+@chapter testset_macro begin
+    check(Main, "ts_macro", [], id=false, dry=true, static=true, verbose=2, output = """
+Main
+  toplevel: ts_macro
+    ts_macro
+""")
+end
+
+
 # * InlineTest ...............................................................
 
 using Pkg
