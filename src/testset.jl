@@ -495,7 +495,11 @@ function testset_beginend(mod::String, isfinal::Bool, pat::Pattern, id::Int64, d
             local oldrng = copy(RNG)
             try
                 # RNG is re-seeded with its own seed to ease reproduce a failed test
-                Random.seed!(RNG.seed)
+                if VERSION >= v"1.7.0-DEV.1225"
+                    Random.seed!(Random.GLOBAL_SEED)
+                else
+                    Random.seed!(RNG.seed)
+                end
                 let
                     ts.timed = @stats $stats $(esc(tests))
                 end
@@ -567,7 +571,11 @@ function testset_forloop(mod::String, isfinal::Bool, pat::Pattern, id::Int64,
         local ts
         local RNG = default_rng()
         local oldrng = copy(RNG)
-        Random.seed!(RNG.seed)
+        if VERSION >= v"1.7.0-DEV.1225"
+            Random.seed!(Random.GLOBAL_SEED)
+        else
+            Random.seed!(RNG.seed)
+        end
         local tmprng = copy(RNG)
         try
             let
