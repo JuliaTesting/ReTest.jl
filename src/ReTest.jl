@@ -683,13 +683,17 @@ function retest(@nospecialize(args::ArgType...);
 
         printlock = ReentrantLock()
         previewchan =
-            if stdout isa Base.TTY && (nthreads() > 1 || nprocs() > 1)
+            if stdout isa Base.TTY && (nthreads() > 1 && VERSION >= v"1.3" || nprocs() > 1)
                 RemoteChannel(() -> Channel{Maybe{String}}(Inf))
                 # needs to be "remote" in the case nprocs() == 2, as then nworkers() == 1,
                 # which means the one remote worker will put descriptions on previewchan
                 # (if nworkers() > 1, descriptions are not put because we can't predict
                 # the order in which they complete, and then the previewer will
                 # not show the descriptions, just the spinning wheel)
+
+                # on VERSION < v"1.3" : we can't call `thread_pin` (see below), and in this
+                # case previewing doesn't work well, as the worker and previewer tasks
+                # can end up in the same thread, and the previewer is not responsive
 
                 # channel size: if nworkers() == 1, then 2 would suffice (one for
                 # the "compilation step", one for @testset execution step, and then
@@ -955,7 +959,7 @@ function retest(@nospecialize(args::ArgType...);
         end # worker = @task begin ...
 
         try
-            if previewchan !== nothing && nthreads() > 1
+            if previewchan !== nothing && nthreads() > 1 && VERSION >= v"1.3"
                 # we try to keep thread #1 free of heavy work, so that the previewer stays
                 # responsive
                 tid = rand(2:nthreads())
