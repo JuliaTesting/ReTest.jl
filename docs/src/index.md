@@ -53,6 +53,110 @@ parent modules), say `M`, such that `M.runtests(...)` is equivalent to
 calling `retest(M, ...)`.
 
 
+## Quick start
+
+Both `ReTest` and `InlineTest` are registered packages and can be installed
+the usual way. Let's create a package `MyPackage`, which is initially a
+single file located in a directory known to `LOAD_PATH`. We want to test
+its `greet` function, by writing tests directly in the same file;
+this is a use-case for `InlineTest`, which loads faster than `ReTest`:
+```julia
+# MyPackage.jl file
+
+module MyPackage
+using InlineTest
+
+greet() = "Hello World!"
+
+@testset "greet" begin
+    @test greet() == "Hello World!"
+end
+
+end # module
+```
+
+Now, in a Julia session, we load `MyPackage` and `ReTest` (needed to actually
+run the tests):
+```julia
+julia> using MyPackage, ReTest
+
+julia> MyPackage.runtests()
+               Pass
+MyPackage:
+  greet    |      1
+```
+
+Suppose now that we organize `MyPackage` as a standard package, with
+a proper "runtests.jl" file. We can still keep testsets within "MyPackage.jl",
+while adding more thorough tests in the "test" folder, which can contain
+two files, "runtests.jl" and "MyPackageTests.jl":
+```julia
+# MyPackage/test/runtests.jl file
+
+using ReTest, MyPackage
+include("MyPackageTests.jl")
+
+# when including this file (e.g. with `Pkg.test`), all the tests
+# in both modules will be run:
+
+retest(MyPackage, MyPackageTests)
+```
+
+```julia
+# MyPackage/test/MyPackageTests.jl file
+
+module MyPackageTests
+using MyPackage, ReTest
+
+@testset "more greet" begin
+    @testset "concatenation" begin
+        @test MyPackage.greet()^2 == "Hello World!Hello World!"
+    end
+end
+
+@testset "stuff" begin
+    @test true
+end
+
+end # module
+```
+
+We can now load tests either via `using MyPackageTests`, if `LOAD_PATH` is configured
+appropriately, or via `include`, and run whichever tests we want:
+```julia
+julia> include("test/MyPackageTests.jl");
+
+julia> using ReTest # to use the `retest` function
+
+julia> retest(dry=true, verbose=2) # just list tests, showing nested ones
+MyPackage
+1| greet
+
+Main.MyPackageTests
+1| more greet
+2|   concatenation
+3| stuff
+
+julia> retest("greet", verbose=2) # run only tests related to `greet()`
+                         Pass
+MyPackage:
+  greet              |      1
+
+Main.MyPackageTests:
+  more greet         |      1
+    concatenation    |      1
+
+Overall              |      2
+
+julia> MyPackageTests.runtests(3) # run only testset with ID 3 in MyPackageTests
+                            Pass
+   Main.MyPackageTests:
+3|   stuff              |      1
+```
+
+Here it is for basic usage!
+
+
 ## API
 
 ```@meta
