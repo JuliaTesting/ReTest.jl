@@ -455,7 +455,7 @@ const ArgType = Union{Module,PatternX,AbstractString,AbstractArray,Tuple,Symbol,
            dry::Bool=false, stats::Bool=false, verbose::Real=true,
            [id::Bool], shuffle::Bool=false, recursive::Bool=true,
            static::Union{Bool,Nothing}=nothing, dup::Bool=false,
-           load::Bool=false)
+           load::Bool=false, [seed::Integer])
 
 Run tests declared with [`@testset`](@ref) blocks, within modules `mod` if specified,
 or within all currently loaded modules otherwise.
@@ -494,6 +494,8 @@ When no `pattern`s are specified, all the tests are run.
   one or more test modules (typically `ModTests`); these new test modules
   are associated to `Mod` (they inherit its pattern specification as
   above), and are cached and used again on subsequent invocations.
+* If `seed` is provided, it is used to seed the global RNG before running
+  the tests.
 
 
 ### Filtering
@@ -580,6 +582,7 @@ function retest(@nospecialize(args::ArgType...);
                 dup::Bool=false,
                 static::Maybe{Bool}=nothing,
                 load::Bool=false,
+                seed::Maybe{Integer}=nothing,
                 )
 
     dry, stats, shuffle, group, verbose, recursive, id, strict, dup, static =
@@ -866,6 +869,17 @@ function retest(@nospecialize(args::ArgType...);
                 put!(outchan, module_ts) # printer task will take care of feeding computechan
             else
                 @async put!(computechan, nothing)
+            end
+
+            if seed !== nothing
+                let includestr = """
+                                 using Random
+                                 Random.seed!($seed)
+                                 nothing
+                                 """
+                    # can't use `@everywhere using Random`, as here is not toplevel
+                    @everywhere Base.include_string(Main, $includestr)
+                end
             end
 
             @sync for wrkr in workers()

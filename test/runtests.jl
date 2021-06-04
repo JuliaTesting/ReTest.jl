@@ -796,6 +796,38 @@ Main.MV:
 """)
 end
 
+module MiscSeed
+using ReTest
+RAND1 = nothing
+RAND2 = nothing
+
+rand(UInt16)
+
+@testset "rand1" begin
+    global RAND1 = rand(UInt16)
+end
+
+@testset "rand2" begin
+    global RAND2 = rand(UInt16)
+end
+
+end
+
+@chapter MiscSeed begin
+    rands = VERSION < v"1.7-" ? [0x24ae, 0x837e] :
+            VERSION <= v"1.7" ? [0x1f33, 0x415f] :
+            error("update the seeds")
+
+    Test.@testset "seed" begin
+        MiscSeed.runtests(verbose=0, seed=1)
+        @test MiscSeed.RAND1 === MiscSeed.RAND2 === rands[1]
+        MiscSeed.runtests(verbose=0, seed=2)
+        @test MiscSeed.RAND1 === MiscSeed.RAND2 === rands[2]
+        # TODO: test in a distributed setting
+    end
+end
+
+
 # * Failing ..................................................................
 
 module Failing
