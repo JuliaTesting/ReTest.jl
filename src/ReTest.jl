@@ -617,9 +617,9 @@ function retest(@nospecialize(args::ArgType...);
         return
     end
 
-    id = something(id, dry | any(modules) do (mod, pat)
-                                 hasinteger(pat)
-                             end)
+    id = something(id, dry || any(modules) do (mod, pat)
+                                  hasinteger(pat)
+                              end)
     maxidw[] = id ? maxidw[] : 0
 
     for imod in eachindex(modules)
@@ -631,14 +631,17 @@ function retest(@nospecialize(args::ArgType...);
             shuffle!(tests)
 
         if dry
-            showmod = overall || implicitmodules
+            showmod = overall | implicitmodules
             if showmod
                 imod > 1 && verbose > 0 &&
                     println()
                 printstyled(mod, '\n', bold=true)
             end
-            foreach(ts -> dryrun(mod, ts, pat, id ? 0 : showmod*2,
-                                 verbose=verbose>0, maxidw = id ? maxidw[] : 0), tests)
+            if verbose > 0
+                foreach(ts -> dryrun(mod, ts, pat, id ? 0 : showmod*2,
+                                     maxidw = id ? maxidw[] : 0),
+                        tests)
+            end
             continue
         end
 
@@ -1278,10 +1281,10 @@ end
 isindented(verbose, overall, many) = (verbose > 0) & (overall | !many)
 
 function dryrun(mod::Module, ts::TestsetExpr, pat::Pattern, align::Int=0, parentsubj=""
-                ; verbose, maxidw::Int, # external calls
+                ; maxidw::Int, # external calls
                 # only recursive calls:
                 evaldesc=true, repeated=nothing, ids::Vector{Int64}=Int64[])
-    ts.run && verbose || return
+    @assert ts.run
     desc = ts.desc
 
     if ts.loops === nothing
@@ -1314,9 +1317,11 @@ function dryrun(mod::Module, ts::TestsetExpr, pat::Pattern, align::Int=0, parent
         else
             println()
         end
-        for tsc in ts.children
-            dryrun(mod, tsc, pat, align + 2, subject, verbose=ts.options.transient_verbose,
-                   maxidw=maxidw, ids=ids)
+        if ts.options.transient_verbose
+            for tsc in ts.children
+                tsc.run || continue
+                dryrun(mod, tsc, pat, align + 2, subject, maxidw=maxidw, ids=ids)
+            end
         end
         pop!(ids)
         nothing
@@ -1342,7 +1347,7 @@ function dryrun(mod::Module, ts::TestsetExpr, pat::Pattern, align::Int=0, parent
             beginend.run = true
             beginend.id = ts.id
             dryrun(mod, beginend, pat, align, parentsubj; evaldesc=false,
-                   repeated=repeated, verbose=verbose, maxidw=maxidw, ids=ids)
+                   repeated=repeated, maxidw=maxidw, ids=ids)
         end
 
         loopvalues = ts.loopvalues
