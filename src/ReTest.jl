@@ -198,7 +198,7 @@ end
 function resolve!(mod::Module, ts::TestsetExpr, pat::Pattern;
                   # external calls
                   verbose::Int, id::Int64, strict::Bool, static::Maybe{Bool},
-                  ids::Vector{Int64},
+                  ids::Vector{Int64}, warned::Ref{Bool},
                    # only recursive calls
                   force::Bool=false, shown::Bool=true, depth::Int=0)
 
@@ -206,8 +206,10 @@ function resolve!(mod::Module, ts::TestsetExpr, pat::Pattern;
     desc = ts.desc
     ts.loopvalues = nothing # unnecessary ?
     ts.loopiters = nothing
-    if ts.id != 0
-        @assert ts.id == id
+    if 0 != ts.id != id && !warned[] && hasinteger(pat)
+        # this can happen when nested testsets are added and Revise is active
+        @warn "testset IDs have changed since last run"
+        warned[] = true
     end
     ts.id = id
     push!(ids, id)
@@ -348,7 +350,7 @@ function resolve!(mod::Module, ts::TestsetExpr, pat::Pattern;
         runc, id = resolve!(mod, tsc, pat, force = !strict && ts.run,
                             shown=shown & ts.options.transient_verbose, static=static,
                             depth=depth+1, verbose=verbose-1, id=id, strict=strict,
-                            ids=ids)
+                            ids=ids, warned=warned)
         run |= runc
         ts.descwidth = max(ts.descwidth, tsc.descwidth)
         if tsc.run
@@ -1233,9 +1235,11 @@ function fetchtests((mod, pat), verbose, overall, maxidw; static, strict, dup)
 
     id = 1
     ids = Int64[]
+    warned = Ref(false)
+
     for ts in tests
         run, id = resolve!(mod, ts, pat, verbose=verbose, id=id, strict=strict,
-                           static=static, ids=ids)
+                           static=static, ids=ids, warned=warned)
         run || continue
         descwidth = max(descwidth, ts.descwidth)
         hasbroken |= ts.hasbrokenrec
