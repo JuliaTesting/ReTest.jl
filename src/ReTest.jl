@@ -590,7 +590,7 @@ function retest(@nospecialize(args::ArgType...);
 
     implicitmodules, modules, verbose = process_args(args; verbose=verbose, shuffle=shuffle,
                                                      recursive=recursive, load=load)
-    overall = length(modules) > 1
+    overall = implicitmodules || length(modules) > 1
     root = Testset.ReTestSet(Main, "Overall", overall=true)
 
     maxidw = Ref{Int}(0) # visual width for showing IDs (Ref for mutability in hack below)
