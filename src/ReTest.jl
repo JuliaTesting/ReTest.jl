@@ -617,9 +617,10 @@ function retest(@nospecialize(args::ArgType...);
         return
     end
 
-    id = something(id, dry || any(modules) do (mod, pat)
-                                  hasinteger(pat)
-                              end)
+    id = verbose > 0 && something(id, dry || any(modules) do (mod, pat)
+                                                 hasinteger(pat)
+                                             end)
+
     maxidw[] = id ? maxidw[] : 0
 
     for imod in eachindex(modules)
