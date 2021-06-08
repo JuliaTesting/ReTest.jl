@@ -590,11 +590,13 @@ function retest(@nospecialize(args::ArgType...);
 
     implicitmodules, modules, verbose = process_args(args; verbose=verbose, shuffle=shuffle,
                                                      recursive=recursive, load=load)
-    overall = implicitmodules || length(modules) > 1
+    # overall: print header for each module, and "Overall" summary for all modules
+    overall = length(modules) > 1
+    moduleheader = overall | implicitmodules
     root = Testset.ReTestSet(Main, "Overall", overall=true)
 
     maxidw = Ref{Int}(0) # visual width for showing IDs (Ref for mutability in hack below)
-    tests_descs_hasbrokens = fetchtests.(modules, verbose, overall, Ref(maxidw);
+    tests_descs_hasbrokens = fetchtests.(modules, verbose, moduleheader, Ref(maxidw);
                                          strict=strict, dup=dup, static=static)
     isempty(tests_descs_hasbrokens) &&
         throw(ArgumentError("no modules using ReTest could be found"))
@@ -632,14 +634,13 @@ function retest(@nospecialize(args::ArgType...);
             shuffle!(tests)
 
         if dry
-            showmod = overall | implicitmodules
-            if showmod
+            if moduleheader
                 imod > 1 && verbose > 0 &&
                     println()
                 printstyled(mod, '\n', bold=true)
             end
             if verbose > 0
-                foreach(ts -> dryrun(mod, ts, pat, id ? 0 : showmod*2,
+                foreach(ts -> dryrun(mod, ts, pat, id ? 0 : moduleheader*2,
                                      maxidw = id ? maxidw[] : 0),
                         tests)
             end
@@ -755,7 +756,7 @@ function retest(@nospecialize(args::ArgType...);
                                 description = desc
                                 style = NamedTuple()
                             end
-                            if isindented(verbose, overall, many)
+                            if isindented(verbose, moduleheader, many)
                                 description = "  " * description
                             end
                             cursor += 1
@@ -841,7 +842,8 @@ function retest(@nospecialize(args::ArgType...);
                             clear_line()
                             Testset.print_test_results(
                                 rts, format;
-                                depth = Int(!rts.overall & isindented(verbose, overall, many)),
+                                depth = Int(!rts.overall &
+                                            isindented(verbose, moduleheader, many)),
                                 bold = rts.overall | !many,
                                 hasbroken=hasbroken,
                                 maxidw=maxidw[]
@@ -868,8 +870,8 @@ function retest(@nospecialize(args::ArgType...);
 
             ndone = 0
 
-            if overall || !many
-                # + if overall, we print the module as a header, to know where the currently
+            if moduleheader | !many
+                # + if moduleheader, we print the module as a header, to know where the currently
                 #   printed testsets belong
                 # + if !many, we won't print the overall afterwads, which would be redundant
                 #   with the only one printed top-level testset
@@ -1250,7 +1252,7 @@ function update_TESTED_MODULES!(double_check::Bool=false)
     TESTED_MODULES
 end
 
-function fetchtests((mod, pat), verbose, overall, maxidw; static, strict, dup)
+function fetchtests((mod, pat), verbose, moduleheader, maxidw; static, strict, dup)
     tests = updatetests!(mod, dup)
     descwidth = 0
     hasbroken = false
@@ -1270,7 +1272,7 @@ function fetchtests((mod, pat), verbose, overall, maxidw; static, strict, dup)
 
     tests = filter(ts -> ts.run, tests)
     many = length(tests) > 1
-    indented = isindented(verbose, overall, many)
+    indented = isindented(verbose, moduleheader, many)
 
     if indented
         descwidth += 2
@@ -1279,7 +1281,7 @@ function fetchtests((mod, pat), verbose, overall, maxidw; static, strict, dup)
     tests, descwidth, hasbroken
 end
 
-isindented(verbose, overall, many) = (verbose > 0) & (overall | !many)
+isindented(verbose, moduleheader, many) = (verbose > 0) & (moduleheader | !many)
 
 function dryrun(mod::Module, ts::TestsetExpr, pat::Pattern, align::Int=0, parentsubj=""
                 ; maxidw::Int, # external calls
