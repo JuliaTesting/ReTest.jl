@@ -789,10 +789,9 @@ end # MV
 
 @chapter MiscVerbose begin
     check(MV, [], output = """
-               Pass
-Main.MV:
-  outer    |      2
-    inner  |      1
+             Pass
+outer    |      2
+  inner  |      1
 """)
 end
 

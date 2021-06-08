@@ -870,11 +870,9 @@ function retest(@nospecialize(args::ArgType...);
 
             ndone = 0
 
-            if moduleheader | !many
+            if moduleheader
                 # + if moduleheader, we print the module as a header, to know where the currently
                 #   printed testsets belong
-                # + if !many, we won't print the overall afterwads, which would be redundant
-                #   with the only one printed top-level testset
                 ntests += 1
                 put!(outchan, module_ts) # printer task will take care of feeding computechan
             else
@@ -1281,7 +1279,7 @@ function fetchtests((mod, pat), verbose, moduleheader, maxidw; static, strict, d
     tests, descwidth, hasbroken
 end
 
-isindented(verbose, moduleheader, many) = (verbose > 0) & (moduleheader | !many)
+isindented(verbose, moduleheader, many) = (verbose > 0) & moduleheader
 
 function dryrun(mod::Module, ts::TestsetExpr, pat::Pattern, align::Int=0, parentsubj=""
                 ; maxidw::Int, # external calls

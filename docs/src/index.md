@@ -81,9 +81,8 @@ run the tests):
 julia> using MyPackage, ReTest
 
 julia> MyPackage.runtests()
-               Pass
-MyPackage:
-  greet    |      1
+             Pass
+greet    |      1
 ```
 
 Suppose now that we organize `MyPackage` as a standard package, with
@@ -149,9 +148,8 @@ Main.MyPackageTests:
 Overall              |      2
 
 julia> MyPackageTests.runtests(3) # run only testset with ID 3 in MyPackageTests
-                            Pass
-   Main.MyPackageTests:
-3|   stuff              |      1
+                          Pass
+3| stuff              |      1
 ```
 
 Here it is for basic usage!
