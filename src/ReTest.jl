@@ -590,21 +590,18 @@ function retest(@nospecialize(args::ArgType...);
 
     implicitmodules, modules, verbose = process_args(args; verbose=verbose, shuffle=shuffle,
                                                      recursive=recursive, load=load)
-    # overall: print header for each module, and "Overall" summary for all modules
+    # overall: print header for each module, and probably "Overall" summary for all modules
     overall = length(modules) > 1
-    moduleheader = overall | implicitmodules
+    module_header = overall | implicitmodules
     root = Testset.ReTestSet(Main, "Overall", overall=true)
 
     maxidw = Ref{Int}(0) # visual width for showing IDs (Ref for mutability in hack below)
-    tests_descs_hasbrokens = fetchtests.(modules, verbose, moduleheader, Ref(maxidw);
+    tests_descs_hasbrokens = fetchtests.(modules, verbose, module_header, Ref(maxidw);
                                          strict=strict, dup=dup, static=static)
     isempty(tests_descs_hasbrokens) &&
         throw(ArgumentError("no modules using ReTest could be found"))
 
     alltests = first.(tests_descs_hasbrokens)
-    descwidth = max(textwidth(root.description),
-                    maximum(x->x[2], tests_descs_hasbrokens))
-    format = Format(stats, descwidth)
     hasbroken = any(last.(tests_descs_hasbrokens))
 
     emptymods = findall(isempty, alltests)
@@ -623,6 +620,13 @@ function retest(@nospecialize(args::ArgType...);
                                                  hasinteger(pat)
                                              end)
 
+    descwidth = maximum(x->x[2], tests_descs_hasbrokens)
+    if nmodules > 1 # might be different to overall, if !isempty(emptymods)
+                    # this is the condition for printing "Overall" summary
+        descwidth = max(descwidth, textwidth(root.description))
+    end
+    format = Format(stats, descwidth)
+
     maxidw[] = id ? maxidw[] : 0
 
     for imod in eachindex(modules)
@@ -634,13 +638,13 @@ function retest(@nospecialize(args::ArgType...);
             shuffle!(tests)
 
         if dry
-            if moduleheader
+            if module_header
                 imod > 1 && verbose > 0 &&
                     println()
                 printstyled(mod, '\n', bold=true)
             end
             if verbose > 0
-                foreach(ts -> dryrun(mod, ts, pat, id ? 0 : moduleheader*2,
+                foreach(ts -> dryrun(mod, ts, pat, id ? 0 : module_header*2,
                                      maxidw = id ? maxidw[] : 0),
                         tests)
             end
@@ -756,7 +760,7 @@ function retest(@nospecialize(args::ArgType...);
                                 description = desc
                                 style = NamedTuple()
                             end
-                            if isindented(verbose, moduleheader, many)
+                            if isindented(verbose, module_header, many)
                                 description = "  " * description
                             end
                             cursor += 1
@@ -799,7 +803,7 @@ function retest(@nospecialize(args::ArgType...);
                 finito = false
 
                 print_overall() =
-                    if many || verbose == 0
+                    if module_summary(verbose, many)
                         @assert endswith(module_ts.description, ':')
                         module_ts.description = chop(module_ts.description, tail=1)
                         clear_line()
@@ -843,7 +847,7 @@ function retest(@nospecialize(args::ArgType...);
                             Testset.print_test_results(
                                 rts, format;
                                 depth = Int(!rts.overall &
-                                            isindented(verbose, moduleheader, many)),
+                                            isindented(verbose, module_header, many)),
                                 bold = rts.overall | !many,
                                 hasbroken=hasbroken,
                                 maxidw=maxidw[]
@@ -870,8 +874,8 @@ function retest(@nospecialize(args::ArgType...);
 
             ndone = 0
 
-            if moduleheader
-                # + if moduleheader, we print the module as a header, to know where the currently
+            if module_header
+                # + if module_header, we print the module as a header, to know where the currently
                 #   printed testsets belong
                 ntests += 1
                 put!(outchan, module_ts) # printer task will take care of feeding computechan
@@ -1250,7 +1254,7 @@ function update_TESTED_MODULES!(double_check::Bool=false)
     TESTED_MODULES
 end
 
-function fetchtests((mod, pat), verbose, moduleheader, maxidw; static, strict, dup)
+function fetchtests((mod, pat), verbose, module_header, maxidw; static, strict, dup)
     tests = updatetests!(mod, dup)
     descwidth = 0
     hasbroken = false
@@ -1270,16 +1274,21 @@ function fetchtests((mod, pat), verbose, moduleheader, maxidw; static, strict, d
 
     tests = filter(ts -> ts.run, tests)
     many = length(tests) > 1
-    indented = isindented(verbose, moduleheader, many)
+    indented = isindented(verbose, module_header, many)
 
-    if indented
-        descwidth += 2
+    if !isempty(tests)
+        if indented
+            descwidth += 2
+        end
+        if module_header || module_summary(verbose, many)
+            descwidth = max(descwidth, textwidth(string(mod)) + module_header) # +1 for ':'
+        end
     end
-    descwidth = max(descwidth, textwidth(string(mod)) + indented)
     tests, descwidth, hasbroken
 end
 
-isindented(verbose, moduleheader, many) = (verbose > 0) & moduleheader
+isindented(verbose, module_header, many) = (verbose > 0) & module_header
+module_summary(verbose, many) = many | iszero(verbose)
 
 function dryrun(mod::Module, ts::TestsetExpr, pat::Pattern, align::Int=0, parentsubj=""
                 ; maxidw::Int, # external calls
