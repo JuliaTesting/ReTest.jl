@@ -6,4 +6,5 @@ makedocs(sitename = "ReTest.jl",
 
 deploydocs(
     repo = "github.com/JuliaTesting/ReTest.jl.git",
+    push_preview = true,
 )
