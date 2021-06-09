@@ -88,6 +88,10 @@ end
 isfor(ts::TestsetExpr) = ts.loops !== nothing
 isfinal(ts::TestsetExpr) = isempty(ts.children)
 
+struct _Invalid
+    global const invalid = _Invalid.instance
+end
+
 # replace unqualified `@testset` by TestsetExpr
 function replace_ts(source, mod, x::Expr, parent)
     if x.head === :macrocall
@@ -95,7 +99,7 @@ function replace_ts(source, mod, x::Expr, parent)
         if name === Symbol("@testset")
             @assert x.args[2] isa LineNumberNode
             ts, hasbroken = parse_ts(x.args[2], mod, Tuple(x.args[3:end]), parent)
-            ts !== nothing && parent !== nothing && push!(parent.children, ts)
+            ts !== invalid && parent !== nothing && push!(parent.children, ts)
             ts, false # hasbroken counts only "proper" @test_broken, not recursive ones
         elseif name === Symbol("@test_broken")
             x, true
@@ -116,7 +120,7 @@ function replace_ts(source, mod, x::Expr, parent)
         x, false
     else @label default
         body_br = map(z -> replace_ts(source, mod, z, parent), x.args)
-        filter!(x -> first(x) !== nothing, body_br)
+        filter!(x -> first(x) !== invalid, body_br)
         Expr(x.head, first.(body_br)...), any(last.(body_br))
     end
 end
@@ -127,7 +131,7 @@ replace_ts(source, mod, x, _) = x, false
 function parse_ts(source::LineNumberNode, mod::Module, args::Tuple, parent=nothing)
     function tserror(msg)
         @error msg _file=String(source.file) _line=source.line _module=mod
-        nothing, false
+        invalid, false
     end
 
     isempty(args) &&
@@ -433,7 +437,7 @@ function updatetests!(mod::Module, dup::Bool)
     #      the last version; should we delete all of the versions in this case?
     for (tsargs, source) in news
         ts, hasbroken = parse_ts(source, mod, tsargs)
-        ts === nothing && continue
+        ts === invalid && continue
         idx = get!(map, ts.desc, length(tests) + 1)
         if idx == length(tests) + 1
             push!(tests, ts)

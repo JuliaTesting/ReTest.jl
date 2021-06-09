@@ -826,6 +826,21 @@ end
     end
 end
 
+module Bugs
+using ReTest
+@testset "macros with nothing" begin
+    # in parse_ts(), we were returning `nothing` to mean invalid testset,
+    # and then filtering out those; but some `Expr`s have meaningful
+    # `nothing` literals which must *not* be filtered out, e.g.
+    # the `@int128_str` macro:
+    @test 24_061_467_864_032_622_473_692_149_727_991 isa Integer
+end
+end # Bugs
+
+@chapter Bugs begin
+    check(Bugs, [])
+end
+
 
 module TestsetErrors
 using ReTest
@@ -837,7 +852,7 @@ using ReTest
 @testset "d" let; end
 end
 
-@chapter "TestsetErrors" begin
+@chapter TestsetErrors begin
     Test.@testset "TestsetErrors" begin
         @test_logs (
             :error, "expected begin/end block or for loop as argument to @testset") (
