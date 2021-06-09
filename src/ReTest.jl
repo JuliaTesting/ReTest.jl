@@ -94,8 +94,8 @@ function replace_ts(source, mod, x::Expr, parent)
         name = x.args[1]
         if name === Symbol("@testset")
             @assert x.args[2] isa LineNumberNode
-            ts, hasbroken = parse_ts(source, mod, Tuple(x.args[3:end]), parent)
-            parent !== nothing && push!(parent.children, ts)
+            ts, hasbroken = parse_ts(x.args[2], mod, Tuple(x.args[3:end]), parent)
+            ts !== nothing && parent !== nothing && push!(parent.children, ts)
             ts, false # hasbroken counts only "proper" @test_broken, not recursive ones
         elseif name === Symbol("@test_broken")
             x, true
@@ -116,6 +116,7 @@ function replace_ts(source, mod, x::Expr, parent)
         x, false
     else @label default
         body_br = map(z -> replace_ts(source, mod, z, parent), x.args)
+        filter!(x -> first(x) !== nothing, body_br)
         Expr(x.head, first.(body_br)...), any(last.(body_br))
     end
 end
@@ -123,23 +124,30 @@ end
 replace_ts(source, mod, x, _) = x, false
 
 # create a TestsetExpr from @testset's args
-function parse_ts(source, mod, args::Tuple, parent=nothing)
+function parse_ts(source::LineNumberNode, mod::Module, args::Tuple, parent=nothing)
+    function tserror(msg)
+        @error msg _file=String(source.file) _line=source.line _module=mod
+        nothing, false
+    end
+
     local desc
     options = Options()
     for arg in args[1:end-1]
         if arg isa String || Meta.isexpr(arg, :string)
             desc = arg
         elseif Meta.isexpr(arg, :(=))
-            arg.args[1] in fieldnames(Options) || error("unsupported @testset option")
+            arg.args[1] in fieldnames(Options) ||
+                return tserror("unsupported @testset option")
             # TODO: make that work with non-literals:
             setfield!(options, arg.args[1], arg.args[2])
         else
-            error("unsupported @testset")
+            return tserror("unsupported @testset")
         end
     end
 
     body = args[end]
-    isa(body, Expr) || error("Expected begin/end block or for loop as argument to @testset")
+    isa(body, Expr) ||
+        return tserror("expected begin/end block or for loop as argument to @testset")
     if body.head === :for
         tsbody = body.args[2]
         loops = body.args[1]
@@ -165,7 +173,7 @@ function parse_ts(source, mod, args::Tuple, parent=nothing)
             desc = "anonym $(randstring('0':'9'))"
         end
     else
-        error("Expected begin/end block or for loop as argument to @testset")
+        return tserror("expected begin/end block or for loop as argument to @testset")
     end
 
     ts = TestsetExpr(source, mod, desc, options, loops, parent)
@@ -422,6 +430,7 @@ function updatetests!(mod::Module, dup::Bool)
     #      the last version; should we delete all of the versions in this case?
     for (tsargs, source) in news
         ts, hasbroken = parse_ts(source, mod, tsargs)
+        ts === nothing && continue
         idx = get!(map, ts.desc, length(tests) + 1)
         if idx == length(tests) + 1
             push!(tests, ts)
