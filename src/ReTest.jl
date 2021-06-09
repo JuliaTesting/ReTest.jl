@@ -130,6 +130,9 @@ function parse_ts(source::LineNumberNode, mod::Module, args::Tuple, parent=nothi
         nothing, false
     end
 
+    isempty(args) &&
+        return tserror("expected begin/end block or for loop as argument to @testset")
+
     local desc
     options = Options()
     for arg in args[1:end-1]

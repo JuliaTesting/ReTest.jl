@@ -830,6 +830,7 @@ end
 module TestsetErrors
 using ReTest
 
+@testset
 @testset "a" notexistingoption=0 begin end
 @testset "b" {badsyntax} begin end
 @testset "c"
@@ -839,6 +840,7 @@ end
 @chapter "TestsetErrors" begin
     Test.@testset "TestsetErrors" begin
         @test_logs (
+            :error, "expected begin/end block or for loop as argument to @testset") (
             :error, "unsupported @testset option") (
             :error, "unsupported @testset" ) (
             :error, "expected begin/end block or for loop as argument to @testset") (
