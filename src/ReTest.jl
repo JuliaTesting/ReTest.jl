@@ -475,7 +475,7 @@ const ArgType = Union{Module,PatternX,AbstractString,AbstractArray,Tuple,Symbol,
 
 Run tests declared with [`@testset`](@ref) blocks, within modules `mod` if specified,
 or within all currently loaded modules otherwise.
-When no `pattern`s are specified, all the tests are run.
+Filtering `pattern`s can be specified to run only a subset of the tests.
 
 ### Keywords
 
@@ -543,19 +543,19 @@ The "subject" of a testset is the concatenation of the subject of its parent `@t
 if any, with `"/\$description"` where `description` is the testset's description.
 For example:
 ```julia
-@testset "a" begin # subject == "/a"
+@testset "a" begin # subject is "/a"
     @testset "b" begin # subject is "/a/b"
     end
-    @testset "c\$i" for i=1:2 # subjects are "/a/c1" & "/a/c2"
+    @testset "c\$i" for i=1:2 # subjects are "/a/c1" and "/a/c2"
     end
 end
 ```
 
-When `pattern` isa a `Regex`, a testset is guaranteed to run only when its subject
- matches `pattern`.
-Moreover, even if a testset matches (e.g. "/a" above with `pattern == r"a\$"`),
+When `pattern` is a `Regex`, a testset is guaranteed to run only when its subject
+matches `pattern`.
+Moreover, even if a testset matches (e.g. `"/a"` above with `pattern == r"a\$"`),
 its nested testsets might be filtered out if they don't also match
-(e.g. "a/b" doesn't match `pattern`).
+(e.g. `"a/b"` doesn't match `pattern`).
 
 If a passed `pattern` is a string, then it is wrapped in a `Regex` with the
 "case-insensitive" flag, and must match literally the subjects.
@@ -583,7 +583,7 @@ of `mod`; if `sub` is also specified as `sub => subpat`, the patterns are merged
 i.e. this is equivalent to specifying `sub => (pattern, subpat)`.
 
 !!! note
-    this function executes each (top-level) `@testset` block using `eval` *within* the
+    This function executes each (top-level) `@testset` block using `eval` *within* the
     module in which it was written (e.g. `mod`, when specified).
 """
 function retest(@nospecialize(args::ArgType...);
@@ -593,7 +593,7 @@ function retest(@nospecialize(args::ArgType...);
                 group::Bool=true,
                 verbose::Real=true, # should be @nospecialize, but not supported on old Julia
                 recursive::Bool=true,
-                id=nothing,
+                id::Maybe{Bool}=nothing,
                 strict::Bool=true,
                 dup::Bool=false,
                 static::Maybe{Bool}=nothing,
