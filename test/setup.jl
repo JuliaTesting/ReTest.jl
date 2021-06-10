@@ -12,9 +12,10 @@ function trace(x)
 end
 end
 
+# NOTE: all keywords have the same defaults as `retest`, except `marks`
 function check(x...; runtests=false, output::Union{Nothing,String}=nothing,
                verbose=true, stats=false, dry=false, strict::Bool=true,
-               recursive=true, static=nothing, id=nothing, load=false)
+               recursive=true, static=nothing, id=nothing, load=false, marks::Bool=false)
     @assert !(runtests & (output !== nothing)) "unimplemented"
     args = x[1:end-1]
     expected = x[end]
@@ -26,15 +27,15 @@ function check(x...; runtests=false, output::Union{Nothing,String}=nothing,
     if runtests
         getfield(args[1], :runtests)(args[2:end]...; verbose=verbose, stats=stats, dry=dry,
                                      strict=strict, recursive=recursive, static=static,
-                                     id=id, load=load)
+                                     id=id, load=load, marks=marks)
     elseif output === nothing
         retest(args...; verbose=verbose, stats=stats, dry=dry, strict=strict,
-               recursive=recursive, static=static, id=id, load=load)
+               recursive=recursive, static=static, id=id, load=load, marks=marks)
     else
         mktemp() do path, io
             redirect_stdout(io) do
                 retest(args...; verbose=verbose, stats=stats, dry=dry, strict=strict,
-                       recursive=recursive, static=static, id=id, load=load)
+                       recursive=recursive, static=static, id=id, load=load, marks=marks)
             end
             seekstart(io)
             printed = join(map(rstrip, split(readchomp(io), '\n')), '\n')

@@ -310,6 +310,8 @@ function get_test_counts(ts::ReTestSet)
     return passes, fails, errors, broken, c_passes, c_fails, c_errors, c_broken
 end
 
+anyfailed(ts::ReTestSet) = any(t -> t isa Union{Fail,Error}, ts.results)
+
 # Recursive function that prints out the results at each level of
 # the tree of test sets
 function print_counts(ts::ReTestSet, fmt::Format, depth, align,
@@ -458,22 +460,23 @@ macro testset(mod::Module, isfinal::Bool, pat::Pattern, x...)
 end
 
 # non-inline testset with regex filtering support
-macro testset(mod::Module, isfinal::Bool, pat::Pattern, id::Int64, desc::Union{String,Expr}, options,
-              stats::Bool, chan, body)
-    Testset.testset_beginend(mod, isfinal, pat, id, desc, options, stats, chan,  body, __source__)
+macro testset(mod::Module, isfinal::Bool, pat::Pattern, id::Int64, desc::Union{String,Expr},
+              options, results::Dict, stats::Bool, chan, body)
+    Testset.testset_beginend(mod, isfinal, pat, id, desc,
+                             options, results, stats, chan, body, __source__)
 end
 
-macro testset(mod::Module, isfinal::Bool, pat::Pattern, id::Int64, desc::Union{String,Expr}, options,
-              stats::Bool, chan, loops, body)
-    Testset.testset_forloop(mod, isfinal, pat, id, desc, options,
-                            stats, chan, loops, body, __source__)
+macro testset(mod::Module, isfinal::Bool, pat::Pattern, id::Int64, desc::Union{String,Expr},
+              options, results::Dict, stats::Bool, chan, loops, body)
+    Testset.testset_forloop(mod, isfinal, pat, id, desc,
+                            options, results, stats, chan, loops, body, __source__)
 end
 
 """
 Generate the code for a `@testset` with a `begin`/`end` argument
 """
 function testset_beginend(mod::Module, isfinal::Bool, pat::Pattern, id::Int64, desc, options,
-                          stats::Bool, chan, tests, source)
+                          results::Dict, stats::Bool, chan, tests, source)
     # Generate a block of code that initializes a new testset, adds
     # it to the task local storage, evaluates the test(s), before
     # finally removing the testset and giving it a chance to take
@@ -514,6 +517,7 @@ function testset_beginend(mod::Module, isfinal::Bool, pat::Pattern, id::Int64, d
                                  Base.catch_stack(), $(QuoteNode(source))))
             finally
                 copy!(RNG, oldrng)
+                $results[current_str] = !anyfailed(ts)
                 pop_testset()
                 ret = finish(ts, $chan)
             end
@@ -533,7 +537,8 @@ end
 Generate the code for a `@testset` with a `for` loop argument
 """
 function testset_forloop(mod::Module, isfinal::Bool, pat::Pattern, id::Int64,
-                         desc::Union{String,Expr}, options, stats, chan, loops, tests, source)
+                         desc::Union{String,Expr}, options, results::Dict, stats, chan,
+                         loops, tests, source)
 
     desc = esc(desc)
     blk = quote
@@ -561,11 +566,13 @@ function testset_forloop(mod::Module, isfinal::Bool, pat::Pattern, id::Int64,
                 let
                     ts.timed = @stats $stats $(esc(tests))
                 end
+                $results[current_str] = !anyfailed(ts)
             catch err
                 err isa InterruptException && rethrow()
                 # Something in the test block threw an error. Count that as an
                 # error in this test set
                 record(ts, Error(:nontest_error, Expr(:tuple), err, Base.catch_stack(), $(QuoteNode(source))))
+                $results[current_str] = false
             end
         end
     end

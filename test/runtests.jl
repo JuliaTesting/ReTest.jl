@@ -69,9 +69,9 @@ function check(rx, list)
         seekstart(io)
         expected = map(list) do t
             if t in innertestsets
-                "  " * t
+                "  " * t * " ✅"
             else
-                t
+                t * " ✅"
             end
         end
         expected = join(expected, '\n')
@@ -862,6 +862,71 @@ end
             :error, "expected begin/end block or for loop as argument to @testset"
             ) TestsetErrors.runtests()
     end
+end
+
+
+# * Marks ....................................................................
+
+module Marks
+using ReTest, ..Trace
+
+@testset "a" begin
+    @test true
+    @testset "b" begin end # no test, counts as pass
+    @testset "c" begin
+        @test true
+    end
+    x = 1
+    @testset "d$x" begin
+        @test true
+    end
+    @testset "e" begin
+        @test false
+    end
+end
+@testset "l$i" for i=1:2
+    @testset "k$j" for j=1:2
+        @test true
+    end
+end
+end
+
+@chapter Marks begin
+    check(Marks, dry=true, marks=true, verbose=3, [], output=raw"""
+1| a
+2|   b
+3|   c
+4|   "d$(x)"
+5|   e
+6| l1
+7|   k1
+7|   k2
+6| l2
+7|   k1
+7|   k2
+""")
+    retest(Marks, "k1")
+    check(Marks, dry=true, marks=true, verbose=3, [], output=raw"""
+1| a ✅
+2|   b
+3|   c
+4|   "d$(x)"
+5|   e
+6| l1 ✅
+7|   k1 ✅
+7|   k2
+6| l2 ✅
+7|   k1 ✅
+7|   k2
+""")
+    @test_throws Test.TestSetException retest(Marks, "e")
+    check(Marks, "a", dry=true, marks=true, verbose=3, [], output=raw"""
+1| a ✅
+2|   b
+3|   c
+4|   "d$(x)"
+5|   e ✘
+""")
 end
 
 

@@ -69,6 +69,7 @@ mutable struct TestsetExpr
     parent::Maybe{TestsetExpr}
     children::Vector{TestsetExpr}
     strings::Vector{Union{String,Missing}}
+    results::Dict{String,Bool}
     # loopvalues & loopiters: when successful in evaluating loop values in resolve!,
     # we "flatten" the nested for loops into a single loop, with loopvalues
     # containing tuples of values, and loopiters the tuples of variables to which the
@@ -82,7 +83,8 @@ mutable struct TestsetExpr
     body::Expr
 
     TestsetExpr(source, mod, desc, options, loops, parent, children=TestsetExpr[]) =
-        new(0, source, mod, desc, options, loops, parent, children, String[])
+        new(0, source, mod, desc, options, loops, parent, children, String[],
+            Dict{String,Bool}())
 end
 
 isfor(ts::TestsetExpr) = ts.loops !== nothing
@@ -255,8 +257,8 @@ function resolve!(mod::Module, ts::TestsetExpr, pat::Pattern;
 
     function decide(subj)
         m = matches(pat, subj, ids)
-        # For the curious, setting `s = something(static, missing)`, there are few
-        # "formulas" to compute the result without `if`, but using only
+        # For the curious reader, setting `s = something(static, missing)`, there
+        # are few "formulas" to compute the result without `if`, but using only
         # `coalesce, |, &, ==, !=, ===, !==, (a,b) -> a, (a,b) -> b, (a,b) -> !a,
         # (a,b) -> !b`. The shortest formulas involve 5 such
         # functions `fi` and are of the form
@@ -372,6 +374,7 @@ function resolve!(mod::Module, ts::TestsetExpr, pat::Pattern;
             ts.hasbrokenrec |= tsc.hasbrokenrec
         end
     end
+
     pop!(ids)
     if !run || !shown
         ts.descwidth = 0
@@ -407,7 +410,8 @@ function make_ts(ts::TestsetExpr, pat::Pattern, stats, chan)
 
     if ts.loops === nothing
         quote
-            @testset $(ts.mod) $(isfinal(ts)) $pat $(ts.id) $(ts.desc) $(ts.options) $stats $chan $body
+            @testset $(ts.mod) $(isfinal(ts)) $pat $(ts.id) $(ts.desc) $(ts.options) #=
+            =# $(ts.results) $stats $chan $body
         end
     else
         c = count(x -> x === nothing, (ts.loopvalues, ts.loopiters))
@@ -418,7 +422,8 @@ function make_ts(ts::TestsetExpr, pat::Pattern, stats, chan)
             loops = ts.loops
         end
         quote
-            @testset $(ts.mod) $(isfinal(ts)) $pat $(ts.id) $(ts.desc) $(ts.options) $stats $chan $loops $body
+            @testset $(ts.mod) $(isfinal(ts)) $pat $(ts.id) $(ts.desc) $(ts.options) #=
+            =# $(ts.results) $stats $chan $loops $body
         end
     end
 end
@@ -471,7 +476,7 @@ const ArgType = Union{Module,PatternX,AbstractString,AbstractArray,Tuple,Symbol,
            dry::Bool=false, stats::Bool=false, verbose::Real=true,
            [id::Bool], shuffle::Bool=false, recursive::Bool=true,
            static::Union{Bool,Nothing}=nothing, dup::Bool=false,
-           load::Bool=false, [seed::Integer])
+           load::Bool=false, [seed::Integer], marks::Bool=true)
 
 Run tests declared with [`@testset`](@ref) blocks, within modules `mod` if specified,
 or within all currently loaded modules otherwise.
@@ -512,7 +517,8 @@ Filtering `pattern`s can be specified to run only a subset of the tests.
   above), and are cached and used again on subsequent invocations.
 * If `seed` is provided, it is used to seed the global RNG before running
   the tests.
-
+* When `marks` and `dry` are `true`, "check marks" are printed next to testsets
+  which passed or failed in previous runs.
 
 ### Filtering
 
@@ -599,10 +605,11 @@ function retest(@nospecialize(args::ArgType...);
                 static::Maybe{Bool}=nothing,
                 load::Bool=false,
                 seed::Maybe{Integer}=nothing,
+                marks::Bool=true,
                 )
 
-    dry, stats, shuffle, group, verbose, recursive, id, strict, dup, static =
-        update_keywords(args, dry, stats, shuffle, group, verbose, recursive, id, strict, dup, static)
+    dry, stats, shuffle, group, verbose, recursive, id, strict, dup, static, marks =
+        update_keywords(args, dry, stats, shuffle, group, verbose, recursive, id, strict, dup, static, marks)
 
     implicitmodules, modules, verbose = process_args(args; verbose=verbose, shuffle=shuffle,
                                                      recursive=recursive, load=load)
@@ -661,7 +668,7 @@ function retest(@nospecialize(args::ArgType...);
             end
             if verbose > 0
                 foreach(ts -> dryrun(mod, ts, pat, id ? 0 : module_header*2,
-                                     maxidw = id ? maxidw[] : 0),
+                                     maxidw = id ? maxidw[] : 0, marks=marks),
                         tests)
             end
             continue
@@ -1025,7 +1032,7 @@ end
 
 # hidden feature, shortcuts for passing kwargs to retest
 function update_keywords(@nospecialize(args), dry, stats, shuffle, group, verbose,
-                         recursive, id, strict, dup, static)
+                         recursive, id, strict, dup, static, marks)
     for arg in args
         if arg isa Symbol
             for c in string(arg)
@@ -1052,13 +1059,15 @@ function update_keywords(@nospecialize(args), dry, stats, shuffle, group, verbos
                     dup = val
                 elseif c == 'c'
                     static = val
+                elseif c == 'm'
+                    marks = val
                 else
                     error("bad keyword shortcut")
                 end
             end
         end
     end
-    dry, stats, shuffle, group, verbose, recursive, id, strict, dup, static
+    dry, stats, shuffle, group, verbose, recursive, id, strict, dup, static, marks
 end
 
 function process_args(@nospecialize(args);
@@ -1307,7 +1316,7 @@ isindented(verbose, module_header, many) = (verbose > 0) & module_header
 module_summary(verbose, many) = many | iszero(verbose)
 
 function dryrun(mod::Module, ts::TestsetExpr, pat::Pattern, align::Int=0, parentsubj=""
-                ; maxidw::Int, # external calls
+                ; maxidw::Int, marks::Bool, # external calls
                 # only recursive calls:
                 evaldesc=true, repeated=nothing, ids::Vector{Int64}=Int64[])
     @assert ts.run
@@ -1334,19 +1343,26 @@ function dryrun(mod::Module, ts::TestsetExpr, pat::Pattern, align::Int=0, parent
         if maxidw > 0 # width (ndigits) of max id; <= 0 means ids not printed
             printstyled(lpad(ts.id, maxidw), "| ", color = :light_black, bold=true)
         end
+
         printstyled(' '^align, desc, color = desc isa String ? :normal : Base.warn_color())
 
         if repeated !== nothing
             printstyled(" (repeated",
-                        repeated == -1 ? ")" : " $repeated times)", '\n',
+                        repeated == -1 ? ")" : " $repeated times)",
                         color=:light_black)
-        else
-            println()
         end
+
+        res = get(ts.results, subject, nothing)
+        if marks && res !== nothing
+            printstyled(res ? " ✅" : " ✘", color = res ? :green : Base.error_color(),
+                        bold=true)
+        end
+        println()
+
         if ts.options.transient_verbose
             for tsc in ts.children
                 tsc.run || continue
-                dryrun(mod, tsc, pat, align + 2, subject, maxidw=maxidw, ids=ids)
+                dryrun(mod, tsc, pat, align + 2, subject, maxidw=maxidw, marks=marks, ids=ids)
             end
         end
         pop!(ids)
@@ -1372,8 +1388,9 @@ function dryrun(mod::Module, ts::TestsetExpr, pat::Pattern, align::Int=0, parent
                                    ts.parent, ts.children)
             beginend.run = true
             beginend.id = ts.id
+            beginend.results = ts.results
             dryrun(mod, beginend, pat, align, parentsubj; evaldesc=false,
-                   repeated=repeated, maxidw=maxidw, ids=ids)
+                   repeated=repeated, maxidw=maxidw, marks=marks, ids=ids)
         end
 
         loopvalues = ts.loopvalues
