@@ -169,8 +169,16 @@ if and only if it doesn't match `pattern`.
 
 For example `not("a")` matches any testset whose subject doesn't contain `"a"`,
 and `not(1:3)` matches all the testsets but the first three of a module.
+
+If `pattern` is an integer or a `ReTest` object (i.e. not a `AbstractString`,
+`Regex`, `Tuple` or `AbstractArray`), `not(pattern)` can be expressed as `-pattern`.
+
+`String` patterns can also be negated by prepending `'-'`, see [`retest`](@ref)
+for details.
 """
 not(x) = Not(make_pattern(x))
+
+Base.:-(x::Pattern) = not(x)
 
 
 """

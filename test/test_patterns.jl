@@ -1,14 +1,17 @@
 module TestPatterns
 using Test
 
-using ReTest: and, or, not, interpolated, reachable
+using ReTest: and, or, not, interpolated, reachable, depth
 
 @testset "patterns: ==" begin
-    basics = [and(), or(), not(0), interpolated, 0, r""]
+    basics = [and(), or(), not(0), interpolated, 0, r"", depth(2)]
     VERSION >= v"1.3" && push!(basics, reachable(1))
     for a = basics, b = basics
         if a === b
             @test a == b
+            if !(a isa Regex || a isa Integer)
+                @test -a == not(a)
+            end
         else
             @test a != b
             for f in (and, or)
@@ -36,6 +39,14 @@ using ReTest: and, or, not, interpolated, reachable
                 @test reachable(reachable(a)) == reachable(deepcopy(reachable(a)))
             end
         end
+    end
+end
+
+@testset "patterns: not" begin
+    pats = [or(1, 3), and(1, r"a"), not(1), interpolated, depth(3)]
+    VERSION >= v"1.3" && push!(pats, reachable("c"))
+    for p ∈ pats
+        @test -p == not(p)
     end
 end
 
