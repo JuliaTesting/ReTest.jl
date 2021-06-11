@@ -1323,7 +1323,7 @@ hasmany(tests) = length(tests) > 1 || isfor(tests[1])
 function dryrun(mod::Module, ts::TestsetExpr, pat::Pattern, align::Int=0, parentsubj=""
                 ; maxidw::Int, marks::Bool, # external calls
                 # only recursive calls:
-                evaldesc=true, repeated=nothing, ids::Vector{Int64}=Int64[])
+                evaldesc=true, repeated=nothing, ids::Vector{Int64}=Int64[], show::Bool=true)
     @assert ts.run
     desc = ts.desc
 
@@ -1341,37 +1341,80 @@ function dryrun(mod::Module, ts::TestsetExpr, pat::Pattern, align::Int=0, parent
             subject = parentsubj * '/' * desc
             if isfinal(ts) && !matches(pat, subject, ids)
                 pop!(ids)
-                return
+                return false, false, false
             end
-        end
-
-        if maxidw > 0 # width (ndigits) of max id; <= 0 means ids not printed
-            printstyled(lpad(ts.id, maxidw), "| ", color = :light_black, bold=true)
-        end
-
-        printstyled(' '^align, desc, color = desc isa String ? :normal : Base.warn_color())
-
-        if repeated !== nothing
-            printstyled(" (repeated",
-                        repeated == -1 ? ")" : " $repeated times)",
-                        color=:light_black)
         end
 
         res = get(ts.results, subject, nothing)
-        if marks && res !== nothing
-            printstyled(res ? " ✅" : " ✘", color = res ? :green : Base.error_color(),
-                        bold=true)
-        end
-        println()
+        if show
+            if maxidw > 0 # width (ndigits) of max id; <= 0 means ids not printed
+                printstyled(lpad(ts.id, maxidw), "| ", color = :light_black, bold=true)
+            end
 
-        if ts.options.transient_verbose
-            for tsc in ts.children
-                tsc.run || continue
-                dryrun(mod, tsc, pat, align + 2, subject, maxidw=maxidw, marks=marks, ids=ids)
+            printstyled(' '^align, desc, color = desc isa String ? :normal : Base.warn_color())
+
+            if repeated !== nothing
+                printstyled(" (repeated",
+                            repeated == -1 ? ")" : " $repeated times)",
+                            color=:light_black)
+            end
+
+            if marks && res !== nothing
+                printstyled(res ? " ✅" : " ✘", color = res ? :green : Base.error_color(),
+                            bold=true)
             end
         end
-        pop!(ids)
-        nothing
+
+        if ts.options.transient_verbose
+            @assert show
+            println()
+            for tsc in ts.children
+                tsc.run || continue
+                dryrun(mod, tsc, pat, align + 2, subject,
+                       maxidw=maxidw, marks=marks, ids=ids, show=true)
+            end
+            pop!(ids)
+            false, false, false # meaningless unused triple
+        elseif marks
+            passes, fails, unrun = false, false, false
+            if !show
+                if res === nothing
+                    unrun = true
+                elseif res
+                    passes = true
+                else
+                    fails = true
+                end
+            end
+            for tsc in ts.children
+                tsc.run || continue
+                cp, cf, cu = dryrun(mod, tsc, pat, align + 2, subject,
+                                    maxidw=maxidw, marks=marks, ids=ids, show=false)
+                passes |= cp
+                fails |= cf
+                unrun |= cu
+                passes && fails && unrun && break
+            end
+            pop!(ids)
+            if show
+                passes &&
+                    printstyled(" ✅", color = :light_black, bold=true)
+                fails &&
+                    printstyled(" ✘", color = :light_black, bold=true)
+                unrun &&
+                    # space at the end because of a printing bug (with no trailing space,
+                    # only two dots are printed instead of three on this machine)
+                    printstyled(" ⋯ ", color = :light_black, bold=true)
+                println()
+            end
+            passes, fails, unrun
+        else
+            if show
+                println()
+            end
+            pop!(ids)
+            false, false, false
+        end
     else
         function dryrun_beginend(descx, repeated=nothing)
             # avoid repeating ourselves, transform this iteration into a "begin/end" testset
@@ -1395,7 +1438,7 @@ function dryrun(mod::Module, ts::TestsetExpr, pat::Pattern, align::Int=0, parent
             beginend.id = ts.id
             beginend.results = ts.results
             dryrun(mod, beginend, pat, align, parentsubj; evaldesc=false,
-                   repeated=repeated, maxidw=maxidw, marks=marks, ids=ids)
+                   repeated=repeated, maxidw=maxidw, marks=marks, ids=ids, show=show)
         end
 
         loopvalues = ts.loopvalues
@@ -1417,6 +1460,7 @@ function dryrun(mod::Module, ts::TestsetExpr, pat::Pattern, align::Int=0, parent
             end
             dryrun_beginend(ts.desc, repeated)
         else
+            passes, fails, unrun = false, false, false
             for (i, x) in enumerate(loopvalues)
                 descx = eval_desc(mod, ts, x)
                 if descx === missing
@@ -1426,11 +1470,16 @@ function dryrun(mod::Module, ts::TestsetExpr, pat::Pattern, align::Int=0, parent
                     # so we add the "repeated" annotation
                     # (it's certainly not worth it to bother being more precise about
                     # exactly which iterations are uninterpolated)
-                    return dryrun_beginend(ts.desc, length(loopvalues)-i+1)
+                    lp, lf, lu = dryrun_beginend(ts.desc, length(loopvalues)-i+1)
+                else
+                    lp, lf, lu = dryrun_beginend(descx)
                 end
-                @assert descx !== missing # should be unnecessary, but there was a test below
-                dryrun_beginend(descx)
+                passes |= lp
+                fails |= lf
+                unrun |= lu
+                descx === missing && break
             end
+            passes, fails, unrun
         end
     end
 end

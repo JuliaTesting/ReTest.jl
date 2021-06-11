@@ -879,48 +879,154 @@ using ReTest, ..Trace
         @test false
     end
 end
+
 @testset "l$i" for i=1:2
     @testset "k$j" for j=1:2
         @test true
     end
 end
+
+@testset "x" begin
+    @testset "y$i" for i=1:2
+        @testset "z1" begin
+            @test true
+        end
+        @testset "z$j" for j=2:3
+            @test true
+        end
+        @testset "z4" begin
+            @test i == 1
+        end
+    end
 end
+end # Marks
 
 @chapter Marks begin
-    check(Marks, dry=true, marks=true, verbose=3, [], output=raw"""
-1| a
-2|   b
-3|   c
-4|   "d$(x)"
-5|   e
-6| l1
-7|   k1
-7|   k2
-6| l2
-7|   k1
-7|   k2
+    check(Marks, "-x", dry=true, marks=true, verbose=3, id=false, [], output=raw"""
+a
+  b
+  c
+  "d$(x)"
+  e
+l1
+  k1
+  k2
+l2
+  k1
+  k2
 """)
-    retest(Marks, "k1")
-    check(Marks, dry=true, marks=true, verbose=3, [], output=raw"""
-1| a ✅
-2|   b
-3|   c
-4|   "d$(x)"
-5|   e
-6| l1 ✅
-7|   k1 ✅
-7|   k2
-6| l2 ✅
-7|   k1 ✅
-7|   k2
+    check(Marks, "-x", dry=true, marks=true, verbose=1, id=false, [], output=raw"""
+a ⋯
+l1 ⋯
+l2 ⋯
+""")
+    retest(Marks, "-x", "k1")
+    check(Marks, "-x", dry=true, marks=true, verbose=3, id=false, [], output=raw"""
+a ✅
+  b
+  c
+  "d$(x)"
+  e
+l1 ✅
+  k1 ✅
+  k2
+l2 ✅
+  k1 ✅
+  k2
+""")
+    check(Marks, "-x", dry=true, marks=true, verbose=1, id=false, [], output=raw"""
+a ✅ ⋯
+l1 ✅ ✅ ⋯
+l2 ✅ ✅ ⋯
 """)
     @test_throws Test.TestSetException retest(Marks, "e")
-    check(Marks, "a", dry=true, marks=true, verbose=3, [], output=raw"""
-1| a ✅
-2|   b
-3|   c
-4|   "d$(x)"
-5|   e ✘
+    check(Marks, "-x", "a", dry=true, marks=true, verbose=3, id=false, [], output=raw"""
+a ✅
+  b
+  c
+  "d$(x)"
+  e ✘
+""")
+    check(Marks, "-x", "a", dry=true, marks=true, verbose=1, id=false, [], output=raw"""
+a ✅ ✘ ⋯
+""")
+    retest(Marks, "b")
+    check(Marks, "a", dry=true, marks=true, verbose=3, id=false, [], output=raw"""
+a ✅
+  b ✅
+  c
+  "d$(x)"
+  e ✘
+""")
+    check(Marks, "a", dry=true, marks=true, verbose=1, id=false, [], output=raw"""
+a ✅ ✅ ✘ ⋯
+""")
+    retest(Marks, "l2")
+    check(Marks, "-x", dry=true, marks=true, verbose=3, id=false, [], output=raw"""
+a ✅
+  b ✅
+  c
+  "d$(x)"
+  e ✘
+l1 ✅
+  k1 ✅
+  k2
+l2 ✅
+  k1 ✅
+  k2 ✅
+""")
+    check(Marks, "-x", dry=true, marks=true, verbose=1, id=false, [], output=raw"""
+a ✅ ✅ ✘ ⋯
+l1 ✅ ✅ ⋯
+l2 ✅ ✅
+""")
+
+    check(Marks, "x", dry=true, marks=true, verbose=3, id=false, interpolated, [], output="""
+x
+  y1
+    z1
+    z2
+    z3
+    z4
+  y2
+    z1
+    z2
+    z3
+    z4
+""")
+    check(Marks, "x", dry=true, marks=true, verbose=2, id=false, interpolated, [], output="""
+x
+  y1 ⋯
+  y2 ⋯
+""")
+    retest(Marks, r"y1$")
+    # at record success at depth==2
+    check(Marks, "x", dry=true, marks=true, verbose=1, id=false, interpolated, [],
+          output="x ✅ ✅ ⋯")
+    @test_throws Test.TestSetException retest(Marks, "y2/z4")
+    check(Marks, "x", dry=true, marks=true, verbose=1, id=false, interpolated, [],
+          output="x ✅ ✅ ✘ ⋯")
+    @test_throws Test.TestSetException retest(Marks, "x")
+    check(Marks, "x", dry=true, marks=true, verbose=3, id=false, interpolated, [], output="""
+x ✅
+  y1 ✅
+    z1 ✅
+    z2 ✅
+    z3 ✅
+    z4 ✅
+  y2 ✅
+    z1 ✅
+    z2 ✅
+    z3 ✅
+    z4 ✘
+""")
+    check(Marks, "x", dry=true, marks=true, verbose=2, id=false, interpolated, [], output="""
+x ✅
+  y1 ✅ ✅
+  y2 ✅ ✅ ✘
+""")
+    check(Marks, "x", dry=true, marks=true, verbose=1, id=false, interpolated, [], output="""
+x ✅ ✅ ✘
 """)
 end
 
