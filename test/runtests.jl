@@ -385,7 +385,7 @@ end
 
 # * toplevel .................................................................
 
-@chapter toplevel begin
+@chapter toplevel false begin
     # The following test is just to exert `@assert allunique(TESTED_MODULES)` in
     # computemodules!, and must be run before any toplevel @testset in declared,
     # so that `Main` is not yet in TESTED_MODULES; we check that previous
@@ -815,15 +815,12 @@ end
 @chapter MiscSeed begin
     rands = VERSION < v"1.7-" ? [0x24ae, 0x837e] :
             VERSION <= v"1.7" ? [0x1f33, 0x415f] :
-            error("update the seeds")
-
-    Test.@testset "seed" begin
-        MiscSeed.runtests(verbose=0, seed=1)
-        @test MiscSeed.RAND1 === MiscSeed.RAND2 === rands[1]
-        MiscSeed.runtests(verbose=0, seed=2)
-        @test MiscSeed.RAND1 === MiscSeed.RAND2 === rands[2]
-        # TODO: test in a distributed setting
-    end
+                                error("update the seeds")
+    MiscSeed.runtests(verbose=0, seed=1)
+    @test MiscSeed.RAND1 === MiscSeed.RAND2 === rands[1]
+    MiscSeed.runtests(verbose=0, seed=2)
+    @test MiscSeed.RAND1 === MiscSeed.RAND2 === rands[2]
+    # TODO: test in a distributed setting
 end
 
 module Bugs
@@ -853,15 +850,13 @@ using ReTest
 end
 
 @chapter TestsetErrors begin
-    Test.@testset "TestsetErrors" begin
-        @test_logs (
-            :error, "expected begin/end block or for loop as argument to @testset") (
-            :error, "unsupported @testset option") (
-            :error, "unsupported @testset" ) (
-            :error, "expected begin/end block or for loop as argument to @testset") (
-            :error, "expected begin/end block or for loop as argument to @testset"
-            ) TestsetErrors.runtests()
-    end
+    @test_logs (
+        :error, "expected begin/end block or for loop as argument to @testset") (
+        :error, "unsupported @testset option") (
+        :error, "unsupported @testset" ) (
+        :error, "expected begin/end block or for loop as argument to @testset") (
+        :error, "expected begin/end block or for loop as argument to @testset"
+        ) TestsetErrors.runtests()
 end
 
 
@@ -1157,7 +1152,7 @@ Pkg.activate("./FakePackage")
 Pkg.develop(PackageSpec(path="../InlineTest"))
 Pkg.develop(PackageSpec(path="..")) # ReTest
 
-@chapter InlineTest begin
+@chapter InlineTest false begin
     Pkg.test("FakePackage")
 end
 
@@ -1167,7 +1162,7 @@ using ReTest: process_args
 module Load end
 module Load2 end
 
-@chapter load begin
+@chapter load false begin
     using FakePackage
     @assert !isdefined(Main, :FakePackageTests)
 
@@ -1214,7 +1209,7 @@ end
 
 # * Hijack ...................................................................
 
-@chapter Hijack begin
+@chapter Hijack false begin
     Pkg.activate("./Hijack")
     Pkg.develop(PackageSpec(path="..")) # ReTest
     Pkg.test("Hijack")

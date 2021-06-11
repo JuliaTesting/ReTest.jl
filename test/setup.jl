@@ -46,11 +46,26 @@ function check(x...; runtests=false, output::Union{Nothing,String}=nothing,
     @test Trace.RUN == expected
 end
 
-macro chapter(title, x)
+# @chapter title [wrap_in_testset::Bool=true] body
+macro chapter(title, wrap_in_testset, body=nothing)
     title = string(title)
+    if body === nothing
+        body = wrap_in_testset
+        wrap_in_testset = true
+    else
+        wrap_in_testset::Bool
+    end
 
     if isempty(ARGS) || any(pat -> occursin(Regex(pat, "i"), title), ARGS)
         printstyled("\n\n", rpad("## $title #", 78, '#'), "\n\n", bold=true, color=:cyan)
-        esc(x)
+        if wrap_in_testset
+            quote
+                Test.@testset $("$title") begin
+                    $(esc(body))
+                end
+            end
+        else
+            esc(body)
+        end
     end
 end
