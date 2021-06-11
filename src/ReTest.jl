@@ -90,6 +90,15 @@ end
 isfor(ts::TestsetExpr) = ts.loops !== nothing
 isfinal(ts::TestsetExpr) = isempty(ts.children)
 
+function tsdepth(ts::Union{TestsetExpr,Testset.ReTestSet})
+    d = 1
+    while ts.parent !== nothing
+        d += 1
+        ts = ts.parent
+    end
+    d
+end
+
 struct _Invalid
     global const invalid = _Invalid.instance
 end
@@ -215,7 +224,7 @@ end
 function resolve!(mod::Module, ts::TestsetExpr, pat::Pattern;
                   # external calls
                   verbose::Int, id::Int64, strict::Bool, static::Maybe{Bool},
-                  ids::Vector{Int64}, warned::Ref{Bool},
+                  warned::Ref{Bool},
                    # only recursive calls
                   force::Bool=false, shown::Bool=true, depth::Int=0)
 
@@ -229,9 +238,8 @@ function resolve!(mod::Module, ts::TestsetExpr, pat::Pattern;
         warned[] = true
     end
     ts.id = id
-    push!(ids, id)
     id += 1
-    ts.run = force | (static !== false) & alwaysmatches(pat, length(ids))
+    ts.run = force | (static !== false) & alwaysmatches(pat, tsdepth(ts))
 
     parentstrs = ts.parent === nothing ? [""] : ts.parent.strings
     ts.descwidth = 0
@@ -256,7 +264,7 @@ function resolve!(mod::Module, ts::TestsetExpr, pat::Pattern;
         end
 
     function decide(subj)
-        m = matches(pat, subj, ids)
+        m = matches(pat, subj, ts)
         # For the curious reader, setting `s = something(static, missing)`, there
         # are few "formulas" to compute the result without `if`, but using only
         # `coalesce, |, &, ==, !=, ===, !==, (a,b) -> a, (a,b) -> b, (a,b) -> !a,
@@ -367,7 +375,7 @@ function resolve!(mod::Module, ts::TestsetExpr, pat::Pattern;
         runc, id = resolve!(mod, tsc, pat, force = !strict && ts.run,
                             shown=shown & ts.options.transient_verbose, static=static,
                             depth=depth+1, verbose=verbose-1, id=id, strict=strict,
-                            ids=ids, warned=warned)
+                            warned=warned)
         run |= runc
         ts.descwidth = max(ts.descwidth, tsc.descwidth)
         if tsc.run
@@ -375,7 +383,6 @@ function resolve!(mod::Module, ts::TestsetExpr, pat::Pattern;
         end
     end
 
-    pop!(ids)
     if !run || !shown
         ts.descwidth = 0
     end
@@ -1285,12 +1292,11 @@ function fetchtests((mod, pat), verbose, module_header, maxidw; static, strict, 
     hasbroken = false
 
     id = 1
-    ids = Int64[]
     warned = Ref(false)
 
     for ts in tests
         run, id = resolve!(mod, ts, pat, verbose=verbose, id=id, strict=strict,
-                           static=static, ids=ids, warned=warned)
+                           static=static, warned=warned)
         run || continue
         descwidth = max(descwidth, ts.descwidth)
         hasbroken |= ts.hasbrokenrec
@@ -1323,12 +1329,11 @@ hasmany(tests) = length(tests) > 1 || isfor(tests[1])
 function dryrun(mod::Module, ts::TestsetExpr, pat::Pattern, align::Int=0, parentsubj=""
                 ; maxidw::Int, marks::Bool, # external calls
                 # only recursive calls:
-                evaldesc=true, repeated=nothing, ids::Vector{Int64}=Int64[], show::Bool=true)
+                evaldesc=true, repeated=nothing, show::Bool=true)
     @assert ts.run
     desc = ts.desc
 
     if ts.loops === nothing
-        push!(ids, ts.id)
         if evaldesc && !(desc isa String)
             try
                 desc = Core.eval(mod, desc)
@@ -1339,8 +1344,7 @@ function dryrun(mod::Module, ts::TestsetExpr, pat::Pattern, align::Int=0, parent
         subject = nothing
         if parentsubj isa String && desc isa String
             subject = parentsubj * '/' * desc
-            if isfinal(ts) && !matches(pat, subject, ids)
-                pop!(ids)
+            if isfinal(ts) && !matches(pat, subject, ts)
                 return false, false, false
             end
         end
@@ -1371,9 +1375,8 @@ function dryrun(mod::Module, ts::TestsetExpr, pat::Pattern, align::Int=0, parent
             for tsc in ts.children
                 tsc.run || continue
                 dryrun(mod, tsc, pat, align + 2, subject,
-                       maxidw=maxidw, marks=marks, ids=ids, show=true)
+                       maxidw=maxidw, marks=marks, show=true)
             end
-            pop!(ids)
             false, false, false # meaningless unused triple
         elseif marks
             passes, fails, unrun = false, false, false
@@ -1389,13 +1392,12 @@ function dryrun(mod::Module, ts::TestsetExpr, pat::Pattern, align::Int=0, parent
             for tsc in ts.children
                 tsc.run || continue
                 cp, cf, cu = dryrun(mod, tsc, pat, align + 2, subject,
-                                    maxidw=maxidw, marks=marks, ids=ids, show=false)
+                                    maxidw=maxidw, marks=marks, show=false)
                 passes |= cp
                 fails |= cf
                 unrun |= cu
                 passes && fails && unrun && break
             end
-            pop!(ids)
             if show
                 passes &&
                     printstyled(" ✅", color = :light_black, bold=true)
@@ -1412,7 +1414,6 @@ function dryrun(mod::Module, ts::TestsetExpr, pat::Pattern, align::Int=0, parent
             if show
                 println()
             end
-            pop!(ids)
             false, false, false
         end
     else
@@ -1438,7 +1439,7 @@ function dryrun(mod::Module, ts::TestsetExpr, pat::Pattern, align::Int=0, parent
             beginend.id = ts.id
             beginend.results = ts.results
             dryrun(mod, beginend, pat, align, parentsubj; evaldesc=false,
-                   repeated=repeated, maxidw=maxidw, marks=marks, ids=ids, show=show)
+                   repeated=repeated, maxidw=maxidw, marks=marks, show=show)
         end
 
         loopvalues = ts.loopvalues

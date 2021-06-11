@@ -79,33 +79,34 @@ alwaysmatches(dep::Depth, d) = dep.d == d
 
 ## matches
 
-matches(pat::And, x, ids) = all(p -> matches(p, x, ids), pat.xs)
+matches(pat::And, x, ts) = all(p -> matches(p, x, ts), pat.xs)
 
-matches(pat::Or, x, ids) =
+matches(pat::Or, x, ts) =
     if pat.xs isa AbstractUnitRange{<:Integer} && minimum(pat.xs) >= 0
-        ids[end] ∈ pat.xs # this is optimised, i.e. it's not O(n)
+        ts.id ∈ pat.xs # this is optimised, i.e. it's not O(n)
     else
-        any(p -> matches(p, x, ids), pat.xs)
+        any(p -> matches(p, x, ts), pat.xs)
     end
 
-matches(pat::Not, x, ids) = !matches(pat.x, x, ids)
-matches(::Interpolated, x::Union{Missing,AbstractString}, ids) = x !== missing
+matches(pat::Not, x, ts) = !matches(pat.x, x, ts)
+matches(::Interpolated, x::Union{Missing,AbstractString}, ts) = x !== missing
 matches(rx::Regex, x, _) = occursin(rx, x)
-matches(rx::Regex, ::Missing, ids) = alwaysmatches(rx, length(ids)) | missing
-matches(pat::Integer, _, ids) =
+matches(rx::Regex, ::Missing, ts) = alwaysmatches(rx, tsdepth(ts)) | missing
+matches(pat::Integer, _, ts) =
     @inbounds pat >= 0 ?
-        pat == ids[end] :
-        pat != -ids[end]
+        pat == ts.id :
+        pat != -ts.id
 
-function matches(pat::Reachable, desc, ids::Vector{Int64})
+function matches(pat::Reachable, desc, ts)
     if desc !== missing
         desc = SubString(desc)
     end
     m = false
-    for d = length(ids):-1:1
-        @inbounds id = ids[d]
-        m |= matches(pat.x, desc, @view ids[1:d])
+    while true
+        m |= matches(pat.x, desc, ts)
         m === true && return true
+        ts.parent === nothing && break
+        ts = ts.parent
         if desc !== missing
             desc = SubString(desc, 1, findlast('/', desc)-1)
         end
@@ -113,7 +114,7 @@ function matches(pat::Reachable, desc, ids::Vector{Int64})
     m
 end
 
-matches(d::Depth, _, ids) = d.d == length(ids)
+matches(d::Depth, _, ts) = d.d == tsdepth(ts)
 
 
 ## make_pattern
