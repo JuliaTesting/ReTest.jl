@@ -69,7 +69,7 @@ mutable struct TestsetExpr
     parent::Maybe{TestsetExpr}
     children::Vector{TestsetExpr}
     strings::Vector{Union{String,Missing}}
-    results::Dict{String,Bool}
+    pastresults::Dict{String,Bool}
     # loopvalues & loopiters: when successful in evaluating loop values in resolve!,
     # we "flatten" the nested for loops into a single loop, with loopvalues
     # containing tuples of values, and loopiters the tuples of variables to which the
@@ -418,7 +418,7 @@ function make_ts(ts::TestsetExpr, pat::Pattern, stats, chan)
     if ts.loops === nothing
         quote
             @testset $(ts.mod) $(isfinal(ts)) $pat $(ts.id) $(ts.desc) $(ts.options) #=
-            =# $(ts.results) $stats $chan $body
+            =# $(ts.pastresults) $stats $chan $body
         end
     else
         c = count(x -> x === nothing, (ts.loopvalues, ts.loopiters))
@@ -430,7 +430,7 @@ function make_ts(ts::TestsetExpr, pat::Pattern, stats, chan)
         end
         quote
             @testset $(ts.mod) $(isfinal(ts)) $pat $(ts.id) $(ts.desc) $(ts.options) #=
-            =# $(ts.results) $stats $chan $loops $body
+            =# $(ts.pastresults) $stats $chan $loops $body
         end
     end
 end
@@ -1349,7 +1349,7 @@ function dryrun(mod::Module, ts::TestsetExpr, pat::Pattern, align::Int=0, parent
             end
         end
 
-        res = get(ts.results, subject, nothing)
+        res = get(ts.pastresults, subject, nothing)
         if show
             if maxidw > 0 # width (ndigits) of max id; <= 0 means ids not printed
                 printstyled(lpad(ts.id, maxidw), "| ", color = :light_black, bold=true)
@@ -1437,7 +1437,7 @@ function dryrun(mod::Module, ts::TestsetExpr, pat::Pattern, align::Int=0, parent
                                    ts.parent, ts.children)
             beginend.run = true
             beginend.id = ts.id
-            beginend.results = ts.results
+            beginend.pastresults = ts.pastresults
             dryrun(mod, beginend, pat, align, parentsubj; evaldesc=false,
                    repeated=repeated, maxidw=maxidw, marks=marks, show=show)
         end
