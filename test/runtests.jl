@@ -1057,6 +1057,27 @@ end # NoTests
 end
 
 
+# * Alignment ................................................................
+
+module Alignment
+using ReTest, ..Trace
+
+@testset "l$i" for i=1:2
+end
+end # Alignment
+
+@chapter Alignment begin
+    # here, there is only one testset, but it's a loop, make sure the alignment takes
+    # into account that a "testset summary" will be printed
+    check(Alignment, [], output="""
+                   Pass
+l1             |      0
+l2             |      0
+Main.Alignment |      0
+""")
+end
+
+
 # * DryRun ...................................................................
 
 module DryRun

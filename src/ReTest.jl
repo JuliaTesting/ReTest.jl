@@ -711,7 +711,7 @@ function retest(@nospecialize(args::ArgType...);
         module_ts = Testset.ReTestSet(Main, string(mod) * ':', overall=true)
         push!(root.results, module_ts)
 
-        many = length(tests) > 1 || isfor(tests[1]) # FIXME: isfor when only one iteration
+        many = hasmany(tests)
 
         printlock = ReentrantLock()
         previewchan =
@@ -1298,10 +1298,11 @@ function fetchtests((mod, pat), verbose, module_header, maxidw; static, strict, 
     maxidw[] = max(maxidw[], ndigits(id-1))
 
     tests = filter(ts -> ts.run, tests)
-    many = length(tests) > 1
-    indented = isindented(verbose, module_header, many)
 
     if !isempty(tests)
+        many = hasmany(tests)
+        indented = isindented(verbose, module_header, many)
+
         if indented
             descwidth += 2
         end
@@ -1314,6 +1315,10 @@ end
 
 isindented(verbose, module_header, many) = (verbose > 0) & module_header
 module_summary(verbose, many) = many | iszero(verbose)
+
+# assumes !isempty(tests)
+# FIXME: isfor when only one iteration
+hasmany(tests) = length(tests) > 1 || isfor(tests[1])
 
 function dryrun(mod::Module, ts::TestsetExpr, pat::Pattern, align::Int=0, parentsubj=""
                 ; maxidw::Int, marks::Bool, # external calls
