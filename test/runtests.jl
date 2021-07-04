@@ -69,9 +69,9 @@ function check(rx, list)
         seekstart(io)
         expected = map(list) do t
             if t in innertestsets
-                "  " * t * " ✅"
+                "  " * t * " ✔"
             else
-                t * " ✅"
+                t * " ✔"
             end
         end
         expected = join(expected, '\n')
@@ -922,63 +922,63 @@ l2 ⋯
 """)
     retest(Marks, "-x", "k1")
     check(Marks, "-x", dry=true, marks=true, verbose=3, id=false, [], output=raw"""
-a ✅
+a ✔
   b
   c
   "d$(x)"
   e
-l1 ✅
-  k1 ✅
+l1 ✔
+  k1 ✔
   k2
-l2 ✅
-  k1 ✅
+l2 ✔
+  k1 ✔
   k2
 """)
     check(Marks, "-x", dry=true, marks=true, verbose=1, id=false, [], output=raw"""
-a ✅ ⋯
-l1 ✅ ✅ ⋯
-l2 ✅ ✅ ⋯
+a ✔ ⋯
+l1 ✔ ✔ ⋯
+l2 ✔ ✔ ⋯
 """)
     @test_throws Test.TestSetException retest(Marks, "e")
     check(Marks, "-x", "a", dry=true, marks=true, verbose=3, id=false, [], output=raw"""
-a ✅
+a ✔
   b
   c
   "d$(x)"
   e ✘
 """)
     check(Marks, "-x", "a", dry=true, marks=true, verbose=1, id=false, [], output=raw"""
-a ✅ ✘ ⋯
+a ✔ ✘ ⋯
 """)
     retest(Marks, "b")
     check(Marks, "a", dry=true, marks=true, verbose=3, id=false, [], output=raw"""
-a ✅
-  b ✅
+a ✔
+  b ✔
   c
   "d$(x)"
   e ✘
 """)
     check(Marks, "a", dry=true, marks=true, verbose=1, id=false, [], output=raw"""
-a ✅ ✅ ✘ ⋯
+a ✔ ✔ ✘ ⋯
 """)
     retest(Marks, "l2")
     check(Marks, "-x", dry=true, marks=true, verbose=3, id=false, [], output=raw"""
-a ✅
-  b ✅
+a ✔
+  b ✔
   c
   "d$(x)"
   e ✘
-l1 ✅
-  k1 ✅
+l1 ✔
+  k1 ✔
   k2
-l2 ✅
-  k1 ✅
-  k2 ✅
+l2 ✔
+  k1 ✔
+  k2 ✔
 """)
     check(Marks, "-x", dry=true, marks=true, verbose=1, id=false, [], output=raw"""
-a ✅ ✅ ✘ ⋯
-l1 ✅ ✅ ⋯
-l2 ✅ ✅
+a ✔ ✔ ✘ ⋯
+l1 ✔ ✔ ⋯
+l2 ✔ ✔
 """)
 
     check(Marks, "x", dry=true, marks=true, verbose=3, id=false, interpolated, [], output="""
@@ -1002,31 +1002,31 @@ x
     retest(Marks, r"y1$")
     # at record success at depth==2
     check(Marks, "x", dry=true, marks=true, verbose=1, id=false, interpolated, [],
-          output="x ✅ ✅ ⋯")
+          output="x ✔ ✔ ⋯")
     @test_throws Test.TestSetException retest(Marks, "y2/z4")
     check(Marks, "x", dry=true, marks=true, verbose=1, id=false, interpolated, [],
-          output="x ✅ ✅ ✘ ⋯")
+          output="x ✔ ✔ ✘ ⋯")
     @test_throws Test.TestSetException retest(Marks, "x")
     check(Marks, "x", dry=true, marks=true, verbose=3, id=false, interpolated, [], output="""
-x ✅
-  y1 ✅
-    z1 ✅
-    z2 ✅
-    z3 ✅
-    z4 ✅
-  y2 ✅
-    z1 ✅
-    z2 ✅
-    z3 ✅
+x ✔
+  y1 ✔
+    z1 ✔
+    z2 ✔
+    z3 ✔
+    z4 ✔
+  y2 ✔
+    z1 ✔
+    z2 ✔
+    z3 ✔
     z4 ✘
 """)
     check(Marks, "x", dry=true, marks=true, verbose=2, id=false, interpolated, [], output="""
-x ✅
-  y1 ✅ ✅
-  y2 ✅ ✅ ✘
+x ✔
+  y1 ✔ ✔
+  y2 ✔ ✔ ✘
 """)
     check(Marks, "x", dry=true, marks=true, verbose=1, id=false, interpolated, [], output="""
-x ✅ ✅ ✘
+x ✔ ✔ ✘
 """)
 end
 

@@ -1364,7 +1364,7 @@ function dryrun(mod::Module, ts::TestsetExpr, pat::Pattern, align::Int=0, parent
             end
 
             if marks && res !== nothing
-                printstyled(res ? " ✅" : " ✘", color = res ? :green : Base.error_color(),
+                printstyled(res ? " ✔" : " ✘", color = res ? :green : Base.error_color(),
                             bold=true)
             end
         end
@@ -1400,7 +1400,7 @@ function dryrun(mod::Module, ts::TestsetExpr, pat::Pattern, align::Int=0, parent
             end
             if show
                 passes &&
-                    printstyled(" ✅", color = :light_black, bold=true)
+                    printstyled(" ✔", color = :light_black, bold=true)
                 fails &&
                     printstyled(" ✘", color = :light_black, bold=true)
                 unrun &&
