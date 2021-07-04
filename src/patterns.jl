@@ -56,6 +56,15 @@ end
 struct Interpolated <: Pattern end
 
 
+### pass/fail
+
+struct Pass <: Pattern end
+const pass = Pass()
+
+struct Fail <: Pattern end
+const fail = Fail()
+
+
 ## alwaysmatches
 
 alwaysmatches(pat::And, d) = all(p -> alwaysmatches(p, d), pat.xs)
@@ -75,6 +84,8 @@ alwaysmatches(rx::Regex, _) = isempty(rx.pattern)
 alwaysmatches(id::Integer, _) = false
 alwaysmatches(pat::Reachable, d) = alwaysmatches(pat.x, d)
 alwaysmatches(dep::Depth, d) = dep.d == d
+alwaysmatches(::Pass, _) = false
+alwaysmatches(::Fail, _) = false
 
 
 ## matches
@@ -116,6 +127,12 @@ end
 
 matches(d::Depth, _, ts) = d.d == tsdepth(ts)
 
+matches(::Pass, subj::AbstractString, ts) = get(ts.pastresults, subj, false)
+matches(::Fail, subj::AbstractString, ts) = !get(ts.pastresults, subj, true)
+# TODO: test method below
+matches(::Union{Pass,Fail}, ::Missing, ts) =
+    isempty(ts.pastresults) ? false : missing
+
 
 ## make_pattern
 
@@ -156,6 +173,8 @@ hasinteger(pat::Not) = hasinteger(pat.x)
 hasinteger(::Interpolated) = false
 hasinteger(pat::Reachable) = hasinteger(pat.x)
 hasinteger(::Depth) = false
+hasinteger(::Pass) = false
+hasinteger(::Fail) = false
 
 
 ## exported pattern functions & singletons
@@ -477,3 +496,14 @@ julia> Depth.runtests(dry=true, verbose=3, depth.(2:3))
 ```
 """
 depth(x::Integer) = Depth(Int(x))
+
+"""
+    pass
+    fail
+
+Filtering patterns which match any testset which already ran,
+succesfully for `pass` or with at least one error for `fail`.
+The pattern `[pass, fail]` therefore matches any testset
+which already ran.
+"""
+pass, fail

@@ -1,6 +1,6 @@
 module ReTest
 
-export retest, @testset, @testset_macro, not, interpolated, reachable, depth
+export retest, @testset, @testset_macro, not, interpolated, reachable, depth, pass, fail
 
 using Distributed
 using Base.Threads: nthreads

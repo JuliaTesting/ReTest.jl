@@ -65,6 +65,7 @@ mutable struct ReTestSet <: AbstractTestSet
     subject::String
     id::Int64
     overall::Bool # TODO: could be conveyed by having self.mod == ""
+    pastresults::Dict{String,Bool}
     results::Vector
     n_passed::Int
     anynonpass::Bool
@@ -74,11 +75,12 @@ mutable struct ReTestSet <: AbstractTestSet
 end
 
 function ReTestSet(mod, desc::String, id::Integer=0;
-                   overall=false, verbose=true, parent=nothing)
+                   overall=false, verbose=true, parent=nothing,
+                   pastresults=Dict{String,Bool}())
     parentsubj = parent === nothing ? "" : parent.subject
     subject = string(parentsubj, '/', desc)
-    ReTestSet(mod, parent, desc, subject, id, overall, [], 0, false,
-              verbose, NamedTuple(), nothing)
+    ReTestSet(mod, parent, desc, subject, id, overall, pastresults, [],
+              0, false, verbose, NamedTuple(), nothing)
 end
 
 # For a non-passed result, simply store the result
@@ -443,11 +445,11 @@ default_rng() = isdefined(Random, :default_rng) ?
     Random.default_rng() :
     Random.GLOBAL_RNG
 
-function make_retestset(mod, desc, id, verbose, remove_last=false)
+function make_retestset(mod, desc, id, verbose, pastresults, remove_last=false)
     _testsets = get(task_local_storage(), :__BASETESTNEXT__, Test.AbstractTestSet[])
     @assert !(remove_last && isempty(_testsets))
     testsets = @view _testsets[1:end-remove_last]
-    ReTestSet(mod, desc, id; verbose=verbose,
+    ReTestSet(mod, desc, id; verbose=verbose, pastresults=pastresults,
               parent = isempty(testsets) ? nothing : testsets[end])
 end
 
@@ -490,7 +492,8 @@ function testset_beginend(mod::Module, isfinal::Bool, pat::Pattern, id::Int64, d
     # action (such as reporting the results)
     desc = esc(desc)
     ex = quote
-        local ts = make_retestset($mod, $desc, $id, $(options.transient_verbose))
+        local ts = make_retestset($mod, $desc, $id, $(options.transient_verbose),
+                                  $pastresults)
 
         if !$isfinal || matches($pat, ts.subject, ts)
             local ret
@@ -547,7 +550,7 @@ function testset_forloop(mod::Module, isfinal::Bool, pat::Pattern, id::Int64,
     desc = esc(desc)
     blk = quote
         local ts0 = make_retestset($mod, $desc, $id, $(options.transient_verbose),
-                                   !first_iteration)
+                                   $pastresults, !first_iteration)
 
         if !$isfinal || matches($pat, ts0.subject, ts0)
             # Trick to handle `break` and `continue` in the test code before

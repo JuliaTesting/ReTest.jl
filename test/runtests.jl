@@ -1039,9 +1039,40 @@ using ReTest
 @testset "has fails" begin
     @test false
 end
+@testset "also has passes" begin
+    @test true
+end
+@testset "unrun" begin
+    @test true
+end
+
 end # Failing
 
-@chapter Failing @test_throws Test.TestSetException retest(Failing)
+@chapter Failing begin
+    @test_throws Test.TestSetException retest(Failing)
+    retest(Failing, "passes")
+
+    check(Failing, dry=true, marks=true, -fail, [], output="""
+2| also has passes ✔
+3| unrun
+""")
+    check(Failing, dry=true, marks=true, pass, [], output="""
+2| also has passes ✔
+""")
+    check(Failing, dry=true, marks=true, [pass, fail], [], output="""
+1| has fails ✘
+2| also has passes ✔
+""")
+    check(Failing, dry=true, marks=true, -pass, -fail, [], output="""
+3| unrun
+""")
+
+    check(Failing, dry=true, marks=true, fail, [], output="1| has fails ✘")
+    check(Failing, dry=true, marks=true, -pass, [], output="""
+1| has fails ✘
+3| unrun
+""")
+end
 
 # * Duplicate ................................................................
 
