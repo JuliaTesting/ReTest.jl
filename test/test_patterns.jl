@@ -1,12 +1,24 @@
 module TestPatterns
 using Test
 
-using ReTest: and, or, not, interpolated, reachable, depth
+using ReTest: and, or, not, interpolated, reachable, depth, pass, fail
+import ReTest
+
+struct MockTestset
+    id
+    pastresults
+    parent
+
+    MockTestset() = new(rand(1:typemax(Int)), Dict(), nothing)
+end
+
+ReTest.tsdepth(::MockTestset) = 1
+
+const basic_patterns = [and(), or(), not(0), interpolated, 0, r"", depth(2), pass, fail]
+VERSION >= v"1.3" && push!(basic_patterns, reachable(1))
 
 @testset "patterns: ==" begin
-    basics = [and(), or(), not(0), interpolated, 0, r"", depth(2)]
-    VERSION >= v"1.3" && push!(basics, reachable(1))
-    for a = basics, b = basics
+    for a = basic_patterns, b = basic_patterns
         if a === b
             @test a == b
             if !(a isa Regex || a isa Integer)
@@ -39,6 +51,15 @@ using ReTest: and, or, not, interpolated, reachable, depth
                 @test reachable(reachable(a)) == reachable(deepcopy(reachable(a)))
             end
         end
+    end
+end
+
+@testset "patterns: interface" begin
+    for a in basic_patterns
+        @test ReTest.matches(a, "a", MockTestset()) isa Union{Missing, Bool}
+        @test ReTest.matches(a, missing, MockTestset()) isa Union{Missing, Bool}
+        @test ReTest.alwaysmatches(a, 1) isa Bool
+        @test ReTest.hasinteger(a) isa Bool
     end
 end
 
