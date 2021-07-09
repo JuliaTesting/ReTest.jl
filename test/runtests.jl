@@ -814,8 +814,7 @@ end
 
 @chapter MiscSeed begin
     rands = VERSION < v"1.7-" ? [0x24ae, 0x837e] :
-            VERSION <= v"1.7" ? [0x1f33, 0x415f] :
-                                error("update the seeds")
+                                [0x1f33, 0x415f]
     MiscSeed.runtests(verbose=0, seed=1)
     @test MiscSeed.RAND1 === MiscSeed.RAND2 === rands[1]
     MiscSeed.runtests(verbose=0, seed=2)
