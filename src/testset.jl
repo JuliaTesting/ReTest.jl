@@ -320,6 +320,15 @@ end
 
 anyfailed(ts::ReTestSet) = any(t -> t isa Union{Fail,Error}, ts.results)
 
+print_id(id, maxidw) =
+    if maxidw > 0 # width (ndigits) of max id; <= 0 means ids not printed
+        if id != 0
+            printstyled(lpad(id, maxidw), "| ", color = :light_black, bold=true)
+        else
+            print(' '^(maxidw+2))
+        end
+    end
+
 # Recursive function that prints out the results at each level of
 # the tree of test sets
 function print_counts(ts::ReTestSet, fmt::Format, depth, align,
@@ -333,14 +342,7 @@ function print_counts(ts::ReTestSet, fmt::Format, depth, align,
     # the test results appear above each other
 
     style = bold ? (bold=bold, color=:white) : NamedTuple()
-    if maxidw > 0
-        if ts.id != 0
-            printstyled(lpad(ts.id, maxidw), "| ", color = :light_black, bold=true)
-        else
-            print(' '^(maxidw+2))
-        end
-    end
-
+    print_id(ts.id, maxidw)
     printstyled(rpad(string("  "^depth, ts.description), align, " "); style...)
 
     np = passes + c_passes
@@ -498,7 +500,7 @@ function testset_beginend(mod::Module, isfinal::Bool, pat::Pattern, id::Int64, d
         if !$isfinal || matches($pat, ts.subject, ts)
             local ret
             if nworkers() == 1 && get_testset_depth() == 0 && $(chan.preview) !== nothing
-                put!($(chan.preview), $desc)
+                put!($(chan.preview), ($id, $desc))
             end
             push_testset(ts)
             # we reproduce the logic of guardseed, but this function
@@ -563,7 +565,7 @@ function testset_forloop(mod::Module, isfinal::Bool, pat::Pattern, id::Int64,
             end
             ts = ts0
             if nworkers() == 1 && get_testset_depth() == 0 && $(chan.preview) !== nothing
-                put!($(chan.preview), ts.description)
+                put!($(chan.preview), ($id, ts.description))
             end
             push_testset(ts)
             first_iteration = false

@@ -47,7 +47,7 @@ include("hijack.jl")
 include("watch.jl")
 include("patterns.jl")
 
-using .Testset: Testset, Format
+using .Testset: Testset, Format, print_id
 
 
 # * TestsetExpr
@@ -723,7 +723,7 @@ function retest(@nospecialize(args::ArgType...);
         printlock = ReentrantLock()
         previewchan =
             if stdout isa Base.TTY && (nthreads() > 1 && VERSION >= v"1.3" || nprocs() > 1)
-                RemoteChannel(() -> Channel{Maybe{String}}(Inf))
+                RemoteChannel(() -> Channel{Maybe{Tuple{Int64,String}}}(Inf))
                 # needs to be "remote" in the case nprocs() == 2, as then nworkers() == 1,
                 # which means the one remote worker will put descriptions on previewchan
                 # (if nworkers() > 1, descriptions are not put because we can't predict
@@ -749,12 +749,16 @@ function retest(@nospecialize(args::ArgType...);
         align_overflow = 0
 
         function take_latest!(previewchan)
-            local desc
+            local id_desc
             while isready(previewchan)
                 # printer/previewer can't take! it, as we locked
-                desc = take!(previewchan)
+                id_desc = take!(previewchan)
             end
-            @isdefined(desc) ? desc : ""
+            if @isdefined(id_desc)
+                something(id_desc, (Int64(0), nothing))
+            else
+                (Int64(0), "")
+            end
         end
 
         previewer = previewchan === nothing ? nothing :
@@ -762,16 +766,18 @@ function retest(@nospecialize(args::ArgType...);
                 timer = ['|', '/', '-', '\\']
                 cursor = 0
                 desc = ""
+                id = Int64(0)
                 finito = false
 
                 while !finito && !interrupted[]
                     lock(printlock) do
-                        newdesc = take_latest!(previewchan)
+                        newid, newdesc = take_latest!(previewchan)
                         if newdesc === nothing
                             finito = true
                             return # no need to sleep before looping
                         elseif newdesc != ""
                             desc = newdesc
+                            id = newid
                             cursor = 0
                             gotprinted = false
                         elseif gotprinted
@@ -805,8 +811,9 @@ function retest(@nospecialize(args::ArgType...);
                             # printer prints
                             align_overflow =
                                 max(align_overflow, textwidth(description) - align)
-                            printstyled('\r',
-                                        rpad("$description", align+align_overflow, " "),
+                            print('\r')
+                            print_id(id, maxidw[])
+                            printstyled(rpad("$description", align+align_overflow, " "),
                                         ' ',
                                         timer[mod1(cursor, end)];
                                         style...)
@@ -857,7 +864,7 @@ function retest(@nospecialize(args::ArgType...);
                     rts = take!(outchan)
                     lock(printlock) do
                         if previewchan !== nothing
-                            desc = take_latest!(previewchan)
+                            id, desc = take_latest!(previewchan)
                             if desc === nothing
                                 # keep `nothing` in so that the previewer knows to terminate
                                 put!(previewchan, nothing)
@@ -967,7 +974,7 @@ function retest(@nospecialize(args::ArgType...);
                             desc = "\0" * desc
                             # even when nworkers() >= 2, we inform the previewer that
                             # computation is gonna happen, so the wheel can start spinning
-                            put!(previewchan, desc)
+                            put!(previewchan, (ts.id, desc))
                         end
 
                         chan = (out=outchan, compute=computechan, preview=previewchan)
@@ -1351,10 +1358,7 @@ function dryrun(mod::Module, ts::TestsetExpr, pat::Pattern, align::Int=0, parent
 
         res = get(ts.pastresults, subject, nothing)
         if show
-            if maxidw > 0 # width (ndigits) of max id; <= 0 means ids not printed
-                printstyled(lpad(ts.id, maxidw), "| ", color = :light_black, bold=true)
-            end
-
+            print_id(ts.id, maxidw)
             printstyled(' '^align, desc, color = desc isa String ? :normal : Base.warn_color())
 
             if repeated !== nothing
