@@ -245,7 +245,7 @@ function hijack(packagemod::Module, modname=nothing; parentmodule::Module=Main,
     end
 
     if packagemod === Base
-        hijack_base(ChooseTests.BASETESTS,
+        hijack_base(:_Base_tests,
                     base=modname, parentmodule=parentmodule, lazy=lazy, revise=revise)
     elseif startswith(packagepath, Sys.STDLIB) # packagemod is an STDLIB
         hijack_base(string(packagemod), modname,
@@ -483,6 +483,12 @@ const BASETESTPATH = joinpath(Sys.BINDIR, "..", "share", "julia", "test")
 function call_choosetests(choices)
     isdefined(ChooseTests, :STDLIBS) ||
         include(joinpath(BASETESTPATH, "choosetests.jl"))
+
+    if choices === :_Base_tests
+        # we compute choices lazily, as in recent Julia versions, TESTNAMES is defined
+        # globally in choosetests.jl, and therefore defined only after the include above
+        choices = filter(x -> x != "stdlib", TESTNAMES)
+    end
     Base.invokelatest(choosetests, choices)
 end
 
@@ -501,7 +507,8 @@ function test_path(test)
     end
 end
 
-const TESTNAMES = [
+if VERSION < v"1.8.0-DEV.34"
+    const TESTNAMES = [
         "subarray", "core", "compiler", "worlds",
         "keywordargs", "numbers", "subtype",
         "char", "strings", "triplequote", "unicode", "intrinsics",
@@ -525,9 +532,8 @@ const TESTNAMES = [
         "channels", "iostream", "secretbuffer", "specificity",
         "reinterpretarray", "syntax", "corelogging", "missing", "asyncmap",
         "smallarrayshrink", "opaque_closure"
-]
-
-const BASETESTS = filter(x -> x != "stdlib", TESTNAMES)
+    ]
+end
 
 const BLACKLIST = [
     # failing at load time (in hijack_base)
