@@ -819,6 +819,19 @@ end
     @test MiscSeed.RAND1 === MiscSeed.RAND2 === rands[1]
     MiscSeed.runtests(verbose=0, seed=2)
     @test MiscSeed.RAND1 === MiscSeed.RAND2 === rands[2]
+    MiscSeed.runtests(verbose=0) # no seeding
+    @test MiscSeed.RAND1 === MiscSeed.RAND2 === rands[2]
+    MiscSeed.runtests(verbose=0, seed=false) # no seeding
+    @test MiscSeed.RAND1 === MiscSeed.RAND2 === rands[2]
+
+    rand1 = MiscSeed.RAND1
+    MiscSeed.runtests(verbose=0, seed=true) # random seeding
+    @test MiscSeed.RAND1 === MiscSeed.RAND2
+    rand2 = MiscSeed.RAND1
+    MiscSeed.runtests(verbose=0, seed=true) # random seeding
+    @test MiscSeed.RAND1 === MiscSeed.RAND2
+    rand3 = MiscSeed.RAND1
+    @test rand1 != rand2 || rand1 != rand3 # || to reduce failure rate
     # TODO: test in a distributed setting
 end
 

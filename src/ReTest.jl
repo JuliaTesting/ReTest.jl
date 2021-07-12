@@ -483,7 +483,8 @@ const ArgType = Union{Module,PatternX,AbstractString,AbstractArray,Tuple,Symbol,
            dry::Bool=false, stats::Bool=false, verbose::Real=true,
            [id::Bool], shuffle::Bool=false, recursive::Bool=true,
            static::Union{Bool,Nothing}=nothing, dup::Bool=false,
-           load::Bool=false, [seed::Integer], marks::Bool=true)
+           load::Bool=false, seed::Union{Integer,Bool}=false,
+           marks::Bool=true)
 
 Run tests declared with [`@testset`](@ref) blocks, within modules `mod` if specified,
 or within all currently loaded modules otherwise.
@@ -523,7 +524,8 @@ Filtering `pattern`s can be specified to run only a subset of the tests.
   are associated to `Mod` (they inherit its pattern specification as
   above), and are cached and used again on subsequent invocations.
 * If `seed` is provided, it is used to seed the global RNG before running
-  the tests.
+  the tests. As a special case, if `seed === false` (the default), no seeding
+  is performed, and if `seed === true`, a seed is chosen randomly.
 * When `marks` and `dry` are `true`, "check marks" are printed next to testsets
   which passed or failed in previous runs.
 
@@ -611,7 +613,7 @@ function retest(@nospecialize(args::ArgType...);
                 dup::Bool=false,
                 static::Maybe{Bool}=nothing,
                 load::Bool=false,
-                seed::Maybe{Integer}=nothing,
+                seed::Integer=false,
                 marks::Bool=true,
                 )
 
@@ -920,10 +922,18 @@ function retest(@nospecialize(args::ArgType...);
                 @async put!(computechan, nothing)
             end
 
-            if seed !== nothing
-                let includestr = """
+            if seed !== false
+                let seedstr =
+                        if seed === true
+                            # seed!(nothing) doesn't work on old Julia, so we can't just set
+                            # `seed = nothing` and interpolate `seed` directly in includestr
+                            ""
+                        else
+                            string(seed)
+                        end,
+                    includestr = """
                                  using Random
-                                 Random.seed!($seed)
+                                 Random.seed!($seedstr)
                                  nothing
                                  """
                     # can't use `@everywhere using Random`, as here is not toplevel
