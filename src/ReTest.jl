@@ -484,7 +484,7 @@ const ArgType = Union{Module,PatternX,AbstractString,AbstractArray,Tuple,Symbol,
            [id::Bool], shuffle::Bool=false, recursive::Bool=true,
            static::Union{Bool,Nothing}=nothing, dup::Bool=false,
            load::Bool=false, seed::Union{Integer,Bool}=false,
-           marks::Bool=true)
+           marks::Bool=true, spin::Bool=true)
 
 Run tests declared with [`@testset`](@ref) blocks, within modules `mod` if specified,
 or within all currently loaded modules otherwise.
@@ -528,6 +528,12 @@ Filtering `pattern`s can be specified to run only a subset of the tests.
   is performed, and if `seed === true`, a seed is chosen randomly.
 * When `marks` and `dry` are `true`, "check marks" are printed next to testsets
   which passed or failed in previous runs.
+* When `spin` is `true`, the description of the testset being currently executed
+  is shown (if there is only one), as well as a "spinner". This is disabled when
+  all the available threads/workers are used to run tests (i.e. typically
+  `Threads.nthreads()` should be greater than `1` for `spin` to take effect).
+  Note also that this feature slows down a bit the execution of tests.
+
 
 ### Filtering
 
@@ -615,10 +621,11 @@ function retest(@nospecialize(args::ArgType...);
                 load::Bool=false,
                 seed::Integer=false,
                 marks::Bool=true,
+                spin::Bool=true,
                 )
 
-    dry, stats, shuffle, group, verbose, recursive, id, strict, dup, static, marks =
-        update_keywords(args, dry, stats, shuffle, group, verbose, recursive, id, strict, dup, static, marks)
+    dry, stats, shuffle, group, verbose, recursive, id, strict, dup, static, marks, spin =
+        update_keywords(args, dry, stats, shuffle, group, verbose, recursive, id, strict, dup, static, marks, spin)
 
     implicitmodules, modules, verbose = process_args(args; verbose=verbose, shuffle=shuffle,
                                                      recursive=recursive, load=load)
@@ -724,7 +731,8 @@ function retest(@nospecialize(args::ArgType...);
 
         printlock = ReentrantLock()
         previewchan =
-            if stdout isa Base.TTY && (nthreads() > 1 && VERSION >= v"1.3" || nprocs() > 1)
+            if spin && stdout isa Base.TTY && (nthreads() > 1 && VERSION >= v"1.3" ||
+                                               nprocs() > 1)
                 RemoteChannel(() -> Channel{Maybe{Tuple{Int64,String}}}(Inf))
                 # needs to be "remote" in the case nprocs() == 2, as then nworkers() == 1,
                 # which means the one remote worker will put descriptions on previewchan
@@ -1056,7 +1064,7 @@ end
 
 # hidden feature, shortcuts for passing kwargs to retest
 function update_keywords(@nospecialize(args), dry, stats, shuffle, group, verbose,
-                         recursive, id, strict, dup, static, marks)
+                         recursive, id, strict, dup, static, marks, spin)
     for arg in args
         if arg isa Symbol
             for c in string(arg)
@@ -1085,13 +1093,15 @@ function update_keywords(@nospecialize(args), dry, stats, shuffle, group, verbos
                     static = val
                 elseif c == 'm'
                     marks = val
+                elseif c == 'p'
+                    spin = val
                 else
                     error("bad keyword shortcut")
                 end
             end
         end
     end
-    dry, stats, shuffle, group, verbose, recursive, id, strict, dup, static, marks
+    dry, stats, shuffle, group, verbose, recursive, id, strict, dup, static, marks, spin
 end
 
 function process_args(@nospecialize(args);
