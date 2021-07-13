@@ -13,9 +13,14 @@ end
 end
 
 # NOTE: all keywords have the same defaults as `retest`, except `marks`
+# Also, not sure why ReTest.def has to be qualified, when we just import def from ReTest
+# in this module and call it unqualified, then `def` is said to not exist when running
+# the test suite, from within a call to @chapter
 function check(x...; runtests=false, output::Union{Nothing,String}=nothing,
-               verbose=true, stats=false, dry=false, strict::Bool=true,
-               recursive=true, static=nothing, id=nothing, load=false, marks::Bool=false)
+               verbose=ReTest.def(:verbose), stats=ReTest.def(:stats), dry=ReTest.def(:dry),
+               strict::Bool=ReTest.def(:strict), recursive=ReTest.def(:recursive),
+               static=ReTest.def(:static), id=ReTest.def(:id), load=ReTest.def(:load),
+               marks::Bool=false)
     @assert !(runtests & (output !== nothing)) "unimplemented"
     args = x[1:end-1]
     expected = x[end]

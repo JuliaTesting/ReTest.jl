@@ -478,6 +478,26 @@ const ArgType = Union{Module,PatternX,AbstractString,AbstractArray,Tuple,Symbol,
                       Pair{Module,
                            <:Union{PatternX,AbstractString,AbstractArray,Tuple}}}
 
+const retest_defaults = (
+    dry       = false,
+    stats     = false,
+    shuffle   = false,
+    group     = true,
+    verbose   = true,
+    recursive = true,
+    id        = nothing,
+    strict    = true,
+    dup       = false,
+    static    = nothing,
+    load      = false,
+    seed      = false,
+    marks     = true,
+    spin      = true,
+)
+
+def(kw::Symbol) = retest_defaults[kw]
+
+
 """
     retest(mod..., pattern...;
            dry::Bool=false, stats::Bool=false, verbose::Real=true,
@@ -608,20 +628,21 @@ i.e. this is equivalent to specifying `sub => (pattern, subpat)`.
     module in which it was written (e.g. `mod`, when specified).
 """
 function retest(@nospecialize(args::ArgType...);
-                dry::Bool=false,
-                stats::Bool=false,
-                shuffle::Bool=false,
-                group::Bool=true,
-                verbose::Real=true, # should be @nospecialize, but not supported on old Julia
-                recursive::Bool=true,
-                id::Maybe{Bool}=nothing,
-                strict::Bool=true,
-                dup::Bool=false,
-                static::Maybe{Bool}=nothing,
-                load::Bool=false,
-                seed::Integer=false,
-                marks::Bool=true,
-                spin::Bool=true,
+                dry::Bool           = def(:dry),
+                stats::Bool         = def(:stats),
+                shuffle::Bool       = def(:shuffle),
+                group::Bool         = def(:group),
+                # should be @nospecialize, but not supported on old Julia
+                verbose::Real       = def(:verbose),
+                recursive::Bool     = def(:recursive),
+                id::Maybe{Bool}     = def(:id),
+                strict::Bool        = def(:strict),
+                dup::Bool           = def(:dup),
+                static::Maybe{Bool} = def(:static),
+                load::Bool          = def(:load),
+                seed::Integer       = def(:seed),
+                marks::Bool         = def(:marks),
+                spin::Bool          = def(:spin),
                 )
 
     dry, stats, shuffle, group, verbose, recursive, id, strict, dup, static, marks, spin =
@@ -1107,8 +1128,8 @@ end
 function process_args(@nospecialize(args);
                       # defaults for keywords are added just for process_args to be more
                       # easily called from test code
-                      # TODO: set defaults in global variables to help stay in sync?
-                      verbose=true, shuffle=false, recursive=true, load::Bool=false)
+                      verbose=def(:verbose), shuffle=def(:shuffle),
+                      recursive=def(:recursive), load::Bool=def(:load))
     ########## process args
     patterns = PatternX[] # list of standalone patterns
     modpats = Dict{Module,Any}() # pairs module => pattern
