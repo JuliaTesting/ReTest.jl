@@ -1327,8 +1327,8 @@ function fetchtests((mod, pat), verbose, module_header, maxidw; static, strict, 
         run || continue
         descwidth = max(descwidth, ts.descwidth)
         hasbroken |= ts.hasbrokenrec
+        maxidw[] = max(maxidw[], ndigits(id-1))
     end
-    maxidw[] = max(maxidw[], ndigits(id-1))
 
     tests = filter(ts -> ts.run, tests)
 
