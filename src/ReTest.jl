@@ -493,6 +493,7 @@ const retest_defaults = (
     seed      = false,
     marks     = true,
     spin      = true,
+    clear     = false,
 )
 
 def(kw::Symbol) =
@@ -653,6 +654,8 @@ function retest(@nospecialize(args::ArgType...);
                 seed::Integer       = def(:seed),
                 marks::Bool         = def(:marks),
                 spin::Bool          = def(:spin),
+                # clear: clear marks for matching tests, only active if dry=true
+                clear::Bool         = def(:clear),
                 )
 
     dry, stats, shuffle, group, verbose, recursive, id, strict, dup, static, marks, spin =
@@ -712,7 +715,7 @@ function retest(@nospecialize(args::ArgType...);
             end
             if verbose > 0
                 foreach(ts -> dryrun(mod, ts, pat, id ? 0 : module_header*2,
-                                     maxidw = id ? maxidw[] : 0, marks=marks),
+                                     maxidw = id ? maxidw[] : 0, marks=marks, clear=clear),
                         tests)
             end
             continue
@@ -1389,7 +1392,7 @@ module_summary(verbose, many) = many | iszero(verbose)
 hasmany(tests) = length(tests) > 1 || isfor(tests[1])
 
 function dryrun(mod::Module, ts::TestsetExpr, pat::Pattern, align::Int=0, parentsubj=""
-                ; maxidw::Int, marks::Bool, # external calls
+                ; maxidw::Int, marks::Bool, clear::Bool, # external calls
                 # only recursive calls:
                 evaldesc=true, repeated=nothing, show::Bool=true)
     @assert ts.run
@@ -1412,6 +1415,10 @@ function dryrun(mod::Module, ts::TestsetExpr, pat::Pattern, align::Int=0, parent
         end
 
         res = get(ts.pastresults, subject, nothing)
+        if clear && res !== nothing
+            delete!(ts.pastresults, subject)
+        end
+
         if show
             print_id(ts.id, maxidw)
             printstyled(' '^align, desc, color = desc isa String ? :normal : Base.warn_color())
@@ -1434,7 +1441,7 @@ function dryrun(mod::Module, ts::TestsetExpr, pat::Pattern, align::Int=0, parent
             for tsc in ts.children
                 tsc.run || continue
                 dryrun(mod, tsc, pat, align + 2, subject,
-                       maxidw=maxidw, marks=marks, show=true)
+                       maxidw=maxidw, marks=marks, clear=clear, show=true)
             end
             false, false, false # meaningless unused triple
         elseif marks
@@ -1451,7 +1458,7 @@ function dryrun(mod::Module, ts::TestsetExpr, pat::Pattern, align::Int=0, parent
             for tsc in ts.children
                 tsc.run || continue
                 cp, cf, cu = dryrun(mod, tsc, pat, align + 2, subject,
-                                    maxidw=maxidw, marks=marks, show=false)
+                                    maxidw=maxidw, marks=marks, clear=clear, show=false)
                 passes |= cp
                 fails |= cf
                 unrun |= cu
@@ -1498,7 +1505,7 @@ function dryrun(mod::Module, ts::TestsetExpr, pat::Pattern, align::Int=0, parent
             beginend.id = ts.id
             beginend.pastresults = ts.pastresults
             dryrun(mod, beginend, pat, align, parentsubj; evaldesc=false,
-                   repeated=repeated, maxidw=maxidw, marks=marks, show=show)
+                   repeated=repeated, maxidw=maxidw, marks=marks, clear=clear, show=show)
         end
 
         loopvalues = ts.loopvalues
