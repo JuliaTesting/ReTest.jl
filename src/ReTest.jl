@@ -495,7 +495,13 @@ const retest_defaults = (
     spin      = true,
 )
 
-def(kw::Symbol) = retest_defaults[kw]
+def(kw::Symbol) =
+    if isdefined(Main, :__retest_defaults__)
+        # TODO: test __retest_defaults__
+        get(Main.__retest_defaults__, kw, retest_defaults[kw])
+    else
+        retest_defaults[kw]
+    end
 
 
 """
@@ -553,6 +559,10 @@ Filtering `pattern`s can be specified to run only a subset of the tests.
   all the available threads/workers are used to run tests (i.e. typically
   `Threads.nthreads()` should be greater than `1` for `spin` to take effect).
   Note also that this feature slows down a bit the execution of tests.
+
+The default values of these keywords can be overriden by defining a dictionary
+or named tuple within `Main` called `__retest_defaults__`, whose keys are
+symbols. E.g. `__retest_defaults__ = (verbose=Inf, spin=false)`.
 
 
 ### Filtering
