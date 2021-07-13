@@ -835,6 +835,23 @@ end
     # TODO: test in a distributed setting
 end
 
+module MiscSubmoduleHeader
+module Sub
+using ReTest
+@testset "a" begin end
+end
+end
+
+@chapter MiscSubmoduleHeader begin
+    check(MiscSubmoduleHeader, recursive=true, dry=true, [], output="""
+Main.MiscSubmoduleHeader.Sub
+1| a
+""")
+    check(MiscSubmoduleHeader.Sub, recursive=true, dry=true, [], output="""
+1| a
+""")
+end
+
 module Bugs
 using ReTest
 @testset "macros with nothing" begin

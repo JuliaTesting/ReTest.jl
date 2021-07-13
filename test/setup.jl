@@ -10,7 +10,7 @@ function trace(x)
     push!(RUN, x)
     @test true
 end
-end
+end # module Trace
 
 # NOTE: all keywords have the same defaults as `retest`, except `marks`
 # Also, not sure why ReTest.def has to be qualified, when we just import def from ReTest

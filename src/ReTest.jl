@@ -658,11 +658,8 @@ function retest(@nospecialize(args::ArgType...);
     dry, stats, shuffle, group, verbose, recursive, id, strict, dup, static, marks, spin =
         update_keywords(args, dry, stats, shuffle, group, verbose, recursive, id, strict, dup, static, marks, spin)
 
-    implicitmodules, modules, verbose = process_args(args; verbose=verbose, shuffle=shuffle,
-                                                     recursive=recursive, load=load)
-    # overall: print header for each module, and probably "Overall" summary for all modules
-    overall = length(modules) > 1
-    module_header = overall | implicitmodules
+    module_header, modules, verbose = process_args(args; verbose=verbose, shuffle=shuffle,
+                                                   recursive=recursive, load=load)
     root = Testset.ReTestSet(Main, "Overall", overall=true)
 
     maxidw = Ref{Int}(0) # visual width for showing IDs (Ref for mutability in hack below)
@@ -1273,6 +1270,13 @@ function process_args(@nospecialize(args);
         end
     end
 
+    # module_header: whether to print module header before testsets belonging to that module
+    # we compute module_header before filtering out modules without tests, so that
+    # if a parent module with no tests is explicitly passed, which contains a submodule
+    # and recursive==true, then the submodule name is printed (and similarly for
+    # printing `MyPackageTests` when `MyPackage` is passed and `load==true`)
+    module_header = length(modules) > 1 | implicitmodules
+
     # remove modules which don't have tests, which can happen when a parent module without
     # tests is passed to retest in order to run tests in its submodules
     filter!(m -> isdefined(m, INLINE_TEST), modules)
@@ -1288,7 +1292,7 @@ function process_args(@nospecialize(args);
     end
     verbose = Int(verbose)
 
-    (implicitmodules=implicitmodules, modules=[mod => modpats[mod] for mod in modules],
+    (module_header=module_header, modules=[mod => modpats[mod] for mod in modules],
      verbose=verbose)
 end
 
