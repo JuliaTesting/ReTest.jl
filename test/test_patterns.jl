@@ -6,7 +6,7 @@ import ReTest
 
 struct MockTestset
     id
-    pastresults
+    marks
     parent
 
     MockTestset() = new(rand(1:typemax(Int)), Dict(), nothing)

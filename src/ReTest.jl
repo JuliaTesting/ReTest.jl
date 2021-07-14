@@ -37,6 +37,7 @@ import InlineTest: retest, @testset_macro
 
 abstract type Pattern end
 function matches end
+function setresult end
 
 
 # * includes
@@ -69,7 +70,8 @@ mutable struct TestsetExpr
     parent::Maybe{TestsetExpr}
     children::Vector{TestsetExpr}
     strings::Vector{Union{String,Missing}}
-    pastresults::Dict{String,Bool}
+    # Union to avoid creating a vector in most cases
+    marks::Dict{String, Union{Symbol, Vector{Symbol}}} # TODO: should be a MultiDict
     # loopvalues & loopiters: when successful in evaluating loop values in resolve!,
     # we "flatten" the nested for loops into a single loop, with loopvalues
     # containing tuples of values, and loopiters the tuples of variables to which the
@@ -84,7 +86,7 @@ mutable struct TestsetExpr
 
     TestsetExpr(source, mod, desc, options, loops, parent, children=TestsetExpr[]) =
         new(0, source, mod, desc, options, loops, parent, children, String[],
-            Dict{String,Bool}())
+            Dict{String, Union{Symbol, Vector{Symbol}}}())
 end
 
 isfor(ts::TestsetExpr) = ts.loops !== nothing
@@ -98,6 +100,54 @@ function tsdepth(ts::Union{TestsetExpr,Testset.ReTestSet})
     end
     d
 end
+
+const _pass = :__pass__
+const _fail = :__fail__
+
+# marks contains at most one of _pass, _fail
+
+# return true (pass), false (fail), or nothing (unrun)
+function pastresult(marks::Dict, subject)
+    ms = get(marks, subject, Symbol())
+    sym::Symbol = ms isa Symbol ? ms : isempty(ms) ? Symbol() : ms[1]
+    sym === _pass ? true : sym === _fail ? false : nothing
+end
+
+function setresult(marks::Dict, subject, success::Bool)
+    ms = get(marks, subject, Symbol())
+    res = success ? _pass : _fail
+    if ms isa Symbol
+        # ms could be Symbol() from get's default or delmark!
+        if ms ∈ (_pass, _fail, Symbol())
+            marks[subject] = res
+        else
+            # res always in first position
+            marks[subject] = [res, ms]
+        end
+    else # ms isa Vector
+        if !isempty(ms) && ms[1] ∈ (_pass, _fail)
+            ms[1] = res
+        else
+            pushfirst!(ms, res)
+        end
+    end
+end
+
+function delmark!(marks, subject, m::Symbol)
+    ms = get(marks, subject, Symbol())
+    if ms isa Symbol
+        if ms === m
+            marks[subject] = Symbol()
+        end
+    else
+        p = findfirst(==(m), ms)
+        if p !== nothing
+            deleteat!(ms, p)
+        end
+    end
+    nothing
+end
+
 
 struct _Invalid
     global const invalid = _Invalid.instance
@@ -418,7 +468,7 @@ function make_ts(ts::TestsetExpr, pat::Pattern, stats, chan)
     if ts.loops === nothing
         quote
             @testset $(ts.mod) $(isfinal(ts)) $pat $(ts.id) $(ts.desc) $(ts.options) #=
-            =# $(ts.pastresults) $stats $chan $body
+            =# $(ts.marks) $stats $chan $body
         end
     else
         c = count(x -> x === nothing, (ts.loopvalues, ts.loopiters))
@@ -430,7 +480,7 @@ function make_ts(ts::TestsetExpr, pat::Pattern, stats, chan)
         end
         quote
             @testset $(ts.mod) $(isfinal(ts)) $pat $(ts.id) $(ts.desc) $(ts.options) #=
-            =# $(ts.pastresults) $stats $chan $loops $body
+            =# $(ts.marks) $stats $chan $loops $body
         end
     end
 end
@@ -1414,9 +1464,9 @@ function dryrun(mod::Module, ts::TestsetExpr, pat::Pattern, align::Int=0, parent
             end
         end
 
-        res = get(ts.pastresults, subject, nothing)
+        res = pastresult(ts.marks, subject)
         if clear && res !== nothing
-            delete!(ts.pastresults, subject)
+            delmark!(ts.marks, subject, res ? _pass : _fail)
         end
 
         if show
@@ -1503,7 +1553,7 @@ function dryrun(mod::Module, ts::TestsetExpr, pat::Pattern, align::Int=0, parent
                                    ts.parent, ts.children)
             beginend.run = true
             beginend.id = ts.id
-            beginend.pastresults = ts.pastresults
+            beginend.marks = ts.marks
             dryrun(mod, beginend, pat, align, parentsubj; evaldesc=false,
                    repeated=repeated, maxidw=maxidw, marks=marks, clear=clear, show=show)
         end

@@ -127,11 +127,14 @@ end
 
 matches(d::Depth, _, ts) = d.d == tsdepth(ts)
 
-matches(::Pass, subj::AbstractString, ts) = get(ts.pastresults, subj, false)
-matches(::Fail, subj::AbstractString, ts) = !get(ts.pastresults, subj, true)
+matches(::Pass, subj::AbstractString, ts) = something(pastresult(ts.marks, subj), false)
+matches(::Fail, subj::AbstractString, ts) = !something(pastresult(ts.marks, subj), true)
 # TODO: test method below
+# instead of `isempty(ts.marks)`, a tighter test would be to check that no value in marks
+# contains the pass/fail marks; but this would be a bit more expensive, as values have to be
+# iterated over
 matches(::Union{Pass,Fail}, ::Missing, ts) =
-    isempty(ts.pastresults) ? false : missing
+    isempty(ts.marks) ? false : missing
 
 
 ## make_pattern
