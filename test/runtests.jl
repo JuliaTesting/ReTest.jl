@@ -1101,6 +1101,12 @@ end # Failing
 1| has fails ✘
 3| unrun
 """)
+    retest(Failing, pass, -fail) # test that pass/fail filters are handled in non-dry mode
+    check(Failing, dry=true, marks=true, [], output="""
+1| has fails ✘
+2| also has passes ✔
+3| unrun
+""")
 end
 
 # * Duplicate ................................................................
