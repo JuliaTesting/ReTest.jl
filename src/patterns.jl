@@ -137,6 +137,14 @@ matches(::Union{Pass,Fail}, ::Missing, ts) =
     isempty(ts.marks) ? false : missing
 
 
+## has
+
+# has(pat, T) checks whether pat recursively "contains" something of type T
+has(pat, T::Type)  = pat isa T
+has(pat::Union{And,Or}, T::Type) = pat isa T || any(p -> has(p, T), pat.xs)
+has(pat::Union{Not,Reachable}, T::Type) = pat isa T || has(pat.x, T)
+
+
 ## make_pattern
 
 make_pattern(x::PatternX) = x
@@ -165,19 +173,6 @@ make_pattern(pat::AbstractArray) = Or(PatternX[make_pattern(p) for p in pat])
 # special case for optimizing unit-ranges:
 make_pattern(pat::AbstractArray{<:Integer}) = Or(pat)
 make_pattern(@nospecialize(pat::Tuple)) = And(PatternX[make_pattern(p) for p in pat])
-
-
-## hasinteger
-
-hasinteger(::Regex) = false
-hasinteger(::Integer) = true
-hasinteger(pat::Union{And,Or}) = any(hasinteger, pat.xs)
-hasinteger(pat::Not) = hasinteger(pat.x)
-hasinteger(::Interpolated) = false
-hasinteger(pat::Reachable) = hasinteger(pat.x)
-hasinteger(::Depth) = false
-hasinteger(::Pass) = false
-hasinteger(::Fail) = false
 
 
 ## exported pattern functions & singletons

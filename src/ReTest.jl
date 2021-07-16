@@ -282,7 +282,7 @@ function resolve!(mod::Module, ts::TestsetExpr, pat::Pattern;
     desc = ts.desc
     ts.loopvalues = nothing # unnecessary ?
     ts.loopiters = nothing
-    if 0 != ts.id != id && !warned[] && hasinteger(pat)
+    if 0 != ts.id != id && !warned[] && has(pat, Integer)
         # this can happen when nested testsets are added and Revise is active
         @warn "testset IDs have changed since last run"
         warned[] = true
@@ -737,7 +737,7 @@ function retest(@nospecialize(args::ArgType...);
     end
 
     id = verbose > 0 && something(id, dry || any(modules) do (mod, pat)
-                                                 hasinteger(pat)
+                                                 has(pat, Integer)
                                              end)
 
     descwidth = maximum(x->x[2], tests_descs_hasbrokens)

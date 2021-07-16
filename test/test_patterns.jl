@@ -59,7 +59,7 @@ end
         @test ReTest.matches(a, "a", MockTestset()) isa Union{Missing, Bool}
         @test ReTest.matches(a, missing, MockTestset()) isa Union{Missing, Bool}
         @test ReTest.alwaysmatches(a, 1) isa Bool
-        @test ReTest.hasinteger(a) isa Bool
+        @test ReTest.has(a, Integer) isa Bool
     end
 end
 
