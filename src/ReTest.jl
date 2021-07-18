@@ -1336,7 +1336,7 @@ function process_args(@nospecialize(args);
     # if a parent module with no tests is explicitly passed, which contains a submodule
     # and recursive==true, then the submodule name is printed (and similarly for
     # printing `MyPackageTests` when `MyPackage` is passed and `load==true`)
-    module_header = length(modules) > 1 | implicitmodules
+    module_header = (length(modules) > 1) | implicitmodules
 
     # remove modules which don't have tests, which can happen when a parent module without
     # tests is passed to retest in order to run tests in its submodules

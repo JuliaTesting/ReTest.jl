@@ -58,23 +58,35 @@ end
 
 innertestsets = ["d", "e1", "e2", "g", "h1", "h2"]
 
-function check(rx, list)
+function check(rx, list; implicit=false)
     empty!(RUN)
-    retest(M, Regex(rx))
+    if implicit
+        retest(Regex(rx))
+    else
+        retest(M, Regex(rx))
+    end
     @test RUN == list
     mktemp() do path, io
         redirect_stdout(io) do
-            retest(M, Regex(rx), dry=true, id=false) # TODO: test with id=true
+            if implicit
+                retest(Regex(rx), dry=true, id=false)
+            else
+                retest(M, Regex(rx), dry=true, id=false) # TODO: test with id=true
+            end
         end
         seekstart(io)
         expected = map(list) do t
-            if t in innertestsets
-                "  " * t * " ✔"
-            else
-                t * " ✔"
-            end
+            "  "^implicit *
+                if t in innertestsets
+                    "  " * t * " ✔"
+                else
+                    t * " ✔"
+                end
         end
         expected = join(expected, '\n')
+        if implicit
+            expected = "Main.M\n" * expected
+        end
         actual = readchomp(io)
         if isempty(expected)
             @test startswith(actual, "No matching tests for module")
@@ -84,6 +96,10 @@ function check(rx, list)
     end
 end
 end #
+
+@chapter OnlyOneModule begin
+    M.check("a", ["a"], implicit=true)
+end
 
 @chapter M begin
     # we don't put these checks in a @testset, as this would modify filtering logic
