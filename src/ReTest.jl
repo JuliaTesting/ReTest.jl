@@ -91,7 +91,9 @@ mutable struct TestsetExpr
 end
 
 isfor(ts::TestsetExpr) = ts.loops !== nothing
-isfinal(ts::TestsetExpr) = isempty(ts.children)
+
+# ts has no children, or at least none which will run this time
+isfinal(ts::TestsetExpr) = all(tsc -> !tsc.run, ts.children)
 
 function tsdepth(ts::Union{TestsetExpr,Testset.ReTestSet})
     d = 1
@@ -467,7 +469,8 @@ eval_desc(mod, ts, x) =
 function make_ts(ts::TestsetExpr, pat::Pattern, stats, chan)
     ts.run || return nothing
 
-    if isfinal(ts)
+    if isempty(ts.children) # not isfinal(ts), so that children which don't run
+                            # are removed from the AST
         body = ts.body
     else
         body = make_ts(ts.body, pat, stats, chan)

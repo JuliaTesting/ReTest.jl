@@ -868,6 +868,31 @@ Main.MiscSubmoduleHeader.Sub
 """)
 end
 
+
+module MiscIsFinal
+using ReTest, ..Trace
+
+@testset "outer$i" for i=1:2
+# "outer$i" is apparently non-final, but with the proper filtering pattern,
+# it can become final: then, test that filtering actually happens
+# (once `resolve!` is done, no more filtering happens except for `isfinal` testsets;
+# so here we check that `isfinal` applies to "outer")
+    trace(i)
+    @testset "inner" begin
+        trace(-1)
+    end
+end
+
+end # MiscIsFinal
+
+@chapter MiscIsFinal begin
+    check(MiscIsFinal, r"outer1$", [1])
+    check(MiscIsFinal, r"outer1$", dry=true, id=false, [], output="outer1")
+    check(MiscIsFinal, r"outer2$", [2])
+    check(MiscIsFinal, r"outer2$", dry=true, id=false, [], output="outer2")
+end
+
+
 module Bugs
 using ReTest
 @testset "macros with nothing" begin
