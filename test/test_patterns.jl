@@ -1,20 +1,21 @@
 module TestPatterns
 using Test
 
-using ReTest: and, or, not, interpolated, reachable, depth, pass, fail
+using ReTest: and, or, not, interpolated, reachable, depth, pass, fail, iter
 import ReTest
 
 struct MockTestset
     id
     marks
     parent
+    iter
 
-    MockTestset() = new(rand(1:typemax(Int)), Dict(), nothing)
+    MockTestset() = new(rand(1:typemax(Int)), Dict(), nothing, 1)
 end
 
 ReTest.tsdepth(::MockTestset) = 1
 
-const basic_patterns = [and(), or(), not(0), interpolated, 0, r"", depth(2), pass, fail]
+const basic_patterns = [and(), or(), not(0), interpolated, 0, r"", depth(2), pass, fail, iter(1)]
 VERSION >= v"1.3" && push!(basic_patterns, reachable(1))
 
 @testset "patterns: ==" begin
@@ -60,6 +61,7 @@ end
         @test ReTest.matches(a, missing, MockTestset()) isa Union{Missing, Bool}
         @test ReTest.alwaysmatches(a, 1) isa Bool
         @test ReTest.has(a, Integer) isa Bool
+        @test ReTest.has(a, ReTest.Iter) isa Bool
     end
 end
 

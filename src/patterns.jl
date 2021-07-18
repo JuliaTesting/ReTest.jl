@@ -65,6 +65,13 @@ struct Fail <: Pattern end
 const fail = Fail()
 
 
+### iter
+
+struct Iter <: Pattern
+    i::Int
+end
+
+
 ## alwaysmatches
 
 alwaysmatches(pat::And, d) = all(p -> alwaysmatches(p, d), pat.xs)
@@ -86,6 +93,7 @@ alwaysmatches(pat::Reachable, d) = alwaysmatches(pat.x, d)
 alwaysmatches(dep::Depth, d) = dep.d == d
 alwaysmatches(::Pass, _) = false
 alwaysmatches(::Fail, _) = false
+alwaysmatches(::Iter, _) = false
 
 
 ## matches
@@ -135,6 +143,13 @@ matches(::Fail, subj::AbstractString, ts) = !something(pastresult(ts.marks, subj
 # iterated over
 matches(::Union{Pass,Fail}, ::Missing, ts) =
     isempty(ts.marks) ? false : missing
+
+matches(i::Iter, subj, ts) =
+    if ts.iter isa Int
+        i.i == ts.iter
+    else
+        i.i ∈ ts.iter
+    end
 
 
 ## has
@@ -505,3 +520,15 @@ The pattern `[pass, fail]` therefore matches any testset
 which already ran.
 """
 pass, fail
+
+"""
+    iter(i::Integer)
+
+Filtering pattern which matches only the `i`-th iteration of a testset-for.
+A non-for testset is considered to have a unique iteration.
+
+!!! warning
+
+    This is very experimental, not tested, and likely to be removed in a future version.
+"""
+iter(i::Integer) = Iter(Int(i))

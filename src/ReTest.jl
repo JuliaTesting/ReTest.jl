@@ -1,6 +1,6 @@
 module ReTest
 
-export retest, @testset, @testset_macro, not, interpolated, reachable, depth, pass, fail
+export retest, @testset, @testset_macro, not, interpolated, reachable, depth, pass, fail, iter
 
 using Distributed
 using Base.Threads: nthreads
@@ -80,6 +80,7 @@ mutable struct TestsetExpr
     loopiters::Maybe{Expr}
     hasbroken::Bool
     hasbrokenrec::Bool # recursive hasbroken, transiently
+    iter::Union{Int,UnitRange{Int}} # transient loop iteration counter
     run::Bool
     descwidth::Int # max width of self and children shown descriptions
     body::Expr
@@ -343,7 +344,8 @@ function resolve!(mod::Module, ts::TestsetExpr, pat::Pattern;
         for str in parentstrs
             !strict && ts.run && break
             new = str * "/" * desc
-            hasmissing && new === missing ||
+            # string[end] == new can happen with loops when has(pat, Iter) and desc isa String
+            hasmissing && new === missing || !isempty(strings) && strings[end] === new ||
                 push!(strings, new)
             hasmissing |= new === missing # comes either from desc or str
             ts.run = ts.run || decide(new)
@@ -352,7 +354,7 @@ function resolve!(mod::Module, ts::TestsetExpr, pat::Pattern;
     end
 
     loops = ts.loops
-    if loops === nothing || desc isa String
+    if loops === nothing || desc isa String && !has(pat, Iter)
         # TODO: maybe, for testset-for and !(desc isa String), still try this branch
         # in case the the interpolation can be resolved thanks to a global binding
         # (i.e. the description doesn't depend on loop variables)
@@ -368,9 +370,11 @@ function resolve!(mod::Module, ts::TestsetExpr, pat::Pattern;
         if shown
             ts.descwidth = descwidth(desc)
         end
+        ts.iter = 1
         decide_testset!(desc, false)
 
-    else # we have a testset-for with description which needs interpolation
+    else # we have a testset-for with description which needs interpolation, or
+         # the iterator must be computed to get an iterator counter
         xs = ()
         loopiters = Expr(:tuple, (arg.args[1] for arg in loops)...)
 
@@ -398,17 +402,20 @@ function resolve!(mod::Module, ts::TestsetExpr, pat::Pattern;
         catch
             @assert xs == ()
             ts.descwidth = shown ? descwidth(missing) : 0
+            ts.iter = typemax(Int)
             ts.run = ts.run || decide(missing)
             push!(strings, missing)
         end
         hasmissing = false
-        for x in xs # empty loop if eval above threw
+        for (iter, x) in enumerate(xs) # empty loop if eval above threw
             descx = eval_desc(mod, ts, x)
+            ts.iter = iter
             if shown
                 ts.descwidth = max(ts.descwidth, descwidth(descx))
             end
-            if !strict && ts.run
-                if !shown # no need to compute subsequent descx to update ts.descwidth
+            if ts.run && (!strict || ts.desc isa String)
+                if ts.desc isa String || !shown # no need to compute subsequent descx to update ts.descwidth
+                    iter = length(xs)
                     break
                 else
                     continue
@@ -420,6 +427,7 @@ function resolve!(mod::Module, ts::TestsetExpr, pat::Pattern;
 
     run = ts.run
     ts.hasbrokenrec = ts.hasbroken
+    ts.iter = 1:ts.iter # for children, when reachable is used, set the possible range
 
     for tsc in ts.children
         runc, id = resolve!(mod, tsc, pat, force = !strict && ts.run,
@@ -465,7 +473,7 @@ function make_ts(ts::TestsetExpr, pat::Pattern, stats, chan)
         body = make_ts(ts.body, pat, stats, chan)
     end
 
-    if ts.loops === nothing
+    if !isfor(ts)
         quote
             @testset $(ts.mod) $(isfinal(ts)) $pat $(ts.id) $(ts.desc) $(ts.options) #=
             =# $(ts.marks) $stats $chan $body
@@ -1448,7 +1456,7 @@ function dryrun(mod::Module, ts::TestsetExpr, pat::Pattern, align::Int=0, parent
     @assert ts.run
     desc = ts.desc
 
-    if ts.loops === nothing
+    if !isfor(ts)
         if evaldesc && !(desc isa String)
             try
                 desc = Core.eval(mod, desc)
@@ -1532,8 +1540,8 @@ function dryrun(mod::Module, ts::TestsetExpr, pat::Pattern, align::Int=0, parent
             end
             false, false, false
         end
-    else
-        function dryrun_beginend(descx, repeated=nothing)
+    else # isfor(ts)
+        function dryrun_beginend(descx; iter, repeated=nothing)
             # avoid repeating ourselves, transform this iteration into a "begin/end" testset
             if descx isa Expr
                 @assert descx.head == :string
@@ -1553,6 +1561,8 @@ function dryrun(mod::Module, ts::TestsetExpr, pat::Pattern, align::Int=0, parent
                                    ts.parent, ts.children)
             beginend.run = true
             beginend.id = ts.id
+            beginend.iter = iter
+            ts.iter = iter # necessary when reachable is used
             beginend.marks = ts.marks
             dryrun(mod, beginend, pat, align, parentsubj; evaldesc=false,
                    repeated=repeated, maxidw=maxidw, marks=marks, clear=clear, show=show)
@@ -1564,7 +1574,11 @@ function dryrun(mod::Module, ts::TestsetExpr, pat::Pattern, align::Int=0, parent
             # identitical lines (caveat: if subjects of children would change randomly)
             # but still try simply to evaluate the length of the iterator
             repeated = -1
-            if ts.desc isa String
+            if ts.desc isa String && !has(pat, Iter)
+                # when has(pat, Iter), we probably weren't able to eval the forloop-iterator
+                # in resolve!, so no need to re-try here; plus, we wouldn't be able in this
+                # branch to tell how many iterations are matching, without going thru the
+                # dryrun_beginend function in an enumerate'd loop
                 local iterlen
                 try
                     iterlen = 1
@@ -1575,7 +1589,9 @@ function dryrun(mod::Module, ts::TestsetExpr, pat::Pattern, align::Int=0, parent
                 catch
                 end
             end
-            dryrun_beginend(ts.desc, repeated)
+            # if iterlen was computed, then !has(pat, Iter) so the value of the iter
+            # keyword below doesn't matter
+            dryrun_beginend(ts.desc, repeated=repeated, iter=1:typemax(Int))
         else
             passes, fails, unrun = false, false, false
             for (i, x) in enumerate(loopvalues)
@@ -1587,9 +1603,10 @@ function dryrun(mod::Module, ts::TestsetExpr, pat::Pattern, align::Int=0, parent
                     # so we add the "repeated" annotation
                     # (it's certainly not worth it to bother being more precise about
                     # exactly which iterations are uninterpolated)
-                    lp, lf, lu = dryrun_beginend(ts.desc, length(loopvalues)-i+1)
+                    lp, lf, lu = dryrun_beginend(ts.desc, repeated=length(loopvalues)-i+1,
+                                                 iter=i:length(loopvalues))
                 else
-                    lp, lf, lu = dryrun_beginend(descx)
+                    lp, lf, lu = dryrun_beginend(descx, iter=i)
                 end
                 passes |= lp
                 fails |= lf

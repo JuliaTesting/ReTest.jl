@@ -66,6 +66,7 @@ mutable struct ReTestSet <: AbstractTestSet
     id::Int64
     overall::Bool # TODO: could be conveyed by having self.mod == ""
     marks::Dict{String, Union{Symbol, Vector{Symbol}}} # used in matches()
+    iter::Int # used in matches()
     results::Vector
     n_passed::Int
     anynonpass::Bool
@@ -76,10 +77,11 @@ end
 
 function ReTestSet(mod, desc::String, id::Integer=0;
                    overall=false, verbose=true, parent=nothing,
-                   marks=Dict{String, Union{Symbol, Vector{Symbol}}}())
+                   marks=Dict{String, Union{Symbol, Vector{Symbol}}}(),
+                   iter=1)
     parentsubj = parent === nothing ? "" : parent.subject
     subject = string(parentsubj, '/', desc)
-    ReTestSet(mod, parent, desc, subject, id, overall, marks, [],
+    ReTestSet(mod, parent, desc, subject, id, overall, marks, iter, [],
               0, false, verbose, NamedTuple(), nothing)
 end
 
@@ -447,11 +449,11 @@ default_rng() = isdefined(Random, :default_rng) ?
     Random.default_rng() :
     Random.GLOBAL_RNG
 
-function make_retestset(mod, desc, id, verbose, marks, remove_last=false)
+function make_retestset(mod, desc, id, verbose, marks, remove_last=false, iter=1)
     _testsets = get(task_local_storage(), :__BASETESTNEXT__, Test.AbstractTestSet[])
     @assert !(remove_last && isempty(_testsets))
     testsets = @view _testsets[1:end-remove_last]
-    ReTestSet(mod, desc, id; verbose=verbose, marks=marks,
+    ReTestSet(mod, desc, id; verbose=verbose, marks=marks, iter=iter,
               parent = isempty(testsets) ? nothing : testsets[end])
 end
 
@@ -551,8 +553,9 @@ function testset_forloop(mod::Module, isfinal::Bool, pat::Pattern, id::Int64,
 
     desc = esc(desc)
     blk = quote
+        iter += 1
         local ts0 = make_retestset($mod, $desc, $id, $(options.transient_verbose),
-                                   $marks, !first_iteration)
+                                   $marks, !first_iteration, iter)
 
         if !$isfinal || matches($pat, ts0.subject, ts0)
             # Trick to handle `break` and `continue` in the test code before
@@ -586,6 +589,7 @@ function testset_forloop(mod::Module, isfinal::Bool, pat::Pattern, id::Int64,
     quote
         local arr = Vector{Any}()
         local first_iteration = true
+        local iter = 0
         local ts
         local RNG = default_rng()
         local oldrng = copy(RNG)
