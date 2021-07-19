@@ -1452,7 +1452,8 @@ module_summary(verbose, many) = many | iszero(verbose)
 # FIXME: isfor when only one iteration
 hasmany(tests) = length(tests) > 1 || isfor(tests[1])
 
-function dryrun(mod::Module, ts::TestsetExpr, pat::Pattern, align::Int=0, parentsubj=""
+function dryrun(mod::Module, ts::TestsetExpr, pat::Pattern, align::Int=0,
+                parentsubj::Union{Missing, String}=""
                 ; maxidw::Int, marks::Bool, clear::Bool, # external calls
                 # only recursive calls:
                 evaldesc=true, repeated=nothing, show::Bool=true)
@@ -1467,12 +1468,10 @@ function dryrun(mod::Module, ts::TestsetExpr, pat::Pattern, align::Int=0, parent
             end
         end
 
-        subject = nothing
-        if parentsubj isa String && desc isa String
-            subject = parentsubj * '/' * desc
-            if isfinal(ts) && !matches(pat, subject, ts)
-                return false, false, false
-            end
+        subject = desc isa String ? parentsubj * "/" * desc :
+                                    missing
+        if isfinal(ts) && false === matches(pat, subject, ts)
+            return false, false, false
         end
 
         res = pastresult(ts.marks, subject)

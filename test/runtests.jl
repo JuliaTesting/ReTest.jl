@@ -789,6 +789,18 @@ a
   "b?" (repeated 1 times)
     c
 """)
+
+    # in dryrun mode, isfinal testsets might have to be filtered out even when
+    # their description can't be interpolated (finding such an example was initial
+    # motivation to add the iter(n)::Iter pattern)
+    check(MiscDuplicity, (2, iter(1)), dry=true, id=false, verbose=2, [], output="""
+a
+  b1
+""")
+    check(MiscDuplicity, (2, iter(2)), dry=true, id=false, verbose=2, [], output="""
+a
+  "b?" (repeated 1 times)
+""")
 end
 
 module MV # MiscVerbose, but we want the name to be short to not have effect on alignment
