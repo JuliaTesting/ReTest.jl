@@ -948,14 +948,14 @@ module Marks
 using ReTest, ..Trace
 
 @testset "a" begin
-    @test true
+    trace("a")
     @testset "b" begin end # no test, counts as pass
     @testset "c" begin
-        @test true
+        trace("c")
     end
     x = 1
     @testset "d$x" begin
-        @test true
+        trace("d$x")
     end
     @testset "e" begin
         @test false
@@ -1129,6 +1129,8 @@ x ⋯
     retest(Marks, r"a$", dry=false)
     retest(Marks, r"a$", dry=true, tag=[:a3 :a4])
     retest(Marks, r"a$", dry=true, tag=(:a5, :a6))
+    @test_throws ArgumentError retest(Marks, r"a$", dry=true, tag=:_underscored)
+
     check(Marks, "-l", -4, dry=true, verbose=9, id=false, marks=true, [], output="""
 a a1 a2 a3 a4 a5 a6 ✔
   b
@@ -1146,6 +1148,35 @@ x
     z3
     z4
 """)
+    check(Marks, "a", "-l", -4, :a2, dry=true, verbose=9, id=false, marks=true, [],
+          output="a a1 a2 a3 a4 a5 a6 ✔")
+    check(Marks, "a", "-l", -4, :a2, dry=false, verbose=9, id=false, marks=true, ["a"])
+    if VERSION >= v"1.3"
+        check(Marks, "-l", -4, not(reachable(:a1)), dry=true, verbose=9, id=false,
+              marks=true, [], output="""
+x
+  y1 ylabel
+    z1 ylabel
+    z2 ylabel
+    z3 ylabel
+    z4 ylabel
+  y2
+    z1
+    z2
+    z3
+    z4
+""")
+    check(Marks, "-l", -4, reachable("x"), not(:ylabel), dry=true, verbose=9, id=false,
+          marks=true, [], output="""
+x
+  y1 ylabel
+  y2
+    z1
+    z2
+    z3
+    z4
+""")
+    end
 end
 
 

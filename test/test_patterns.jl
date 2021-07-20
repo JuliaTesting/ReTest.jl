@@ -15,14 +15,15 @@ end
 
 ReTest.tsdepth(::MockTestset) = 1
 
-const basic_patterns = [and(), or(), not(0), interpolated, 0, r"", depth(2), pass, fail, iter(1)]
+const basic_patterns = [and(), or(), not(0), interpolated, 0, r"", :label,
+                        depth(2), pass, fail, iter(1)]
 VERSION >= v"1.3" && push!(basic_patterns, reachable(1))
 
 @testset "patterns: ==" begin
     for a = basic_patterns, b = basic_patterns
         if a === b
             @test a == b
-            if !(a isa Regex || a isa Integer)
+            if !(a isa Regex || a isa Integer || a isa Symbol)
                 @test -a == not(a)
             end
         else

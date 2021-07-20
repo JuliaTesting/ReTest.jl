@@ -1,4 +1,4 @@
-const PatternX = Union{Pattern, Regex, Integer}
+const PatternX = Union{Pattern, Regex, Integer, Symbol}
 
 ## Patterns
 
@@ -89,6 +89,7 @@ alwaysmatches(::Not, _) = false
 alwaysmatches(::Interpolated, _) = false
 alwaysmatches(rx::Regex, _) = isempty(rx.pattern)
 alwaysmatches(id::Integer, _) = false
+alwaysmatches(label::Symbol, _) = false
 alwaysmatches(pat::Reachable, d) = alwaysmatches(pat.x, d)
 alwaysmatches(dep::Depth, d) = dep.d == d
 alwaysmatches(::Pass, _) = false
@@ -115,6 +116,11 @@ matches(pat::Integer, _, ts) =
     @inbounds pat >= 0 ?
         pat == ts.id :
         pat != -ts.id
+
+matches(label::Symbol, subj::AbstractString, ts) = hasmark(ts.marks, subj, label)
+matches(label::Symbol, subj::Missing, ts) = missing
+# TODO: optimize by recording possible labels for missing, to allow returning false
+# in some cases
 
 function matches(pat::Reachable, desc, ts)
     if desc !== missing

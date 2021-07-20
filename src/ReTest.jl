@@ -188,6 +188,15 @@ function delmark!(marks, subject, m::Symbol)
     nothing
 end
 
+function hasmark(marks, subject, m::Symbol)
+    ms = get(marks, subject, Symbol())
+    if ms isa Symbol
+        ms === m
+    else
+        m ∈ ms
+    end
+end
+
 
 struct _Invalid
     global const invalid = _Invalid.instance
@@ -679,10 +688,11 @@ Moreover if a testset is run, its enclosing testset, if any, also has to run
 (although not necessarily exhaustively, i.e. other nested testsets
 might be filtered out).
 
-A `pattern` can be a string, a `Regex`, an integer, an array or a tuple.
+A `pattern` can be a string, a `Regex`, an integer, a symbol, an array or a tuple.
 For a testset to "match" an array, it must match at least one of its elements (disjunction).
 To match a tuple, it must match all of its elements (conjunction).
 To match an integer, its ID must be equal to this integer (cf. the `id` keyword).
+To match a symbol, it must be tagged with that symbol (label).
 
 A pattern can also be the "negation" of a pattern, via the [`not`](@ref) function,
 which allows to exclude testsets from being run.
@@ -810,6 +820,10 @@ function retest(@nospecialize(args::ArgType...);
     end
     if !dry && !isempty(tag)
         @warn "tag keyword: labels can be added only in dry mode"
+    end
+    for label in tag
+        startswith(String(label), '_') &&
+            throw(ArgumentError("tag keyword: labels can't start with an underscore"))
     end
 
     for imod in eachindex(modules)
@@ -1212,7 +1226,9 @@ function update_keywords(@nospecialize(args), dry, stats, shuffle, group, verbos
                          recursive, id, strict, dup, static, marks, spin)
     for arg in args
         if arg isa Symbol
-            for c in string(arg)
+            sarg = String(arg)
+            startswith(sarg, '_') || continue
+            for c in sarg[2:end]
                 c == 'v' && continue # "verbose" ignored, we care only about the value
                 val = islowercase(c)
                 c = lowercase(c)
@@ -1300,7 +1316,7 @@ function process_args(@nospecialize(args);
             push!(pat.xs, make_pattern(last(arg)))
             mod ∉ modules && push!(modules, mod)
             load_testmod(mod)
-        elseif arg isa Symbol
+        elseif arg isa Symbol && startswith(String(arg), '_')
             # ignored, already processed in update_keywords
         else
             push!(patterns, make_pattern(arg))
