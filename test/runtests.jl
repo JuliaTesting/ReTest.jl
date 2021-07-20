@@ -1130,6 +1130,7 @@ x ⋯
     retest(Marks, r"a$", dry=true, tag=[:a3 :a4])
     retest(Marks, r"a$", dry=true, tag=(:a5, :a6))
     @test_throws ArgumentError retest(Marks, r"a$", dry=true, tag=:_underscored)
+    @test_throws ArgumentError retest(Marks, r"a$", dry=true, tag=[not(:_underscored)])
 
     check(Marks, "-l", -4, dry=true, verbose=9, id=false, marks=true, [], output="""
 a a1 a2 a3 a4 a5 a6 ✔
@@ -1166,8 +1167,8 @@ x
     z3
     z4
 """)
-    check(Marks, "-l", -4, reachable("x"), not(:ylabel), dry=true, verbose=9, id=false,
-          marks=true, [], output="""
+        check(Marks, "-l", -4, reachable("x"), not(:ylabel), dry=true, verbose=9, id=false,
+              marks=true, [], output="""
 x
   y1 ylabel
   y2
@@ -1177,6 +1178,27 @@ x
     z4
 """)
     end
+    check(Marks, -4, [r"y1$", "z3"], dry=true, marks=true, id=false, tag=not(:ylabel),
+          verbose=9, [], output="""
+x
+  y1
+    z3
+  y2
+    z3
+""")
+    check(Marks, 8:12, dry=true, verbose=9, id=false, marks=true, [], output="""
+x
+  y1
+    z1 ylabel
+    z2 ylabel
+    z3
+    z4 ylabel
+  y2
+    z1
+    z2
+    z3
+    z4
+""")
 end
 
 

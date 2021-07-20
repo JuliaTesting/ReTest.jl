@@ -20,7 +20,7 @@ function check(x...; runtests=false, output::Union{Nothing,String}=nothing,
                verbose=ReTest.def(:verbose), stats=ReTest.def(:stats), dry=ReTest.def(:dry),
                strict::Bool=ReTest.def(:strict), recursive=ReTest.def(:recursive),
                static=ReTest.def(:static), id=ReTest.def(:id), load=ReTest.def(:load),
-               marks::Bool=false, clear::Bool=ReTest.def(:clear))
+               marks::Bool=false, tag=ReTest.def(:tag), clear::Bool=ReTest.def(:clear))
     @assert !(runtests & (output !== nothing)) "unimplemented"
     args = x[1:end-1]
     expected = x[end]
@@ -32,17 +32,17 @@ function check(x...; runtests=false, output::Union{Nothing,String}=nothing,
     if runtests
         getfield(args[1], :runtests)(args[2:end]...; verbose=verbose, stats=stats, dry=dry,
                                      strict=strict, recursive=recursive, static=static,
-                                     id=id, load=load, marks=marks, clear=clear)
+                                     id=id, load=load, marks=marks, tag=tag, clear=clear)
     elseif output === nothing
         retest(args...; verbose=verbose, stats=stats, dry=dry, strict=strict,
                recursive=recursive, static=static, id=id, load=load, marks=marks,
-               clear=clear)
+               tag=tag, clear=clear)
     else
         mktemp() do path, io
             redirect_stdout(io) do
                 retest(args...; verbose=verbose, stats=stats, dry=dry, strict=strict,
                        recursive=recursive, static=static, id=id, load=load, marks=marks,
-                       clear=clear)
+                       tag=tag, clear=clear)
             end
             seekstart(io)
             printed = join(map(rstrip, split(readchomp(io), '\n')), '\n')

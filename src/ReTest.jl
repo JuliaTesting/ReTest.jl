@@ -666,6 +666,8 @@ Filtering `pattern`s can be specified to run only a subset of the tests.
 * The `tag` keyword allows to tag a testset with labels, encoded as symbols.
   When `tag` is a list of symbols, tag all matching testsets with these.
   When `tag` is a symbol, tag all matching testsets with it.
+  Instead of a symbol `:sym`, it's possible to instead pass `not(:sym)` in
+  order to remove the `:sym` label from matching testsets.
   Currently, `tag` has an effect only if `dry` is `true`.
 * When `spin` is `true`, the description of the testset being currently executed
   is shown (if there is only one), as well as a "spinner". This is disabled when
@@ -813,15 +815,16 @@ function retest(@nospecialize(args::ArgType...);
 
     maxidw[] = id ? maxidw[] : 0
 
-    if tag isa Symbol
+    if tag isa Symbol || tag isa Not && tag.x isa Symbol
         tag = [tag]
-    elseif !(tag isa Vector{Symbol})
-        tag = vec(collect(Symbol, tag))
+    elseif !(tag isa Vector{<:Union{Symbol,Not}})
+        tag = vec(collect(Union{Symbol,Not}, tag))
     end
     if !dry && !isempty(tag)
         @warn "tag keyword: labels can be added only in dry mode"
     end
-    for label in tag
+    for t in tag
+        label::Symbol = t isa Symbol ? t : t.x
         startswith(String(label), '_') &&
             throw(ArgumentError("tag keyword: labels can't start with an underscore"))
     end
@@ -1524,7 +1527,7 @@ hasmany(tests) = length(tests) > 1 || isfor(tests[1])
 function dryrun(mod::Module, ts::TestsetExpr, pat::Pattern, align::Int=0,
                 parentsubj::Union{Missing, String}=""
                 # external calls:
-                ; maxidw::Int, marks::Bool, tag::Vector{Symbol}, clear::Bool,
+                ; maxidw::Int, marks::Bool, tag::Vector, clear::Bool,
                 # only recursive calls:
                 evaldesc=true, repeated=nothing, show::Bool=true)
     @assert ts.run
@@ -1556,7 +1559,13 @@ function dryrun(mod::Module, ts::TestsetExpr, pat::Pattern, align::Int=0,
         end
         if subject !== missing
             for mark=tag
-                ismatch && addmark!(ts.marks, subject, mark)
+                if ismatch
+                    if mark isa Symbol
+                        addmark!(ts.marks, subject, mark)
+                    else
+                        delmark!(ts.marks, subject, mark.x)
+                    end
+                end
             end
         end
 
