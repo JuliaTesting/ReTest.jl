@@ -37,7 +37,7 @@ import InlineTest: retest, @testset_macro
 
 abstract type Pattern end
 function matches end
-function setresult end
+function setresult! end
 
 
 # * includes
@@ -116,7 +116,7 @@ function pastresult(marks::Dict, subject)
     sym === _pass ? true : sym === _fail ? false : nothing
 end
 
-function setresult(marks::Dict, subject, success::Bool)
+function setresult!(marks::Dict, subject, success::Bool)
     ms = get(marks, subject, Symbol())
     res = success ? _pass : _fail
     if ms isa Symbol
@@ -133,6 +133,43 @@ function setresult(marks::Dict, subject, success::Bool)
         else
             pushfirst!(ms, res)
         end
+    end
+end
+
+function markiter(marks, subject, skipres::Bool)
+    ms = get(marks, subject, Symbol())
+    if ms isa Symbol
+        if ms === Symbol() || skipres && ms ∈ (_pass, _fail)
+            ()
+        else
+            (ms,)
+        end
+    else
+        if skipres
+            Iterators.filter(m -> m ∉ (_pass, _fail), ms)
+        else
+            ms
+        end
+    end
+end
+
+function addmark!(marks, subject, m::Symbol)
+    ms = get(marks, subject, Symbol())
+    if ms isa Symbol
+        if ms === m
+            false
+        elseif ms === Symbol()
+            marks[subject] = m
+            true
+        else
+            marks[subject] = [ms, m]
+            true
+        end
+    elseif findfirst(==(m), ms) === nothing
+        push!(ms, m)
+        true
+    else
+        false
     end
 end
 
@@ -553,6 +590,7 @@ const retest_defaults = (
     load      = false,
     seed      = false,
     marks     = true,
+    tag       = Symbol[],
     spin      = true,
     clear     = false,
 )
@@ -572,7 +610,7 @@ def(kw::Symbol) =
            [id::Bool], shuffle::Bool=false, recursive::Bool=true,
            static::Union{Bool,Nothing}=nothing, dup::Bool=false,
            load::Bool=false, seed::Union{Integer,Bool}=false,
-           marks::Bool=true, spin::Bool=true)
+           marks::Bool=true, tag=[], spin::Bool=true)
 
 Run tests declared with [`@testset`](@ref) blocks, within modules `mod` if specified,
 or within all currently loaded modules otherwise.
@@ -615,7 +653,11 @@ Filtering `pattern`s can be specified to run only a subset of the tests.
   the tests. As a special case, if `seed === false` (the default), no seeding
   is performed, and if `seed === true`, a seed is chosen randomly.
 * When `marks` and `dry` are `true`, "check marks" are printed next to testsets
-  which passed or failed in previous runs.
+  which passed or failed in previous runs, as well as labels.
+* The `tag` keyword allows to tag a testset with labels, encoded as symbols.
+  When `tag` is a list of symbols, tag all matching testsets with these.
+  When `tag` is a symbol, tag all matching testsets with it.
+  Currently, `tag` has an effect only if `dry` is `true`.
 * When `spin` is `true`, the description of the testset being currently executed
   is shown (if there is only one), as well as a "spinner". This is disabled when
   all the available threads/workers are used to run tests (i.e. typically
@@ -714,6 +756,7 @@ function retest(@nospecialize(args::ArgType...);
                 load::Bool          = def(:load),
                 seed::Integer       = def(:seed),
                 marks::Bool         = def(:marks),
+                tag                 = def(:tag),
                 spin::Bool          = def(:spin),
                 # clear: clear marks for matching tests, only active if dry=true
                 clear::Bool         = def(:clear),
@@ -760,6 +803,15 @@ function retest(@nospecialize(args::ArgType...);
 
     maxidw[] = id ? maxidw[] : 0
 
+    if tag isa Symbol
+        tag = [tag]
+    elseif !(tag isa Vector{Symbol})
+        tag = vec(collect(Symbol, tag))
+    end
+    if !dry && !isempty(tag)
+        @warn "tag keyword: labels can be added only in dry mode"
+    end
+
     for imod in eachindex(modules)
         mod, pat = modules[imod]
         tests = alltests[imod]
@@ -776,7 +828,8 @@ function retest(@nospecialize(args::ArgType...);
             end
             if verbose > 0
                 foreach(ts -> dryrun(mod, ts, pat, id ? 0 : module_header*2,
-                                     maxidw = id ? maxidw[] : 0, marks=marks, clear=clear),
+                                     maxidw = id ? maxidw[] : 0, marks=marks, tag=tag,
+                                     clear=clear),
                         tests)
             end
             continue
@@ -1454,7 +1507,8 @@ hasmany(tests) = length(tests) > 1 || isfor(tests[1])
 
 function dryrun(mod::Module, ts::TestsetExpr, pat::Pattern, align::Int=0,
                 parentsubj::Union{Missing, String}=""
-                ; maxidw::Int, marks::Bool, clear::Bool, # external calls
+                # external calls:
+                ; maxidw::Int, marks::Bool, tag::Vector{Symbol}, clear::Bool,
                 # only recursive calls:
                 evaldesc=true, repeated=nothing, show::Bool=true)
     @assert ts.run
@@ -1470,13 +1524,24 @@ function dryrun(mod::Module, ts::TestsetExpr, pat::Pattern, align::Int=0,
 
         subject = desc isa String ? parentsubj * "/" * desc :
                                     missing
-        if isfinal(ts) && false === matches(pat, subject, ts)
+        final = isfinal(ts)
+        if final || !isempty(tag)
+            ismatch = matches(pat, subject, ts)
+        end
+        if final && false === ismatch
             return false, false, false
         end
 
         res = pastresult(ts.marks, subject)
         if clear && res !== nothing
             delmark!(ts.marks, subject, res ? _pass : _fail)
+            # should we set res=nothing here ? not doing it might be confusing,
+            # but it gives an idea about which marks are being deleted
+        end
+        if subject !== missing
+            for mark=tag
+                ismatch && addmark!(ts.marks, subject, mark)
+            end
         end
 
         if show
@@ -1489,9 +1554,14 @@ function dryrun(mod::Module, ts::TestsetExpr, pat::Pattern, align::Int=0,
                             color=:light_black)
             end
 
-            if marks && res !== nothing
-                printstyled(res ? " ✔" : " ✘", color = res ? :green : Base.error_color(),
-                            bold=true)
+            if marks
+                for mark in markiter(ts.marks, subject, true)
+                    printstyled(" ", mark, color=:cyan, bold=false)
+                end
+                if res !== nothing
+                    printstyled(res ? " ✔" : " ✘", color = res ? :green : Base.error_color(),
+                                bold=true)
+                end
             end
         end
 
@@ -1501,7 +1571,7 @@ function dryrun(mod::Module, ts::TestsetExpr, pat::Pattern, align::Int=0,
             for tsc in ts.children
                 tsc.run || continue
                 dryrun(mod, tsc, pat, align + 2, subject,
-                       maxidw=maxidw, marks=marks, clear=clear, show=true)
+                       maxidw=maxidw, marks=marks, tag=tag, clear=clear, show=true)
             end
             false, false, false # meaningless unused triple
         elseif marks
@@ -1518,7 +1588,8 @@ function dryrun(mod::Module, ts::TestsetExpr, pat::Pattern, align::Int=0,
             for tsc in ts.children
                 tsc.run || continue
                 cp, cf, cu = dryrun(mod, tsc, pat, align + 2, subject,
-                                    maxidw=maxidw, marks=marks, clear=clear, show=false)
+                                    maxidw=maxidw, marks=marks, tag=tag, clear=clear,
+                                    show=false)
                 passes |= cp
                 fails |= cf
                 unrun |= cu
@@ -1567,7 +1638,8 @@ function dryrun(mod::Module, ts::TestsetExpr, pat::Pattern, align::Int=0,
             ts.iter = iter # necessary when reachable is used
             beginend.marks = ts.marks
             dryrun(mod, beginend, pat, align, parentsubj; evaldesc=false,
-                   repeated=repeated, maxidw=maxidw, marks=marks, clear=clear, show=show)
+                   repeated=repeated, maxidw=maxidw, marks=marks, tag=tag,
+                   clear=clear, show=show)
         end
 
         loopvalues = ts.loopvalues

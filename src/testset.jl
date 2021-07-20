@@ -14,7 +14,7 @@ using Distributed: myid, nworkers
 
 import InlineTest: @testset
 
-using ..ReTest: Pattern, matches, setresult
+using ..ReTest: Pattern, matches, setresult!
 
 # mostly copied from Test stdlib
 # changed from Test: pass nothing as file in ip_has_file_and_func
@@ -528,7 +528,7 @@ function testset_beginend(mod::Module, isfinal::Bool, pat::Pattern, id::Int64, d
                                  Base.catch_stack(), $(QuoteNode(source))))
             finally
                 copy!(RNG, oldrng)
-                setresult($marks, ts.subject, !anyfailed(ts))
+                setresult!($marks, ts.subject, !anyfailed(ts))
                 pop_testset()
                 ret = finish(ts, $chan)
             end
@@ -576,13 +576,13 @@ function testset_forloop(mod::Module, isfinal::Bool, pat::Pattern, id::Int64,
                 let
                     ts.timed = @stats $stats $(esc(tests))
                 end
-                setresult($marks, ts.subject, !anyfailed(ts))
+                setresult!($marks, ts.subject, !anyfailed(ts))
             catch err
                 err isa InterruptException && rethrow()
                 # Something in the test block threw an error. Count that as an
                 # error in this test set
                 record(ts, Error(:nontest_error, Expr(:tuple), err, Base.catch_stack(), $(QuoteNode(source))))
-                setresult($marks, ts.subject, false)
+                setresult!($marks, ts.subject, false)
             end
         end
     end

@@ -1110,6 +1110,42 @@ x ✔
     check(Marks, "x", dry=true, marks=true, verbose=1, id=false, interpolated, [], output="""
 x ✔ ✔ ✘
 """)
+
+    check(Marks, dry=true, clear=true, marks=true, id=false, [], output="""
+a ✔ ✔ ✘ ⋯
+l1 ✔ ✔ ⋯
+l2 ✔ ✔
+x ✔ ✔ ✘
+""")
+    check(Marks, dry=true, clear=true, marks=true, id=false, [], output="""
+a ⋯
+l1 ⋯
+l2 ⋯
+x ⋯
+""")
+
+    retest(Marks, "y1", -4, dry=true, tag=:ylabel) # should not label "/x"
+    retest(Marks, r"a$", dry=true, tag=[:a1, :a2])
+    retest(Marks, r"a$", dry=false)
+    retest(Marks, r"a$", dry=true, tag=[:a3 :a4])
+    retest(Marks, r"a$", dry=true, tag=(:a5, :a6))
+    check(Marks, "-l", -4, dry=true, verbose=9, id=false, marks=true, [], output="""
+a a1 a2 a3 a4 a5 a6 ✔
+  b
+  c
+  e
+x
+  y1 ylabel
+    z1 ylabel
+    z2 ylabel
+    z3 ylabel
+    z4 ylabel
+  y2
+    z1
+    z2
+    z3
+    z4
+""")
 end
 
 
