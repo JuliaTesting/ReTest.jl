@@ -10,7 +10,7 @@ struct MockTestset
     parent
     iter
 
-    MockTestset() = new(rand(1:typemax(Int)), Dict(), nothing, 1)
+    MockTestset() = new(rand(1:typemax(Int)), ReTest.Marks(), nothing, 1)
 end
 
 ReTest.tsdepth(::MockTestset) = 1

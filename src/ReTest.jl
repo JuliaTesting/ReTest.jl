@@ -71,8 +71,7 @@ mutable struct TestsetExpr
     parent::Maybe{TestsetExpr}
     children::Vector{TestsetExpr}
     strings::Vector{Union{String,Missing}}
-    # Union to avoid creating a vector in most cases
-    marks::Dict{String, Union{Symbol, Vector{Symbol}}} # TODO: should be a MultiDict
+    marks::Marks
     # loopvalues & loopiters: when successful in evaluating loop values in resolve!,
     # we "flatten" the nested for loops into a single loop, with loopvalues
     # containing tuples of values, and loopiters the tuples of variables to which the
@@ -88,7 +87,7 @@ mutable struct TestsetExpr
 
     TestsetExpr(source, mod, desc, options, loops, parent, children=TestsetExpr[]) =
         new(0, source, mod, desc, options, loops, parent, children, String[],
-            Dict{String, Union{Symbol, Vector{Symbol}}}())
+            Marks())
 end
 
 isfor(ts::TestsetExpr) = ts.loops !== nothing

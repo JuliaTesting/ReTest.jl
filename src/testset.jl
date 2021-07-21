@@ -14,7 +14,7 @@ using Distributed: myid, nworkers
 
 import InlineTest: @testset
 
-using ..ReTest: Pattern, matches, setresult!
+using ..ReTest: Pattern, Marks, matches, setresult!
 
 # mostly copied from Test stdlib
 # changed from Test: pass nothing as file in ip_has_file_and_func
@@ -65,7 +65,7 @@ mutable struct ReTestSet <: AbstractTestSet
     subject::String
     id::Int64
     overall::Bool # TODO: could be conveyed by having self.mod == ""
-    marks::Dict{String, Union{Symbol, Vector{Symbol}}} # used in matches()
+    marks::Marks # used in matches()
     iter::Int # used in matches()
     results::Vector
     n_passed::Int
@@ -77,8 +77,7 @@ end
 
 function ReTestSet(mod, desc::String, id::Integer=0;
                    overall=false, verbose=true, parent=nothing,
-                   marks=Dict{String, Union{Symbol, Vector{Symbol}}}(),
-                   iter=1)
+                   marks=Marks(), iter=1)
     parentsubj = parent === nothing ? "" : parent.subject
     subject = string(parentsubj, '/', desc)
     ReTestSet(mod, parent, desc, subject, id, overall, marks, iter, [],
@@ -474,13 +473,13 @@ end
 
 # non-inline testset with regex filtering support
 macro testset(mod::Module, isfinal::Bool, pat::Pattern, id::Int64, desc::Union{String,Expr},
-              options, marks::Dict, stats::Bool, chan, body)
+              options, marks::Marks, stats::Bool, chan, body)
     Testset.testset_beginend(mod, isfinal, pat, id, desc,
                              options, marks, stats, chan, body, __source__)
 end
 
 macro testset(mod::Module, isfinal::Bool, pat::Pattern, id::Int64, desc::Union{String,Expr},
-              options, marks::Dict, stats::Bool, chan, loops, body)
+              options, marks::Marks, stats::Bool, chan, loops, body)
     Testset.testset_forloop(mod, isfinal, pat, id, desc,
                             options, marks, stats, chan, loops, body, __source__)
 end
@@ -489,7 +488,7 @@ end
 Generate the code for a `@testset` with a `begin`/`end` argument
 """
 function testset_beginend(mod::Module, isfinal::Bool, pat::Pattern, id::Int64, desc, options,
-                          marks::Dict, stats::Bool, chan, tests, source)
+                          marks::Marks, stats::Bool, chan, tests, source)
     # Generate a block of code that initializes a new testset, adds
     # it to the task local storage, evaluates the test(s), before
     # finally removing the testset and giving it a chance to take
@@ -548,7 +547,7 @@ end
 Generate the code for a `@testset` with a `for` loop argument
 """
 function testset_forloop(mod::Module, isfinal::Bool, pat::Pattern, id::Int64,
-                         desc::Union{String,Expr}, options, marks::Dict, stats, chan,
+                         desc::Union{String,Expr}, options, marks::Marks, stats, chan,
                          loops, tests, source)
 
     desc = esc(desc)

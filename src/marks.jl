@@ -1,25 +1,33 @@
+struct Marks
+    # Union to avoid creating a vector in most cases
+    soft::Dict{String, Union{Symbol, Vector{Symbol}}} # TODO: should be a MultiDict
+
+    Marks() = new(Dict{String, Union{Symbol, Vector{Symbol}}}())
+end
+
 const _pass = :__pass__
 const _fail = :__fail__
 
 # marks contains at most one of _pass, _fail
 
 # return true (pass), false (fail), or nothing (unrun)
-function pastresult(marks::Dict, subject)
-    ms = get(marks, subject, Symbol())
+function pastresult(marks::Marks, subject)
+    ms = get(marks.soft, subject, Symbol())
     sym::Symbol = ms isa Symbol ? ms : isempty(ms) ? Symbol() : ms[1]
     sym === _pass ? true : sym === _fail ? false : nothing
 end
 
-function setresult!(marks::Dict, subject, success::Bool)
-    ms = get(marks, subject, Symbol())
+function setresult!(marks::Marks, subject, success::Bool)
+    soft = marks.soft
+    ms = get(soft, subject, Symbol())
     res = success ? _pass : _fail
     if ms isa Symbol
         # ms could be Symbol() from get's default or delmark!
         if ms ∈ (_pass, _fail, Symbol())
-            marks[subject] = res
+            soft[subject] = res
         else
             # res always in first position
-            marks[subject] = [res, ms]
+            soft[subject] = [res, ms]
         end
     else # ms isa Vector
         if !isempty(ms) && ms[1] ∈ (_pass, _fail)
@@ -30,8 +38,8 @@ function setresult!(marks::Dict, subject, success::Bool)
     end
 end
 
-function markiter(marks, subject, skipres::Bool)
-    ms = get(marks, subject, Symbol())
+function markiter(marks::Marks, subject, skipres::Bool)
+    ms = get(marks.soft, subject, Symbol())
     if ms isa Symbol
         if ms === Symbol() || skipres && ms ∈ (_pass, _fail)
             ()
@@ -47,16 +55,17 @@ function markiter(marks, subject, skipres::Bool)
     end
 end
 
-function addmark!(marks, subject, m::Symbol)
-    ms = get(marks, subject, Symbol())
+function addmark!(marks::Marks, subject, m::Symbol)
+    soft = marks.soft
+    ms = get(soft, subject, Symbol())
     if ms isa Symbol
         if ms === m
             false
         elseif ms === Symbol()
-            marks[subject] = m
+            soft[subject] = m
             true
         else
-            marks[subject] = [ms, m]
+            soft[subject] = [ms, m]
             true
         end
     elseif findfirst(==(m), ms) === nothing
@@ -67,11 +76,12 @@ function addmark!(marks, subject, m::Symbol)
     end
 end
 
-function delmark!(marks, subject, m::Symbol)
-    ms = get(marks, subject, Symbol())
+function delmark!(marks::Marks, subject, m::Symbol)
+    soft = marks.soft
+    ms = get(soft, subject, Symbol())
     if ms isa Symbol
         if ms === m
-            marks[subject] = Symbol()
+            soft[subject] = Symbol()
         end
     else
         p = findfirst(==(m), ms)
@@ -82,8 +92,8 @@ function delmark!(marks, subject, m::Symbol)
     nothing
 end
 
-function hasmark(marks, subject, m::Symbol)
-    ms = get(marks, subject, Symbol())
+function hasmark(marks::Marks, subject, m::Symbol)
+    ms = get(marks.soft, subject, Symbol())
     if ms isa Symbol
         ms === m
     else
