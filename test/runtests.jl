@@ -968,9 +968,9 @@ end
     end
 end
 
-@testset "x" begin
+@testset "x" :hx begin
     @testset "y$i" for i=1:2
-        @testset "z1" begin
+        @testset :hz1 "z1" begin
             @test true
         end
         @testset "z$j" for j=2:3
@@ -1064,64 +1064,64 @@ l2 ✔ ✔
 """)
 
     check(Marks, "x", dry=true, marks=true, verbose=3, id=false, interpolated, [], output="""
-x
-  y1
-    z1
-    z2
-    z3
-    z4
-  y2
-    z1
-    z2
-    z3
-    z4
+x hx
+  y1 hx
+    z1 hx hz1
+    z2 hx
+    z3 hx
+    z4 hx
+  y2 hx
+    z1 hx hz1
+    z2 hx
+    z3 hx
+    z4 hx
 """)
     check(Marks, "x", dry=true, marks=true, verbose=2, id=false, interpolated, [], output="""
-x
-  y1 ⋯
-  y2 ⋯
+x hx
+  y1 hx ⋯
+  y2 hx ⋯
 """)
     retest(Marks, r"y1$")
     # at record success at depth==2
     check(Marks, "x", dry=true, marks=true, verbose=1, id=false, interpolated, [],
-          output="x ✔ ✔ ⋯")
+          output="x hx ✔ ✔ ⋯")
     @test_throws Test.TestSetException retest(Marks, "y2/z4")
     check(Marks, "x", dry=true, marks=true, verbose=1, id=false, interpolated, [],
-          output="x ✔ ✔ ✘ ⋯")
+          output="x hx ✔ ✔ ✘ ⋯")
     @test_throws Test.TestSetException retest(Marks, "x")
     check(Marks, "x", dry=true, marks=true, verbose=3, id=false, interpolated, [], output="""
-x ✔
-  y1 ✔
-    z1 ✔
-    z2 ✔
-    z3 ✔
-    z4 ✔
-  y2 ✔
-    z1 ✔
-    z2 ✔
-    z3 ✔
-    z4 ✘
+x hx ✔
+  y1 hx ✔
+    z1 hx hz1 ✔
+    z2 hx ✔
+    z3 hx ✔
+    z4 hx ✔
+  y2 hx ✔
+    z1 hx hz1 ✔
+    z2 hx ✔
+    z3 hx ✔
+    z4 hx ✘
 """)
     check(Marks, "x", dry=true, marks=true, verbose=2, id=false, interpolated, [], output="""
-x ✔
-  y1 ✔ ✔
-  y2 ✔ ✔ ✘
+x hx ✔
+  y1 hx ✔ ✔
+  y2 hx ✔ ✔ ✘
 """)
     check(Marks, "x", dry=true, marks=true, verbose=1, id=false, interpolated, [], output="""
-x ✔ ✔ ✘
+x hx ✔ ✔ ✘
 """)
 
     check(Marks, dry=true, clear=true, marks=true, id=false, [], output="""
 a ✔ ✔ ✘ ⋯
 l1 ✔ ✔ ⋯
 l2 ✔ ✔
-x ✔ ✔ ✘
+x hx ✔ ✔ ✘
 """)
     check(Marks, dry=true, clear=true, marks=true, id=false, [], output="""
 a ⋯
 l1 ⋯
 l2 ⋯
-x ⋯
+x hx ⋯
 """)
 
     retest(Marks, "y1", -4, dry=true, tag=:ylabel) # should not label "/x"
@@ -1137,17 +1137,17 @@ a a1 a2 a3 a4 a5 a6 ✔
   b
   c
   e
-x
-  y1 ylabel
-    z1 ylabel
-    z2 ylabel
-    z3 ylabel
-    z4 ylabel
-  y2
-    z1
-    z2
-    z3
-    z4
+x hx
+  y1 hx ylabel
+    z1 hx hz1 ylabel
+    z2 hx ylabel
+    z3 hx ylabel
+    z4 hx ylabel
+  y2 hx
+    z1 hx hz1
+    z2 hx
+    z3 hx
+    z4 hx
 """)
     check(Marks, "a", "-l", -4, :a2, dry=true, verbose=9, id=false, marks=true, [],
           output="a a1 a2 a3 a4 a5 a6 ✔")
@@ -1155,50 +1155,63 @@ x
     if VERSION >= v"1.3"
         check(Marks, "-l", -4, not(reachable(:a1)), dry=true, verbose=9, id=false,
               marks=true, [], output="""
-x
-  y1 ylabel
-    z1 ylabel
-    z2 ylabel
-    z3 ylabel
-    z4 ylabel
-  y2
-    z1
-    z2
-    z3
-    z4
+x hx
+  y1 hx ylabel
+    z1 hx hz1 ylabel
+    z2 hx ylabel
+    z3 hx ylabel
+    z4 hx ylabel
+  y2 hx
+    z1 hx hz1
+    z2 hx
+    z3 hx
+    z4 hx
 """)
         check(Marks, "-l", -4, reachable("x"), not(:ylabel), dry=true, verbose=9, id=false,
               marks=true, [], output="""
-x
-  y1 ylabel
-  y2
-    z1
-    z2
-    z3
-    z4
+x hx
+  y1 hx ylabel
+  y2 hx
+    z1 hx hz1
+    z2 hx
+    z3 hx
+    z4 hx
 """)
     end
     check(Marks, -4, [r"y1$", "z3"], dry=true, marks=true, id=false, tag=not(:ylabel),
           verbose=9, [], output="""
-x
-  y1
-    z3
-  y2
-    z3
+x hx
+  y1 hx
+    z3 hx
+  y2 hx
+    z3 hx
 """)
     check(Marks, 8:12, dry=true, verbose=9, id=false, marks=true, [], output="""
-x
-  y1
-    z1 ylabel
-    z2 ylabel
-    z3
-    z4 ylabel
-  y2
-    z1
-    z2
-    z3
-    z4
+x hx
+  y1 hx
+    z1 hx hz1 ylabel
+    z2 hx ylabel
+    z3 hx
+    z4 hx ylabel
+  y2 hx
+    z1 hx hz1
+    z2 hx
+    z3 hx
+    z4 hx
 """)
+    check(Marks, -4, :hx, not(:hz1), dry=true, verbose=9, id=false, marks=true, [], output="""
+x hx
+  y1 hx
+    z2 hx ylabel
+    z3 hx
+    z4 hx ylabel
+  y2 hx
+    z2 hx
+    z3 hx
+    z4 hx
+""")
+    @test_logs (:warn, r"cannot remove statically attached label \(@testset :.* \.\.\.\)"
+                ) retest(Marks, -4, :hx, not(:hz1), tag=not(:hx), dry=true)
 end
 
 

@@ -1,9 +1,10 @@
 struct Marks
     # Union to avoid creating a vector in most cases
     soft::Dict{String, Union{Symbol, Vector{Symbol}}} # TODO: should be a MultiDict
-
-    Marks() = new(Dict{String, Union{Symbol, Vector{Symbol}}}())
+    hard::Vector{Symbol} # attached to all instances of a @testset
 end
+
+Marks() = Marks(Dict{String, Union{Symbol, Vector{Symbol}}}(), Symbol[])
 
 const _pass = :__pass__
 const _fail = :__fail__
@@ -42,20 +43,22 @@ function markiter(marks::Marks, subject, skipres::Bool)
     ms = get(marks.soft, subject, Symbol())
     if ms isa Symbol
         if ms === Symbol() || skipres && ms ∈ (_pass, _fail)
-            ()
+            marks.hard
         else
-            (ms,)
+            Iterators.flatten((marks.hard, (ms,)))
         end
     else
-        if skipres
-            Iterators.filter(m -> m ∉ (_pass, _fail), ms)
-        else
-            ms
-        end
+        Iterators.flatten((marks.hard,
+                           if skipres
+                               Iterators.filter(m -> m ∉ (_pass, _fail), ms)
+                           else
+                               ms
+                           end))
     end
 end
 
 function addmark!(marks::Marks, subject, m::Symbol)
+    m ∈ marks.hard && return false
     soft = marks.soft
     ms = get(soft, subject, Symbol())
     if ms isa Symbol
@@ -68,7 +71,7 @@ function addmark!(marks::Marks, subject, m::Symbol)
             soft[subject] = [ms, m]
             true
         end
-    elseif findfirst(==(m), ms) === nothing
+    elseif m ∉ ms
         push!(ms, m)
         true
     else
@@ -76,7 +79,12 @@ function addmark!(marks::Marks, subject, m::Symbol)
     end
 end
 
-function delmark!(marks::Marks, subject, m::Symbol)
+# return whether warning is issued
+function delmark!(marks::Marks, subject, m::Symbol, warned::Bool=false)
+    if m ∈ marks.hard && !warned
+        @warn "cannot remove statically attached label (@testset :$m ...)"
+        return true
+    end
     soft = marks.soft
     ms = get(soft, subject, Symbol())
     if ms isa Symbol
@@ -89,10 +97,11 @@ function delmark!(marks::Marks, subject, m::Symbol)
             deleteat!(ms, p)
         end
     end
-    nothing
+    false
 end
 
 function hasmark(marks::Marks, subject, m::Symbol)
+    m ∈ marks.hard && return true
     ms = get(marks.soft, subject, Symbol())
     if ms isa Symbol
         ms === m

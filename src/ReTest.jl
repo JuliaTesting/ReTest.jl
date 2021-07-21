@@ -65,13 +65,13 @@ mutable struct TestsetExpr
     mod::Module # enclosing module
     desc::Union{String,Expr}
     options::Options
+    marks::Marks
     # loops: the original loop expression, if any, but where each `x=...` is
     # pulled out into a vector
     loops::Maybe{Vector{Expr}}
     parent::Maybe{TestsetExpr}
     children::Vector{TestsetExpr}
     strings::Vector{Union{String,Missing}}
-    marks::Marks
     # loopvalues & loopiters: when successful in evaluating loop values in resolve!,
     # we "flatten" the nested for loops into a single loop, with loopvalues
     # containing tuples of values, and loopiters the tuples of variables to which the
@@ -85,9 +85,8 @@ mutable struct TestsetExpr
     descwidth::Int # max width of self and children shown descriptions
     body::Expr
 
-    TestsetExpr(source, mod, desc, options, loops, parent, children=TestsetExpr[]) =
-        new(0, source, mod, desc, options, loops, parent, children, String[],
-            Marks())
+    TestsetExpr(source, mod, desc, options, marks, loops, parent, children=TestsetExpr[]) =
+        new(0, source, mod, desc, options, marks, loops, parent, children, String[])
 end
 
 isfor(ts::TestsetExpr) = ts.loops !== nothing
@@ -156,9 +155,16 @@ function parse_ts(source::LineNumberNode, mod::Module, args::Tuple, parent=nothi
 
     local desc
     options = Options()
+    marks = Marks()
+    if parent !== nothing
+        append!(marks.hard, parent.marks.hard) # copy! not available in Julia 1.0
+    end
     for arg in args[1:end-1]
         if arg isa String || Meta.isexpr(arg, :string)
             desc = arg
+        elseif arg isa QuoteNode && arg.value isa Symbol
+            # TODO: support non-literal symbols?
+            push!(marks.hard, arg.value)
         elseif Meta.isexpr(arg, :(=))
             arg.args[1] in fieldnames(Options) ||
                 return tserror("unsupported @testset option")
@@ -200,7 +206,7 @@ function parse_ts(source::LineNumberNode, mod::Module, args::Tuple, parent=nothi
         return tserror("expected begin/end block or for loop as argument to @testset")
     end
 
-    ts = TestsetExpr(source, mod, desc, options, loops, parent)
+    ts = TestsetExpr(source, mod, desc, options, marks, loops, parent)
     ts.body, ts.hasbroken = replace_ts(source, mod, tsbody, ts)
     ts, false # hasbroken counts only "proper" @test_broken, not recursive ones
 end
@@ -723,14 +729,15 @@ function retest(@nospecialize(args::ArgType...);
     maxidw[] = id ? maxidw[] : 0
 
     if tag isa Symbol || tag isa Not && tag.x isa Symbol
-        tag = [tag]
-    elseif !(tag isa Vector{<:Union{Symbol,Not}})
-        tag = vec(collect(Union{Symbol,Not}, tag))
+        tag = Pair[tag => false]
+    else
+        tag = vec(Pair[t => false for t in tag])
+        # values indicate whether a warning was already issued for this tag
     end
     if !dry && !isempty(tag)
         @warn "tag keyword: labels can be added only in dry mode"
     end
-    for t in tag
+    for (t, _) in tag
         label::Symbol = t isa Symbol ? t : t.x
         startswith(String(label), '_') &&
             throw(ArgumentError("tag keyword: labels can't start with an underscore"))
@@ -1461,16 +1468,19 @@ function dryrun(mod::Module, ts::TestsetExpr, pat::Pattern, align::Int=0,
         res = pastresult(ts.marks, subject)
         if clear && res !== nothing
             delmark!(ts.marks, subject, res ? _pass : _fail)
-            # should we set res=nothing here ? not doing it might be confusing,
-            # but it gives an idea about which marks are being deleted
+            # TODO: should we set res=nothing here ? not doing it might be confusing,
+            # but it gives an idea about which marks are being deleted;
         end
         if subject !== missing
-            for mark=tag
+            for (ith, (mark, warned)) in enumerate(tag)
                 if ismatch
                     if mark isa Symbol
                         addmark!(ts.marks, subject, mark)
                     else
-                        delmark!(ts.marks, subject, mark.x)
+                        justwarned = delmark!(ts.marks, subject, mark.x, warned)
+                        if justwarned > warned
+                            tag[ith] = mark => justwarned
+                        end
                     end
                 end
             end
@@ -1562,13 +1572,12 @@ function dryrun(mod::Module, ts::TestsetExpr, pat::Pattern, align::Int=0,
                     end
                 end
             end
-            beginend = TestsetExpr(ts.source, ts.mod, descx, ts.options, nothing,
+            beginend = TestsetExpr(ts.source, ts.mod, descx, ts.options, ts.marks, nothing,
                                    ts.parent, ts.children)
             beginend.run = true
             beginend.id = ts.id
             beginend.iter = iter
             ts.iter = iter # necessary when reachable is used
-            beginend.marks = ts.marks
             dryrun(mod, beginend, pat, align, parentsubj; evaldesc=false,
                    repeated=repeated, maxidw=maxidw, marks=marks, tag=tag,
                    clear=clear, show=show)
