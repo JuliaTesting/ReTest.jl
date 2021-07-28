@@ -206,12 +206,14 @@ load
 ### Filtering tests
 
 * [`not`](@ref)
+* [`pass`](@ref) and `fail`
 * [`reachable`](@ref)
 * [`interpolated`](@ref)
 * [`depth`](@ref)
 
 ```@docs
 not
+pass
 reachable
 interpolated
 depth
