@@ -30,6 +30,11 @@ test files is necessary in order to switch to `ReTest`; it's often even
 possible to use `ReTest` features without changing a line, e.g. on Julia's
 `Base`/stdlib tests), cf. [Working with test files which use `Test`](@ref).
 
+`ReTest` is still at an early stage of development. If you like to use it
+for your packages, it's recommended to [keep your tests compatible with
+`Test`](@ref Keeping-the-ability-to-use-Test), so that they can be run through
+both frameworks (e.g. using `ReTest` interactively and `Test` in C.I.).
+
 
 ## Usage
 
