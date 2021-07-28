@@ -216,6 +216,10 @@ should be fixable:
   overwritten and a warning is issued, unless `Revise` is loaded; the reason
   is the current implemented heuristic to allow `Revise` do its magic.
 
+* There is not yet a good solution to factor out testsets into functions called
+  within other testsets; a work-around is to use [`@testset_macro`](@ref),
+  or to use only the `@test` and `@test_*` macros within these functions.
+
 
 #### Including files from within testsets
 
