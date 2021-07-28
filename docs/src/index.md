@@ -166,26 +166,55 @@ Here it is for basic usage!
 CurrentModule = ReTest
 ```
 
-* [`retest`](@ref)
-* [`not`](@ref)
-* [`interpolated`](@ref)
-* [`reachable`](@ref)
-* [`depth`](@ref)
+* [Defining tests](@ref)
+* [Running tests](@ref)
+* [Loading tests](@ref)
+* [Filtering tests](@ref)
+
+### Defining tests
+
 * [`@testset`](@ref)
 * [`@testset_macro`](@ref)
-* [`load`](@ref)
+
+```@docs
+@testset
+@testset_macro
+```
+
+### Running tests
+
+* [`retest`](@ref)
 * [`watch`](@ref)
 
 ```@docs
 retest
-not
-interpolated
-reachable
-depth
-@testset
-@testset_macro
-load
 watch
+```
+
+### Loading tests
+
+* [`load`](@ref)
+* [`hijack`](@ref)
+* [`hijack_base`](@ref)
+
+Cf. [Working with test files which use Test](@ref) for  `hijack` and `hijack_base`.
+
+```@docs
+load
+```
+
+### Filtering tests
+
+* [`not`](@ref)
+* [`reachable`](@ref)
+* [`interpolated`](@ref)
+* [`depth`](@ref)
+
+```@docs
+not
+reachable
+interpolated
+depth
 ```
 
 
