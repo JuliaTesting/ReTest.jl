@@ -251,6 +251,11 @@ should be fixable:
   within other testsets; a work-around is to use [`@testset_macro`](@ref),
   or to use only the `@test` and `@test_*` macros within these functions.
 
+* Interrupting running testsets with Control-C sometimes doesn't work well,
+  because of the use of multiple tasks in `retest`. There can also be
+  usability annoyances when some tests are failing. This will hopefully
+  be fixed _soon_.
+
 
 #### Including files from within testsets
 
