@@ -1264,6 +1264,48 @@ end # Failing
 """)
 end
 
+module FailingLoops
+# we test that toplevel testset-for don't make retest unresponsive
+
+using ReTest
+
+@testset "a$i" for i=1:3
+    @test i == 1
+end
+
+@testset "b$i" for i=1:3
+    @test i == 2
+end
+
+@testset "c$i" for i=1:3
+    @test i == 3
+end
+
+end # FailingLoops
+
+@chapter FailingLoops begin
+    @test_throws Test.TestSetException retest(FailingLoops, "a")
+    # TODO: we check here the behaviour by looking at check marks, we could maybe do better
+    check(FailingLoops, "a", dry=true, marks=true, id=false, [], clear=true, output="""
+a1 ✔
+a2 ✘
+a3
+""")
+    @test_throws Test.TestSetException retest(FailingLoops, "b")
+    check(FailingLoops, "b", dry=true, marks=true, id=false, [], clear=true, output="""
+b1 ✘
+b2
+b3
+""")
+    @test_throws Test.TestSetException retest(FailingLoops, "c")
+    check(FailingLoops, "c", dry=true, marks=true, id=false, [], clear=true, output="""
+c1 ✘
+c2
+c3
+""")
+end
+
+
 # * Duplicate ................................................................
 
 module Duplicate

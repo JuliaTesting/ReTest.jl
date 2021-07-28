@@ -562,6 +562,13 @@ function testset_forloop(mod::Module, isfinal::Bool, pat::Pattern, id::Int64,
             if !first_iteration
                 pop_testset()
                 push!(arr, finish(ts, $chan))
+                if ts.exception !== nothing
+                    # ts.exception might be set in finish(...) above
+                    # In this case, we currently don't want to continue with subsequent
+                    # iterations, as is done in Test.
+                    # See also https://github.com/JuliaLang/julia/pull/41715
+                    break
+                end
                 # it's 1000 times faster to copy from tmprng rather than calling Random.seed!
                 copy!(RNG, tmprng)
             end
@@ -604,7 +611,7 @@ function testset_forloop(mod::Module, isfinal::Bool, pat::Pattern, id::Int64,
             end
         finally
             # Handle `return` in test body
-            if !first_iteration
+            if !first_iteration && ts.exception === nothing
                 pop_testset()
                 push!(arr, finish(ts, $chan))
             end
