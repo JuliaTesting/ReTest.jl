@@ -927,8 +927,10 @@ function retest(@nospecialize(args::ArgType...);
 
                 print_overall() =
                     if module_summary(verbose, many)
-                        @assert endswith(module_ts.description, ':')
-                        module_ts.description = chop(module_ts.description, tail=1)
+                        # @assert endswith(module_ts.description, ':')
+                        if endswith(module_ts.description, ':')
+                            module_ts.description = chop(module_ts.description, tail=1)
+                        end
                         clear_line()
                         Testset.print_test_results(module_ts, format,
                                                    bold=true, hasbroken=hasbroken,
@@ -959,7 +961,8 @@ function retest(@nospecialize(args::ArgType...);
                         gotprinted = true
 
                         if rts === nothing
-                            errored || print_overall()
+                            errored && println() # to have empty line after reported error
+                            print_overall()
                             finito = true
                             return
                         end
@@ -977,7 +980,9 @@ function retest(@nospecialize(args::ArgType...);
                             )
                         end
                         if rts.anynonpass
-                            print_overall()
+                            # TODO: can we print_overall() here,
+                            # without having the wrong numbers?
+                            # print_overall()
                             println()
                             Testset.print_test_errors(rts)
                             errored = true
