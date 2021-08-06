@@ -57,6 +57,7 @@ using .Testset: Testset, Format, print_id
 Base.@kwdef mutable struct Options
     verbose::Bool = false # annotated verbosity
     transient_verbose::Bool = false # verbosity for next run
+    static_include::Bool = false # whether to execute include at `replace_ts` time
 end
 
 mutable struct TestsetExpr
@@ -108,13 +109,25 @@ struct _Invalid
     global const invalid = _Invalid.instance
 end
 
+function extract_testsets(dest)
+    function extractor(x)
+        if Meta.isexpr(x, :macrocall) && x.args[1] == Symbol("@testset")
+            push!(dest, x)
+            nothing # @testset move out of the evaluated file
+        else
+            x
+        end
+    end
+end
+
 # replace unqualified `@testset` by TestsetExpr
-function replace_ts(source, mod, x::Expr, parent)
+function replace_ts(source, mod, x::Expr, parent; static_include::Bool)
     if x.head === :macrocall
         name = x.args[1]
         if name === Symbol("@testset")
             @assert x.args[2] isa LineNumberNode
-            ts, hasbroken = parse_ts(x.args[2], mod, Tuple(x.args[3:end]), parent)
+            ts, hasbroken = parse_ts(x.args[2], mod, Tuple(x.args[3:end]), parent;
+                                     static_include=static_include)
             ts !== invalid && parent !== nothing && push!(parent.children, ts)
             ts, false # hasbroken counts only "proper" @test_broken, not recursive ones
         elseif name === Symbol("@test_broken")
@@ -123,7 +136,7 @@ function replace_ts(source, mod, x::Expr, parent)
             # `@test` is generally called a lot, so it's probably worth it to skip
             # the containment test in this case
             x = macroexpand(mod, x, recursive=false)
-            replace_ts(source, mod, x, parent)
+            replace_ts(source, mod, x, parent; static_include=static_include)
         else
             @goto default
         end
@@ -133,18 +146,34 @@ function replace_ts(source, mod, x::Expr, parent)
         x.args[end] = path isa AbstractString ?
             joinpath(sourcepath, path) :
             :(joinpath($sourcepath, $path))
-        x, false
+        if static_include
+            length(x.args) == 2 || error("cannot handle include with two arguments: $x")
+            news = Expr(:block)
+            insert!(x.args, 2, extract_testsets(news.args))
+            try
+                Core.eval(mod, x)
+            catch
+                @warn "could not statically include at $source"
+                deleteat!(x.args, 2)
+                return x, false
+            end
+            replace_ts(source, mod, news, parent; static_include=static_include)
+        else
+            x, false
+        end
     else @label default
-        body_br = map(z -> replace_ts(source, mod, z, parent), x.args)
+        body_br = map(z -> replace_ts(source, mod, z, parent; static_include=static_include),
+                      x.args)
         filter!(x -> first(x) !== invalid, body_br)
         Expr(x.head, first.(body_br)...), any(last.(body_br))
     end
 end
 
-replace_ts(source, mod, x, _) = x, false
+replace_ts(source, mod, x, _1; static_include::Bool) = x, false
 
 # create a TestsetExpr from @testset's args
-function parse_ts(source::LineNumberNode, mod::Module, args::Tuple, parent=nothing)
+function parse_ts(source::LineNumberNode, mod::Module, args::Tuple, parent=nothing;
+                  static_include::Bool=false)
     function tserror(msg)
         @error msg _file=String(source.file) _line=source.line _module=mod
         invalid, false
@@ -158,6 +187,10 @@ function parse_ts(source::LineNumberNode, mod::Module, args::Tuple, parent=nothi
     marks = Marks()
     if parent !== nothing
         append!(marks.hard, parent.marks.hard) # copy! not available in Julia 1.0
+        options.static_include = parent.options.static_include
+        # if static_include was set in parent, it should have been forwarded also
+        # through the parse_ts/replace_ts call chains:
+        @assert static_include == parent.options.static_include
     end
     for arg in args[1:end-1]
         if arg isa String || Meta.isexpr(arg, :string)
@@ -207,7 +240,8 @@ function parse_ts(source::LineNumberNode, mod::Module, args::Tuple, parent=nothi
     end
 
     ts = TestsetExpr(source, mod, desc, options, marks, loops, parent)
-    ts.body, ts.hasbroken = replace_ts(source, mod, tsbody, ts)
+    ts.body, ts.hasbroken = replace_ts(source, mod, tsbody, ts;
+                                       static_include=options.static_include)
     ts, false # hasbroken counts only "proper" @test_broken, not recursive ones
 end
 

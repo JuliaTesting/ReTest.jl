@@ -1790,10 +1790,27 @@ end
         empty!(Hijack.RUN)
         @test_throws ArgumentError ReTest.hijack("./Hijack/test/lazy.jl", :HijackWrong, lazy=:wrong)
 
-        # test testset=true
+        # test include=:outline
         empty!(Hijack.RUN)
-        ReTest.hijack("./Hijack/test/testset.jl", :HijackTestset, testset=true)
+        ReTest.hijack("./Hijack/test/testset.jl", :HijackTestset, include=:outline)
         retest(HijackTestset)
         @test Hijack.RUN == [1, 2, 3]
+
+        # test include=:static
+        empty!(Hijack.RUN)
+        @test_throws ErrorException ReTest.hijack("./Hijack/test/include_static.jl", :HijackInclude, include=:static, testset=true)
+        @test_throws ErrorException ReTest.hijack("./Hijack/test/include_static.jl", :HijackInclude, include=:notvalid)
+        ReTest.hijack("./Hijack/test/include_static.jl", :HijackInclude, include=:static)
+        check(HijackInclude, dry=true, verbose=9, [], output="""
+1| include_static
+2|   include_static_included1 1
+3|     nested include_static_included1
+4|       include_static_included2
+2|   include_static_included1 2
+3|     nested include_static_included1
+4|       include_static_included2
+""")
+        retest(HijackInclude)
+        @test Hijack.RUN == [1, 2, 3, 2, 3]
     end
 end
