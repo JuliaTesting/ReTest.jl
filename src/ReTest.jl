@@ -147,17 +147,29 @@ function replace_ts(source, mod, x::Expr, parent; static_include::Bool)
             joinpath(sourcepath, path) :
             :(joinpath($sourcepath, $path))
         if static_include
-            length(x.args) == 2 || error("cannot handle include with two arguments: $x")
-            news = Expr(:block)
-            insert!(x.args, 2, extract_testsets(news.args))
+            news = InlineTest.get_tests(mod).news
+            newslen = length(news)
             try
                 Core.eval(mod, x)
             catch
                 @warn "could not statically include at $source"
-                deleteat!(x.args, 2)
                 return x, false
             end
-            replace_ts(source, mod, news, parent; static_include=static_include)
+            newstmp = news[newslen+1:end]
+            resize!(news, newslen)
+            if !isempty(newstmp)
+                # we unfortunately re-wrap ts expressions in a `@testset ...` expression :(
+                included_ts = Expr(:block,
+                                   (Expr(:macrocall, Symbol("@testset"),
+                                         # NOTE: tsi.source has no effect here, it will be
+                                         # overwritten by source in the replace_ts call
+                                         # below; it's currently not very important
+                                         tsi.source, tsi.ts...)
+                                    for tsi in newstmp)...)
+                replace_ts(source, mod, included_ts, parent; static_include=static_include)
+            else
+                nothing, false
+            end
         else
             x, false
         end
