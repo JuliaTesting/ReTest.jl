@@ -30,7 +30,7 @@ function load(testpath::AbstractString;
         Base.include(parentmodule, testpath)
     else
         files = Dict{String,Module}(testpath => parentmodule)
-        substitute!(x) = substitute_retest!(x, false, false, files; ishijack=false)
+        substitute!(x) = substitute_retest!(x, false, nothing, files; ishijack=false)
         res = Base.include(substitute!, parentmodule, testpath)
         revise_track(Revise, files)
         res
@@ -234,7 +234,7 @@ const root_module = Ref{Symbol}()
 
 __init__() = root_module[] = gensym("MODULE")
 
-function populate_mod!(mod::Module, path; lazy, Revise, include)
+function populate_mod!(mod::Module, path; lazy, Revise, include::Maybe{Symbol}=nothing)
     lazy ∈ (true, false, :brutal) ||
         throw(ArgumentError("the `lazy` keyword must be `true`, `false` or `:brutal`"))
 
@@ -290,7 +290,7 @@ function hijack(packagemod::Module, modname=nothing; parentmodule::Module=Main,
     end
 end
 
-function substitute_retest!(ex, lazy, include_, files=nothing;
+function substitute_retest!(ex, lazy, include_::Maybe{Symbol}, files=nothing;
                             ishijack::Bool=true)
     substitute!(x) = substitute_retest!(x, lazy, include_, files, ishijack=ishijack)
 
@@ -495,7 +495,7 @@ function hijack_base(tests, modname=nothing; parentmodule::Module=Main, lazy=fal
         @eval mod begin
             using Random
         end
-        populate_mod!(mod, ChooseTests.test_path(test), lazy=lazy, Revise=Revise, testset=false)
+        populate_mod!(mod, ChooseTests.test_path(test), lazy=lazy, Revise=Revise)
     end
 end
 
