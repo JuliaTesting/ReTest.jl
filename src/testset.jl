@@ -190,9 +190,9 @@ function print_test_results(ts::ReTestSet, fmt::Format;
 
     # Calculate the alignment of the test result counts by
     # recursively walking the tree of test sets
-   if !ts.overall # otherwise, we don't print recursively
-       align = get_alignment(ts, 0)
-   end
+    if !ts.overall # otherwise, we don't print recursively
+        align = get_alignment(ts, 0)
+    end
 
     if !ts.overall && align > fmt.desc_align
         upd = true
@@ -282,7 +282,7 @@ function get_alignment(ts::ReTestSet, depth::Int)
     # The minimum width at this depth is
     ts_width = 2*depth + length(ts.description)
     # If all passing, no need to look at children
-    !ts.anynonpass && return ts_width
+    !ts.anynonpass && !ts.verbose && return ts_width
     # Return the maximum of this width and the minimum width
     # for all children (if they exist)
     isempty(ts.results) && return ts_width

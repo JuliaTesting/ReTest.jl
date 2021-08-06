@@ -1468,6 +1468,34 @@ Main.Alignment |      0
 """)
 end
 
+module AlU # AlignmentUpdate, condensed to not contribute to the alignment
+using ReTest
+
+@testset "x" begin
+    @test true
+end
+@testset "a" begin
+    i = 2
+    # this testset alignment can't be computed in advance, but make sure that the
+    # alignment is updated (including printing "Pass" again)
+    @testset "b$('c'^(4j))" for j=i:-1:1
+        @test true
+    end
+end
+end # AlUpd
+
+@chapter Alignment begin
+    check(AlU, verbose=9, [], output="""
+             Pass
+x        |      1
+                Pass
+a           |      2
+  bcccccccc |      1
+  bcccc     |      1
+Main.AlU    |      3
+""")
+end
+
 
 # * DryRun ...................................................................
 
@@ -1536,7 +1564,16 @@ end
 end
 
 @chapter Test_Testset begin
-    check(Test_Testset, verbose=4, ["a", "b", "c", "d1", "d2"])
+    check(Test_Testset, id=true, verbose=4, ["a", "b", "c", "d1", "d2"],
+          # check alignment with nested Test.@testset, and also id printing
+          # TODO: maybe for non-ReTest testsets, we should still print the
+          #       vertical bar on the left, even if no id is printed?
+          output="""
+           Pass
+1| a   |      5
+     b |      1
+     c |      3
+""")
 end
 
 
