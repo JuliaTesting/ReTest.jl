@@ -84,6 +84,11 @@ function ReTestSet(mod, desc::String, id::Integer=0;
               0, false, verbose, NamedTuple(), nothing)
 end
 
+# constructor for nested Test.@testset, which is called with desc and kwargs
+ReTestSet(desc::String; verbose::Bool=false) =
+    ReTestSet(Testset, # fake, but is .mod still used?
+              desc; verbose=verbose) # doesn't seem necessary to set .parent via get_testset
+
 # For a non-passed result, simply store the result
 record(ts::ReTestSet, t::Union{Broken,Fail,Error}) = (push!(ts.results, t); t)
 # For a passed result, do not store the result since it uses a lot of memory
@@ -233,7 +238,9 @@ end
 
 # Called at the end of a @testset, behaviour depends on whether
 # this is a child of another testset, or the "root" testset
-function finish(ts::ReTestSet, chan)
+function finish(ts::ReTestSet, chan=nothing)
+    # chan == nothing: only when ts was created from Test.@testset, and is nested
+
     # If we are a nested test set, do not print a full summary
     # now - let the parent test set do the printing
     if get_testset_depth() != 0
@@ -342,9 +349,9 @@ function print_counts(ts::ReTestSet, fmt::Format, depth, align,
     # Print test set header, with an alignment that ensures all
     # the test results appear above each other
 
-    style = bold ? (bold=bold, color=:white) : NamedTuple()
     print_id(ts.id, maxidw)
-    printstyled(rpad(string("  "^depth, ts.description), align, " "); style...)
+    printstyled(rpad(string("  "^depth, ts.description), align, " ");
+                bold=bold, color = ts.mod === Testset ? :cyan : :white)
 
     np = passes + c_passes
     nf = fails + c_fails

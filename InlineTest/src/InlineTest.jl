@@ -63,6 +63,12 @@ arguments of `@testset` can be:
 Invocations of `@testset` can be nested, but qualified invocations of
 `ReTest.@testset` can't.
 
+A `@testset` can contain a nested `Test.@testset`, or call a function
+which defines a `Test.@testset`: in this case, the `Test.@testset`
+will be run whenever the parent testset is run, but `retest` won't
+know about it: it won't be taken into account
+during the filtering phase, and won't be printed in dry mode.
+
 Internally, `@testset` expressions are converted to an equivalent of
 `Test.@testset` at execution time.
 """

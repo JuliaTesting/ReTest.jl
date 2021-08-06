@@ -1515,6 +1515,31 @@ end # DryRun2
 end
 
 
+# * Test_Testset
+
+module Test_Testset
+using ReTest, ..Trace
+import Test
+
+@testset "a" begin
+    trace("a")
+    Test.@testset "b" begin
+        trace("b")
+    end
+    Test.@testset "c" begin
+        trace("c")
+        Test.@testset "d$i" for i=1:2
+            trace("d$i")
+        end
+    end
+end
+end
+
+@chapter Test_Testset begin
+    check(Test_Testset, verbose=4, ["a", "b", "c", "d1", "d2"])
+end
+
+
 # * @testset_macro ...........................................................
 
 
