@@ -243,7 +243,13 @@ function resolve!(mod::Module, ts::TestsetExpr, pat::Pattern;
     strings = empty!(ts.strings)
     desc = ts.desc
     ts.loopvalues = nothing # unnecessary ?
-    ts.loopiters = nothing
+    loopiters = ts.loopiters =
+        if ts.loops === nothing
+            nothing
+        else
+            Expr(:tuple, (arg.args[1] for arg in ts.loops)...)
+        end
+
     if 0 != ts.id != id && !warned[] && has(pat, Integer)
         # this can happen when nested testsets are added and Revise is active
         @warn "testset IDs have changed since last run"
@@ -337,7 +343,6 @@ function resolve!(mod::Module, ts::TestsetExpr, pat::Pattern;
     else # we have a testset-for with description which needs interpolation, or
          # the iterator must be computed to get an iterator counter
         xs = ()
-        loopiters = Expr(:tuple, (arg.args[1] for arg in loops)...)
 
         try
             # we need to evaluate roughly the following:
@@ -359,7 +364,6 @@ function resolve!(mod::Module, ts::TestsetExpr, pat::Pattern;
             xs = Core.eval(mod, xsgen)
             @assert xs isa Vector
             ts.loopvalues = xs
-            ts.loopiters = loopiters
         catch
             @assert xs == ()
             ts.descwidth = shown ? descwidth(missing) : 0
@@ -409,15 +413,20 @@ function resolve!(mod::Module, ts::TestsetExpr, pat::Pattern;
     run, id
 end
 
-eval_desc(mod, ts, x) =
+eval_desc(mod, ts, x; stack=false) = # stack => x == iterstack in dryrun
     if ts.desc isa String
         ts.desc
     else
         try
-            Core.eval(mod, quote
-                      let $(ts.loopiters) = $x
-                          $(ts.desc)
-                      end
+            Core.eval(mod,
+                      if stack
+                          Expr(:let, x, ts.desc)
+                      else
+                          quote
+                              let $(ts.loopiters) = $x
+                                  $(ts.desc)
+                              end
+                          end
                       end)::String
         catch
             missing
@@ -442,7 +451,7 @@ function make_ts(ts::TestsetExpr, pat::Pattern, stats, chan)
         end
     else
         c = count(x -> x === nothing, (ts.loopvalues, ts.loopiters))
-        @assert c == 0 || c == 2
+        @assert c == 0 || c == 1
         if c == 0
             loops = [Expr(:(=), ts.loopiters, ts.loopvalues)]
         else
@@ -1448,7 +1457,7 @@ function dryrun(mod::Module, ts::TestsetExpr, pat::Pattern, align::Int=0,
                 # external calls:
                 ; maxidw::Int, marks::Bool, tag::Vector, clear::Bool,
                 # only recursive calls:
-                evaldesc=true, repeated=nothing, show::Bool=true)
+                evaldesc=true, repeated=nothing, show::Bool=true, iterstack=Expr(:block))
     @assert ts.run
     desc = ts.desc
 
@@ -1518,7 +1527,8 @@ function dryrun(mod::Module, ts::TestsetExpr, pat::Pattern, align::Int=0,
             for tsc in ts.children
                 tsc.run || continue
                 dryrun(mod, tsc, pat, align + 2, subject,
-                       maxidw=maxidw, marks=marks, tag=tag, clear=clear, show=true)
+                       maxidw=maxidw, marks=marks, tag=tag, clear=clear, show=true,
+                       iterstack=iterstack)
             end
             false, false, false # meaningless unused triple
         elseif marks
@@ -1536,7 +1546,7 @@ function dryrun(mod::Module, ts::TestsetExpr, pat::Pattern, align::Int=0,
                 tsc.run || continue
                 cp, cf, cu = dryrun(mod, tsc, pat, align + 2, subject,
                                     maxidw=maxidw, marks=marks, tag=tag, clear=clear,
-                                    show=false)
+                                    show=false, iterstack=iterstack)
                 passes |= cp
                 fails |= cf
                 unrun |= cu
@@ -1585,10 +1595,30 @@ function dryrun(mod::Module, ts::TestsetExpr, pat::Pattern, align::Int=0,
             ts.iter = iter # necessary when reachable is used
             dryrun(mod, beginend, pat, align, parentsubj; evaldesc=false,
                    repeated=repeated, maxidw=maxidw, marks=marks, tag=tag,
-                   clear=clear, show=show)
+                   clear=clear, show=show, iterstack=iterstack)
         end
 
         loopvalues = ts.loopvalues
+        if loopvalues === nothing
+            # we check whether we can now evaluate loopvalues via iterstack
+            try
+                # cf. resolve!
+                xssym = gensym()
+                xsgen = quote
+                    let $xssym = []
+                        $(Expr(:for, Expr(:block, ts.loops...),
+                               Expr(:call, Expr(:., :Base, QuoteNode(:push!)),
+                                    xssym, ts.loopiters)))
+                        $xssym
+                    end
+                end
+                loopvalues = Core.eval(mod, Expr(:let, iterstack, xsgen))
+                @assert loopvalues isa Vector
+            catch
+                @assert loopvalues == nothing
+            end
+        end
+
         if loopvalues === nothing
             # ts.desc is probably a String (cf. resolve!); if so, don't print repeated
             # identitical lines (caveat: if subjects of children would change randomly)
@@ -1615,7 +1645,8 @@ function dryrun(mod::Module, ts::TestsetExpr, pat::Pattern, align::Int=0,
         else
             passes, fails, unrun = false, false, false
             for (i, x) in enumerate(loopvalues)
-                descx = eval_desc(mod, ts, x)
+                push!(iterstack.args, Expr(:(=), ts.loopiters, x))
+                descx = eval_desc(mod, ts, iterstack, stack=true)
                 if descx === missing
                     # we would usually have `i == 1`, but not in some rare cases;
                     # once we find an uninterpolated description, we still assume
@@ -1628,6 +1659,7 @@ function dryrun(mod::Module, ts::TestsetExpr, pat::Pattern, align::Int=0,
                 else
                     lp, lf, lu = dryrun_beginend(descx, iter=i)
                 end
+                pop!(iterstack.args)
                 passes |= lp
                 fails |= lf
                 unrun |= lu

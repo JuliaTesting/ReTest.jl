@@ -635,6 +635,33 @@ end # MultiLoops
     check(MultiLoops, "1 1", [(1, 1)])
 end
 
+module LoopsVariablesDryrun
+# check that even with for-iterators which depend on previous loop variables,
+# dryrun mode is able to compute them and corresponding descriptions,
+# and filter accordingly
+
+using ReTest
+
+@testset "a$i" for i=1:2
+    @testset "b$j" for j=1:i
+        @test true
+    end
+end
+end
+
+@chapter Loops begin
+    # no match, so this it at least filtered for final testsets
+    check(LoopsVariablesDryrun, "a1/b3", dry=true, verbose=9, [], output="""
+1| a1
+1| a2
+""")
+    check(LoopsVariablesDryrun, "a2/b1", dry=true, verbose=9, [], output="""
+1| a1
+1| a2
+2|   b1
+""")
+end
+
 # * Anonym ...................................................................
 
 module Anonym
