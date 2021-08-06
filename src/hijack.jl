@@ -104,7 +104,7 @@ const loaded_testmodules = Dict{Module,Vector{Module}}()
 
 """
     ReTest.hijack(source, [modname];
-                  parentmodule::Module=Main, lazy=false, testset::Bool=false,
+                  parentmodule::Module=Main, lazy=false, [include::Symbol],
                   [revise::Bool])
 
 Given test files defined in `source` using the `Test` package, try to load
@@ -143,11 +143,10 @@ The `lazy` keyword specifies whether some toplevel expressions should be skipped
 * `:brutal` means toplevel `@test*` macros are removed, as well as toplevel
   `begin`, `let`, `for` or `if` blocks.
 
-#### `testset` keyword
+#### `include` keyword
 
-The `testset` keyword can help to handle the case where `@testset`s contain
-`include` expressions (at the "toplevel" of the testset), like in the
-following example:
+The `include` keyword can help to handle the case where `@testset`s contain
+`include` expressions, like in the following example:
 ```julia
 @testset "parent" begin
     @test true
@@ -161,11 +160,28 @@ of the testset which include them. With `ReTest`, the `include` expressions
 would be evaluated only when the parent testsets are run, so that included
 testsets are not run themselves, but only "declared".
 
-It the `testset` keyword
-is `true`, `hijack` inspects `@testset` expressions and puts `include`
-expressions outside of the testset. This is not ideal, but at least allows
-`ReTest` to know about all the testsets right after the call to `hijack`, and
-to not declare new testsets when parent testsets are run.
+If the `include` keyword is set to `:static`, `include(...)` expressions are
+evaluated when `@testset` expressions containing them are parsed, before
+filtering and before testsets are run. Testsets which are declared (within the
+same module) as a side effect of `include(...)` are then inserted in place of
+the call to `include(...)`.
+
+If the `include` keyword is set to `:outline`, `hijack` inspects topelevel
+`@testset` expressions and puts toplevel `include(...)` expressions outside of
+the containing testset, and should therefore be evaluated immediately. This is
+not ideal, but at least allows `ReTest` to know about all the testsets right
+after the call to `hijack`, and to not declare new testsets when parent
+testsets are run.
+
+The `:outline` option might be deprecated in the future, and `include=:static`
+should generally be preferred. One case where `:outline` might work better is
+when the included file defines a submodule: `ReTest` doesn't have the concept
+of a nested testset belonging to a different module than the parent testset,
+so the best that can be done here is to "outline" such nested testsets; with
+`include=:outline`, `hijack` will "process" the content of such submodules
+(replace `using Test` by `using ReTest`, etc.), whereas with
+`include=:static`, the subdmodules will get defined after `hijack` has
+returned (on the first call to `retest` thereafter), so won't be "processed".
 
 #### `revise` keyword
 
@@ -180,8 +196,12 @@ and to `false` otherwise.
 """
 function hijack end
 
+# TODO 0.4: remove `testset` kwarg
+# TODO: maybe deprecate `include=:outline`?
+
 function hijack(path::AbstractString, modname=nothing; parentmodule::Module=Main,
-                lazy=false, testset::Bool=false, revise::Maybe{Bool}=nothing)
+                lazy=false, revise::Maybe{Bool}=nothing,
+                include::Maybe{Symbol}=nothing, testset::Bool=false)
 
     # do first, to error early if necessary
     Revise = get_revise(revise)
@@ -192,8 +212,20 @@ function hijack(path::AbstractString, modname=nothing; parentmodule::Module=Main
     modname = Symbol(modname)
 
     newmod = @eval parentmodule module $modname end
-    populate_mod!(newmod, path; lazy=lazy, testset=testset, Revise=Revise)
+    populate_mod!(newmod, path; lazy=lazy, include=setinclude(include, testset),
+                  Revise=Revise)
     newmod
+end
+
+function setinclude(include, testset)
+    if testset
+        include === nothing || error("cannot specify both `testset` and `include` arguments")
+        :outline
+    else
+        include === nothing || include === :static || include === :outline ||
+            error("`include` keyword only accepts `:static` or `:outline` as value")
+        include
+    end
 end
 
 # this is just a work-around for v"1.5", where @__MODULE__ can't be used in
@@ -202,12 +234,12 @@ const root_module = Ref{Symbol}()
 
 __init__() = root_module[] = gensym("MODULE")
 
-function populate_mod!(mod::Module, path; lazy, Revise, testset)
+function populate_mod!(mod::Module, path; lazy, Revise, include)
     lazy ∈ (true, false, :brutal) ||
         throw(ArgumentError("the `lazy` keyword must be `true`, `false` or `:brutal`"))
 
     files = Revise === nothing ? nothing : Dict(path => mod)
-    substitute!(x) = substitute_retest!(x, lazy, testset, files)
+    substitute!(x) = substitute_retest!(x, lazy, include, files)
 
     @eval mod begin
         using ReTest # for files which don't have `using Test`
@@ -235,7 +267,8 @@ function revise_track(Revise, files)
 end
 
 function hijack(packagemod::Module, modname=nothing; parentmodule::Module=Main,
-                lazy=false, testset::Bool=false, revise::Maybe{Bool}=nothing)
+                lazy=false, revise::Maybe{Bool}=nothing,
+                include::Maybe{Symbol}=nothing, testset::Bool=false)
     packagepath = pathof(packagemod)
     packagepath === nothing && packagemod !== Base &&
         throw(ArgumentError("$packagemod is not a package"))
@@ -253,13 +286,13 @@ function hijack(packagemod::Module, modname=nothing; parentmodule::Module=Main,
     else
         path = joinpath(dirname(dirname(packagepath)), "test", "runtests.jl")
         hijack(path, modname, parentmodule=parentmodule,
-               lazy=lazy, testset=testset, revise=revise)
+               lazy=lazy, testset=testset, include=include, revise=revise)
     end
 end
 
-function substitute_retest!(ex, lazy, testset, files=nothing;
+function substitute_retest!(ex, lazy, include_, files=nothing;
                             ishijack::Bool=true)
-    substitute!(x) = substitute_retest!(x, lazy, testset, files, ishijack=ishijack)
+    substitute!(x) = substitute_retest!(x, lazy, include_, files, ishijack=ishijack)
 
     if Meta.isexpr(ex, :using)
         ishijack || return ex
@@ -309,19 +342,24 @@ function substitute_retest!(ex, lazy, testset, files=nothing;
         ishijack || return ex
         if lazy != false && ex.args[1] ∈ TEST_MACROS
             empty_expr!(ex)
-        elseif testset && ex.args[1] == Symbol("@testset")
-            # we remove `include` expressions and put them out of the `@testset`
-            body = ex.args[end]
-            if body.head == :for
-                body = body.args[end]
+        elseif include_ !== nothing && ex.args[1] == Symbol("@testset")
+            if include_ === :outline
+                # we remove `include` expressions and put them out of the `@testset`
+                body = ex.args[end]
+                if body.head == :for
+                    body = body.args[end]
+                end
+                includes = splice!(body.args, findall(body.args) do x
+                                                  Meta.isexpr(x, :call) && x.args[1] == :include
+                                              end)
+                map!(substitute!, includes, includes)
+                ex.head = :block
+                newts = Expr(:macrocall, ex.args...)
+                push!(empty!(ex.args), newts, includes...)
+            else # :static
+                pos = ex.args[2] isa LineNumberNode ? 3 : 2
+                insert!(ex.args, pos, :(static_include=true))
             end
-            includes = splice!(body.args, findall(body.args) do x
-                                              Meta.isexpr(x, :call) && x.args[1] == :include
-                                          end)
-            map!(substitute!, includes, includes)
-            ex.head = :block
-            newts = Expr(:macrocall, ex.args...)
-            push!(empty!(ex.args), newts, includes...)
         end
     elseif ex isa Expr && ex.head ∈ (:block, :let, :for, :while, :if, :try)
         if lazy == :brutal
