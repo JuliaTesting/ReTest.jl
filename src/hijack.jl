@@ -104,8 +104,8 @@ const loaded_testmodules = Dict{Module,Vector{Module}}()
 
 """
     ReTest.hijack(source, [modname];
-                  parentmodule::Module=Main, lazy=false, [include::Symbol],
-                  [revise::Bool])
+                  parentmodule::Module=Main, lazy=false, [revise::Bool],
+                  [include::Symbol], include_functions=[:include])
 
 Given test files defined in `source` using the `Test` package, try to load
 them by replacing `Test` with `ReTest`, wrapping them in a module `modname`
@@ -183,6 +183,15 @@ so the best that can be done here is to "outline" such nested testsets; with
 `include=:static`, the subdmodules will get defined after `hijack` has
 returned (on the first call to `retest` thereafter), so won't be "processed".
 
+#### `include_functions` keyword
+
+When the `include=:static` keyword argument is passed, it's possible to
+tell `hijack` to apply the same treatment to other functions than
+`include`, by passing a list a symbols to `include_functions`.
+For example, if you defined a custom function `custom_include(x)`
+which itself calls out to `include`, you can pass
+`include_functions=[:custom_include]` to `hijack`.
+
 #### `revise` keyword
 
 The `revise` keyword specifies whether `Revise` should be used to track
@@ -201,7 +210,8 @@ function hijack end
 
 function hijack(path::AbstractString, modname=nothing; parentmodule::Module=Main,
                 lazy=false, revise::Maybe{Bool}=nothing,
-                include::Maybe{Symbol}=nothing, testset::Bool=false)
+                include::Maybe{Symbol}=nothing, testset::Bool=false,
+                include_functions=[:include])
 
     # do first, to error early if necessary
     Revise = get_revise(revise)
@@ -213,6 +223,7 @@ function hijack(path::AbstractString, modname=nothing; parentmodule::Module=Main
 
     newmod = @eval parentmodule module $modname end
     populate_mod!(newmod, path; lazy=lazy, include=setinclude(include, testset),
+                  include_functions=include_functions,
                   Revise=Revise)
     newmod
 end
@@ -234,12 +245,14 @@ const root_module = Ref{Symbol}()
 
 __init__() = root_module[] = gensym("MODULE")
 
-function populate_mod!(mod::Module, path; lazy, Revise, include::Maybe{Symbol}=nothing)
+function populate_mod!(mod::Module, path; lazy, Revise, include::Maybe{Symbol}=nothing,
+                       include_functions)
     lazy ∈ (true, false, :brutal) ||
         throw(ArgumentError("the `lazy` keyword must be `true`, `false` or `:brutal`"))
 
     files = Revise === nothing ? nothing : Dict(path => mod)
-    substitute!(x) = substitute_retest!(x, lazy, include, files)
+    substitute!(x) = substitute_retest!(x, lazy, include, files;
+                                        include_functions=include_functions)
 
     @eval mod begin
         using ReTest # for files which don't have `using Test`
@@ -268,7 +281,8 @@ end
 
 function hijack(packagemod::Module, modname=nothing; parentmodule::Module=Main,
                 lazy=false, revise::Maybe{Bool}=nothing,
-                include::Maybe{Symbol}=nothing, testset::Bool=false)
+                include::Maybe{Symbol}=nothing, testset::Bool=false,
+                include_functions=[:include])
     packagepath = pathof(packagemod)
     packagepath === nothing && packagemod !== Base &&
         throw(ArgumentError("$packagemod is not a package"))
@@ -286,13 +300,15 @@ function hijack(packagemod::Module, modname=nothing; parentmodule::Module=Main,
     else
         path = joinpath(dirname(dirname(packagepath)), "test", "runtests.jl")
         hijack(path, modname, parentmodule=parentmodule,
-               lazy=lazy, testset=testset, include=include, revise=revise)
+               lazy=lazy, testset=testset, include=include, revise=revise,
+               include_functions=include_functions)
     end
 end
 
 function substitute_retest!(ex, lazy, include_::Maybe{Symbol}, files=nothing;
-                            ishijack::Bool=true)
-    substitute!(x) = substitute_retest!(x, lazy, include_, files, ishijack=ishijack)
+                            ishijack::Bool=true, include_functions::Vector{Symbol}=[:include])
+    substitute!(x) = substitute_retest!(x, lazy, include_, files, ishijack=ishijack,
+                                        include_functions=include_functions)
 
     if Meta.isexpr(ex, :using)
         ishijack || return ex
@@ -349,16 +365,28 @@ function substitute_retest!(ex, lazy, include_::Maybe{Symbol}, files=nothing;
                 if body.head == :for
                     body = body.args[end]
                 end
-                includes = splice!(body.args, findall(body.args) do x
-                                                  Meta.isexpr(x, :call) && x.args[1] == :include
-                                              end)
+                includes = splice!(body.args,
+                                   findall(body.args) do x
+                                       Meta.isexpr(x, :call) && x.args[1] ∈ include_functions
+                                   end)
                 map!(substitute!, includes, includes)
                 ex.head = :block
                 newts = Expr(:macrocall, ex.args...)
                 push!(empty!(ex.args), newts, includes...)
-            else # :static
+            elseif include_ == :static
                 pos = ex.args[2] isa LineNumberNode ? 3 : 2
                 insert!(ex.args, pos, :(static_include=true))
+                if !isempty(include_functions)
+                    # enabled only for :static currently, would need to change ex.args
+                    # to newts.args in order to make it work for :outline
+                    ifn_expr = Expr(:vect)
+                    for ifn in include_functions
+                        push!(ifn_expr.args, QuoteNode(ifn))
+                    end
+                    insert!(ex.args, length(ex.args)-1, :(include_functions=$ifn_expr))
+                end
+            else
+                @assert false
             end
         end
     elseif ex isa Expr && ex.head ∈ (:block, :let, :for, :while, :if, :try)
