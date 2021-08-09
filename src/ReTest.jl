@@ -58,6 +58,7 @@ Base.@kwdef mutable struct Options
     verbose::Bool = false # annotated verbosity
     transient_verbose::Bool = false # verbosity for next run
     static_include::Bool = false # whether to execute include at `replace_ts` time
+    include_functions::Vector{Symbol} = [:include] # functions to treat like include
 end
 
 mutable struct TestsetExpr
@@ -121,12 +122,14 @@ function extract_testsets(dest)
 end
 
 # replace unqualified `@testset` by TestsetExpr
-function replace_ts(source, mod, x::Expr, parent; static_include::Bool)
+function replace_ts(source, mod, x::Expr, parent; static_include::Bool,
+                    include_functions::Vector{Symbol})
     if x.head === :macrocall
         name = x.args[1]
         if name === Symbol("@testset")
             @assert x.args[2] isa LineNumberNode
             ts, hasbroken = parse_ts(x.args[2], mod, Tuple(x.args[3:end]), parent;
+                                     include_functions=include_functions,
                                      static_include=static_include)
             ts !== invalid && parent !== nothing && push!(parent.children, ts)
             ts, false # hasbroken counts only "proper" @test_broken, not recursive ones
@@ -136,16 +139,17 @@ function replace_ts(source, mod, x::Expr, parent; static_include::Bool)
             # `@test` is generally called a lot, so it's probably worth it to skip
             # the containment test in this case
             x = macroexpand(mod, x, recursive=false)
-            replace_ts(source, mod, x, parent; static_include=static_include)
+            replace_ts(source, mod, x, parent; static_include=static_include,
+                       include_functions=include_functions)
         else
             @goto default
         end
-    elseif x.head == :call && x.args[1] == :include
+    elseif x.head == :call && x.args[1] ∈ include_functions
         path = x.args[end]
         sourcepath = dirname(string(source.file))
         x.args[end] = path isa AbstractString ?
-            joinpath(sourcepath, path) :
-            :(joinpath($sourcepath, $path))
+                          joinpath(sourcepath, path) :
+                          :(joinpath($sourcepath, $path))
         if static_include
             news = InlineTest.get_tests(mod).news
             newslen = length(news)
@@ -166,7 +170,8 @@ function replace_ts(source, mod, x::Expr, parent; static_include::Bool)
                                          # below; it's currently not very important
                                          tsi.source, tsi.ts...)
                                     for tsi in newstmp)...)
-                replace_ts(source, mod, included_ts, parent; static_include=static_include)
+                replace_ts(source, mod, included_ts, parent;
+                           static_include=static_include, include_functions=include_functions)
             else
                 nothing, false
             end
@@ -174,18 +179,21 @@ function replace_ts(source, mod, x::Expr, parent; static_include::Bool)
             x, false
         end
     else @label default
-        body_br = map(z -> replace_ts(source, mod, z, parent; static_include=static_include),
+        body_br = map(z -> replace_ts(source, mod, z, parent; static_include=static_include,
+                                      include_functions=include_functions),
                       x.args)
         filter!(x -> first(x) !== invalid, body_br)
         Expr(x.head, first.(body_br)...), any(last.(body_br))
     end
 end
 
-replace_ts(source, mod, x, _1; static_include::Bool) = x, false
+replace_ts(source, mod, x, _1; static_include::Bool,
+           include_functions) = x, false
 
 # create a TestsetExpr from @testset's args
 function parse_ts(source::LineNumberNode, mod::Module, args::Tuple, parent=nothing;
-                  static_include::Bool=false)
+                  static_include::Bool=false, include_functions::Vector{Symbol}=[:include])
+
     function tserror(msg)
         @error msg _file=String(source.file) _line=source.line _module=mod
         invalid, false
@@ -195,7 +203,7 @@ function parse_ts(source::LineNumberNode, mod::Module, args::Tuple, parent=nothi
         return tserror("expected begin/end block or for loop as argument to @testset")
 
     local desc
-    options = Options()
+    options = Options(include_functions=include_functions)
     marks = Marks()
     if parent !== nothing
         append!(marks.hard, parent.marks.hard) # copy! not available in Julia 1.0
@@ -203,6 +211,7 @@ function parse_ts(source::LineNumberNode, mod::Module, args::Tuple, parent=nothi
         # if static_include was set in parent, it should have been forwarded also
         # through the parse_ts/replace_ts call chains:
         @assert static_include == parent.options.static_include
+        @assert include_functions === parent.options.include_functions
     end
     for arg in args[1:end-1]
         if arg isa String || Meta.isexpr(arg, :string)
@@ -211,10 +220,22 @@ function parse_ts(source::LineNumberNode, mod::Module, args::Tuple, parent=nothi
             # TODO: support non-literal symbols?
             push!(marks.hard, arg.value)
         elseif Meta.isexpr(arg, :(=))
-            arg.args[1] in fieldnames(Options) ||
-                return tserror("unsupported @testset option")
-            # TODO: make that work with non-literals:
-            setfield!(options, arg.args[1], arg.args[2])
+            optname = arg.args[1]
+            optname in fieldnames(Options) ||
+                return tserror("unsupported @testset option: $optname")
+            if optname == :include_functions
+                @assert Meta.isexpr(arg.args[2], :vect)
+                if parent !== nothing
+                    options.include_functions = Symbol[] # make it non-shared
+                end
+                for ifn in arg.args[2].args
+                    @assert ifn isa QuoteNode
+                    push!(options.include_functions, ifn.value)
+                end
+            else
+                # TODO: make that work with non-literals:
+                setfield!(options, optname, arg.args[2])
+            end
         else
             return tserror("unsupported @testset")
         end
@@ -253,7 +274,8 @@ function parse_ts(source::LineNumberNode, mod::Module, args::Tuple, parent=nothi
 
     ts = TestsetExpr(source, mod, desc, options, marks, loops, parent)
     ts.body, ts.hasbroken = replace_ts(source, mod, tsbody, ts;
-                                       static_include=options.static_include)
+                                       static_include=options.static_include,
+                                       include_functions=options.include_functions)
     ts, false # hasbroken counts only "proper" @test_broken, not recursive ones
 end
 

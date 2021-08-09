@@ -961,7 +961,7 @@ end
 @chapter TestsetErrors begin
     @test_logs (
         :error, "expected begin/end block or for loop as argument to @testset") (
-        :error, "unsupported @testset option") (
+        :error, "unsupported @testset option: notexistingoption") (
         :error, "unsupported @testset" ) (
         :error, "expected begin/end block or for loop as argument to @testset") (
         :error, "expected begin/end block or for loop as argument to @testset"
@@ -1862,7 +1862,8 @@ end
         empty!(Hijack.RUN)
         @test_throws ErrorException ReTest.hijack("./Hijack/test/include_static.jl", :HijackInclude, include=:static, testset=true)
         @test_throws ErrorException ReTest.hijack("./Hijack/test/include_static.jl", :HijackInclude, include=:notvalid)
-        ReTest.hijack("./Hijack/test/include_static.jl", :HijackInclude, include=:static)
+        ReTest.hijack("./Hijack/test/include_static.jl", :HijackInclude, include=:static,
+                      include_functions=[:include, :custom_include_function])
         check(HijackInclude, dry=true, verbose=9, [], output="""
 1| include_static
 2|   include_static_included1 1
