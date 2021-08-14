@@ -74,6 +74,8 @@ mutable struct TestsetExpr
     parent::Maybe{TestsetExpr}
     children::Vector{TestsetExpr}
     strings::Vector{Union{String,Missing}}
+    branches::Dict # TODO
+    resolver::Maybe{Function}
     # loopvalues & loopiters: when successful in evaluating loop values in resolve!,
     # we "flatten" the nested for loops into a single loop, with loopvalues
     # containing tuples of values, and loopiters the tuples of variables to which the
@@ -87,9 +89,26 @@ mutable struct TestsetExpr
     descwidth::Int # max width of self and children shown descriptions
     body::Expr
 
-    TestsetExpr(source, mod, desc, options, marks, loops, parent, children=TestsetExpr[]) =
-        new(0, source, mod, desc, options, marks, loops, parent, children, String[])
+    function TestsetExpr(source, mod, desc, options, marks, loops, parent, branches,
+                children=TestsetExpr[])
+        ts = new(0, source, mod, desc, options, marks, loops, parent, children, String[],
+                 branches, nothing)
+        ts.loopiters =
+            if ts.loops === nothing
+                nothing
+            else
+                Expr(:tuple, (arg.args[1] for arg in ts.loops)...)
+            end
+        ts
+    end
+
 end
+
+Base.show(io::IO, ts::TestsetExpr) =
+    print(io, "TestsetExpr(",
+          "id=", ts.id,
+          ", desc=", ts.desc,
+          ", run=", ts.run, ")")
 
 isfor(ts::TestsetExpr) = ts.loops !== nothing
 
@@ -272,7 +291,8 @@ function parse_ts(source::LineNumberNode, mod::Module, args::Tuple, parent=nothi
         return tserror("expected begin/end block or for loop as argument to @testset")
     end
 
-    ts = TestsetExpr(source, mod, desc, options, marks, loops, parent)
+    ts = TestsetExpr(source, mod, desc, options, marks, loops, parent,
+                     parent === nothing ? Dict() : parent.branches)
     ts.body, ts.hasbroken = replace_ts(source, mod, tsbody, ts;
                                        static_include=options.static_include,
                                        include_functions=options.include_functions)
@@ -301,7 +321,7 @@ end
 # true) a testset found to have to run doesn't force its children to run.
 # The drawback is more exhaustive tree walking and more string churn.
 
-function resolve!(mod::Module, ts::TestsetExpr, pat::Pattern;
+function resolve0!(mod::Module, ts::TestsetExpr, pat::Pattern;
                   # external calls
                   verbose::Int, id::Int64, strict::Bool, static::Maybe{Bool},
                   warned::Ref{Bool},
@@ -480,7 +500,55 @@ function resolve!(mod::Module, ts::TestsetExpr, pat::Pattern;
     ts.run = run
     run, id
 end
+#=
+function preresolve!(pat, id)
+    iters = []
+    subjects = [""]
+    runs = []
+    %ts2.runs = Dict() # (id => iters) => [(x1, subject1, run1), ...]
+    # ^^ do in TestsetExpr ctor
+    # ts1
+    ts1.id = %(id += 1 )
+    for ((ith, iter) in enumerate(%(ts1.loopiters)))
+        push!(runs, false)
+        %ts.iter = ith
+        push!(iters, ith)
+        desc = %(ts1.description)
+        subject = subject[end] * '/' * desc
+        push!(subjects, subject)
+        if matches(pat, subject, ts)
+            runs[end] = true
+        end
 
+        ## recursive
+        # ts2
+        %ts2.id = %(id += 1)
+        ts2iters = empty!(get!(%ts2.runs, Tuple(iters), []))
+        for ((ith, iter) in enumerate (%ts2.loopiters))
+            push!(runs, false)
+            %ts2.iter = ith
+            push!(iters, ith)
+            desc = %(ts2.description)
+            subject = subjects[end] * '/' * desc
+            push!(subjects, subject)
+            if matches(pat, subject, ts)
+                runs[end] = true
+            end
+
+            ### recursive ...
+
+            irun = pop!(runs)
+            push!(ts2iters, (iter, subject, irun))
+            runs[end] |= irun
+            pop!(iters)
+            pop!(subjects)
+        end
+
+        pop!(iters)
+        pop!(subjects)
+    end
+end
+=#
 eval_desc(mod, ts, x; stack=false) = # stack => x == iterstack in dryrun
     if ts.desc isa String
         ts.desc
@@ -501,8 +569,144 @@ eval_desc(mod, ts, x; stack=false) = # stack => x == iterstack in dryrun
         end
     end
 
+
+function resolve!(ts::TestsetExpr, pat::Pattern;
+                  # external calls
+                  verbose::Int, id::Int64, static::Maybe{Bool},
+                  warned::Ref{Bool})
+    if ts.resolver === nothing
+        ts.resolver = make_resolver(ts)
+    end
+    #    @show "resolving"
+    println("resolving...")
+    res = Base.invokelatest(ts.resolver, pat, verbose, id, static, warned)
+        println("resolved...")
+res
+#    Base.invokelatest(make_resolver(ts), pat, verbose, id, static, warned)
+end
+
+rmln(e) = e
+function rmln(e::Expr)
+    args = filter(x -> !(x isa LineNumberNode), e.args)
+    Expr(e.head, map(rmln, args)...)
+end
+
+function make_resolver(ts)
+    gensym_(x) = Symbol(x)
+    resolver   = gensym_("ReTest.resolver")
+    pat        = gensym_("pat")
+    verbose    = gensym_("verbose")
+    id         = gensym_("id")
+    static     = gensym_("static")
+    warned     = gensym_("warned")
+    iters      = gensym_("iters")
+    titers     = gensym_("titers")
+    iter       = gensym_("iter")
+    subjects   = gensym_("subjects")
+    subject    = gensym_("subject")
+    runs       = gensym_("runs")
+    run        = gensym_("run")
+    curloop    = gensym_("curloop")
+    curval     = gensym_("curval")
+    loopvalues = gensym_("loopvalues")
+#    body       = gensym_("body")
+    desc       = gensym_("desc")
+
+    branches = ts.branches
+
+    resolver_expr = quote
+        function $resolver($pat::$Pattern, $verbose, $id, $static, $warned)
+            $iters = $Int[]
+            $subjects = [""]
+            $runs = $Bool[false]
+            local $run
+        end
+    end
+
+    function add_testsets!(args, ts)
+        blk = quote
+            # TODO: warn for id
+#            @show $iters, $ts.id
+            if all(isone, $iters)
+                $ts.id = $id
+#                @show $iters, $ts.run
+                $ts.run = false
+                $ts.options.transient_verbose = true # TODO
+#                @show $id
+                $id += 1
+            end
+ #           @show $ts.id
+            let $curloop = $empty!($get!($branches, $ts.id => $Tuple($iters),
+                                           $Tuple{$Any, $String, $Bool}[])),
+                $iter = 0, $subject, $desc
+            end
+        end
+
+        body = quote
+            $ts.iter = $iter
+            push!($iters, $iter)
+            $desc = $(ts.desc)
+            $subject = $string($subjects[end], '/', $desc)
+            $push!($subjects, $subject)
+            mm = $matches($pat, $subject, $ts)
+            push!($runs, $matches($pat, $subject, $ts))
+            $ts.run |= mm
+#            @show $subject, $ts.id, mm, $ts.run
+
+        end
+
+        for tsc in ts.children
+            add_testsets!(body.args, tsc)
+        end
+        push!(body.args,
+              quote
+              # runs[end] might have been updated by nested testsets
+                   $run = $pop!($runs)
+              $push!($curloop, ($curval, $subject, $run))
+              # if $run, both this testset/testset-for and parent testset are set to run
+                   $ts.run |= $run
+                   $runs[end] |= $run
+                   $pop!($iters)
+                   $pop!($subjects)
+               end)
+
+        push!(blk.args[end].args[2].args,
+              if isfor(ts)
+            Expr(:for, Expr(:block, ts.loops...),
+                 quote
+                     $curval = nothing #$(ts.loopiters)
+                     $iter += 1
+                     $body
+                 end)
+        else
+            quote
+                $curval = $nothing
+                $iter = 1
+                $body
+            end
+        end)
+        append!(args, blk.args)
+
+    end
+
+    let fn = resolver_expr.args[end]
+        @assert fn.head == :function
+        @assert fn.args[end].head == :block
+        add_testsets!(fn.args[end].args, ts)
+        push!(fn.args[end].args, :(begin
+                                   @assert $length($runs) == 1
+                                   @assert $ts.run == $runs[1]
+                                   return $runs[1], $id
+                                   end))
+    end
+#    dump( resolver_expr, maxdepth=1000)
+#    println( rmln(resolver_expr))
+    Core.eval(ts.mod, resolver_expr)
+end
+
 # convert a TestsetExpr into an actually runnable testset
 function make_ts(ts::TestsetExpr, pat::Pattern, stats, chan)
+#    @show ts.id, ts.run
     ts.run || return nothing
 
     if isempty(ts.children) # not isfinal(ts), so that children which don't run
@@ -515,19 +719,19 @@ function make_ts(ts::TestsetExpr, pat::Pattern, stats, chan)
     if !isfor(ts)
         quote
             @testset $(ts.mod) $(isfinal(ts)) $pat $(ts.id) $(ts.desc) $(ts.options) #=
-            =# $(ts.marks) $stats $chan $body
+            =# $(ts.branches) $(ts.marks) $stats $chan $body
         end
     else
-        c = count(x -> x === nothing, (ts.loopvalues, ts.loopiters))
+#=        c = count(x -> x === nothing, (ts.loopvalues, ts.loopiters))
         @assert c == 0 || c == 1
         if c == 0
             loops = [Expr(:(=), ts.loopiters, ts.loopvalues)]
-        else
+        else =#
             loops = ts.loops
-        end
+#        end
         quote
             @testset $(ts.mod) $(isfinal(ts)) $pat $(ts.id) $(ts.desc) $(ts.options) #=
-            =# $(ts.marks) $stats $chan $loops $body
+            =# $(ts.branches) $(ts.marks) $stats $chan $loops $body
         end
     end
 end
@@ -801,6 +1005,7 @@ function retest(@nospecialize(args::ArgType...);
                     # this is the condition for printing "Overall" summary
         descwidth = max(descwidth, textwidth(root.description))
     end
+
     format = Format(stats, descwidth)
 
     maxidw[] = id ? maxidw[] : 0
@@ -1489,14 +1694,18 @@ function fetchtests((mod, pat), verbose, module_header, maxidw; static, strict, 
     warned = Ref(false)
 
     for ts in tests
-        run, id = resolve!(mod, ts, pat, verbose=verbose, id=id, strict=strict,
+        @assert ts.mod === mod
+#=        run, id = resolve!(mod, ts, pat, verbose=verbose, id=id, strict=strict,
                            static=static, warned=warned)
+        =#
+        run, id = resolve!(ts, pat, verbose=verbose, id=id, static=static, warned=warned)
+
         run || continue
+        ts.descwidth = 0 # TODO
         descwidth = max(descwidth, ts.descwidth)
         hasbroken |= ts.hasbrokenrec
         maxidw[] = max(maxidw[], ndigits(id-1))
     end
-
     tests = filter(ts -> ts.run, tests)
 
     if !isempty(tests)

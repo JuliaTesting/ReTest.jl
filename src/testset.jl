@@ -124,7 +124,6 @@ function print_test_results(ts::ReTestSet, fmt::Format;
     # Calculate the overall number for each type so each of
     # the test result types are aligned
     upd = false
-
     passes, fails, errors, broken, c_passes, c_fails, c_errors, c_broken = get_test_counts(ts)
     total_pass   = passes + c_passes
     total_fail   = fails  + c_fails
@@ -146,7 +145,6 @@ function print_test_results(ts::ReTestSet, fmt::Format;
         total = 0
     end
     dig_total = total > 0 || hasbroken ? ndigits(total) : 0
-
     # For each category, take max of digits and header width if there are
     # tests of that type
     fail_width   = dig_fail   > 0 ? max(6,   dig_fail) : 0
@@ -187,7 +185,6 @@ function print_test_results(ts::ReTestSet, fmt::Format;
     else
         total_width = fmt.total_width
     end
-
     # Calculate the alignment of the test result counts by
     # recursively walking the tree of test sets
     if !ts.overall # otherwise, we don't print recursively
@@ -263,7 +260,6 @@ function finish(ts::ReTestSet, chan=nothing)
         ts.exception = TestSetException(total_pass, total_fail, total_error,
                                         total_broken, efs)
     end
-
     put!(chan.out, ts)
     if myid() == 1
         take!(chan.compute)
@@ -456,12 +452,37 @@ default_rng() = isdefined(Random, :default_rng) ?
     Random.GLOBAL_RNG
 
 function make_retestset(mod, desc, id, verbose, marks, remove_last=false, iter=1)
+#    @show verbose
     _testsets = get(task_local_storage(), :__BASETESTNEXT__, Test.AbstractTestSet[])
     @assert !(remove_last && isempty(_testsets))
     testsets = @view _testsets[1:end-remove_last]
     ReTestSet(mod, desc, id; verbose=verbose, marks=marks, iter=iter,
               parent = isempty(testsets) ? nothing : testsets[end])
 end
+
+function intheloop(ts, branches)
+#    return true
+#    display(branches)
+    iters = Int[]
+    par = ts.parent
+    while par !== nothing
+        pushfirst!(iters, par.iter)
+        par = par.parent
+    end
+ #   @show ts.description, ts.id, iters, ts.iter
+
+    brs = branches[ts.id => Tuple(iters)][ts.iter]
+
+    curval, subject, run =  brs
+#    @show ts.id, subject, run
+    if subject != ts.subject
+        @show subject, ts.subject
+    end
+    @assert subject == ts.subject
+    # @assert curval == ...
+    run
+end
+
 
 # HACK: we re-use the same macro name `@testset` for actual execution (like in `Test`)
 # as for the one documented in ReTest (deferred execution), because otherwise
@@ -480,22 +501,22 @@ end
 
 # non-inline testset with regex filtering support
 macro testset(mod::Module, isfinal::Bool, pat::Pattern, id::Int64, desc::Union{String,Expr},
-              options, marks::Marks, stats::Bool, chan, body)
+              options, branches::Dict, marks::Marks, stats::Bool, chan, body)
     Testset.testset_beginend(mod, isfinal, pat, id, desc,
-                             options, marks, stats, chan, body, __source__)
+                             options, branches, marks, stats, chan, body, __source__)
 end
 
 macro testset(mod::Module, isfinal::Bool, pat::Pattern, id::Int64, desc::Union{String,Expr},
-              options, marks::Marks, stats::Bool, chan, loops, body)
+              options, branches::Dict, marks::Marks, stats::Bool, chan, loops, body)
     Testset.testset_forloop(mod, isfinal, pat, id, desc,
-                            options, marks, stats, chan, loops, body, __source__)
+                            options, branches, marks, stats, chan, loops, body, __source__)
 end
 
 """
 Generate the code for a `@testset` with a `begin`/`end` argument
 """
 function testset_beginend(mod::Module, isfinal::Bool, pat::Pattern, id::Int64, desc, options,
-                          marks::Marks, stats::Bool, chan, tests, source)
+                          branches::Dict, marks::Marks, stats::Bool, chan, tests, source)
     # Generate a block of code that initializes a new testset, adds
     # it to the task local storage, evaluates the test(s), before
     # finally removing the testset and giving it a chance to take
@@ -554,16 +575,18 @@ end
 Generate the code for a `@testset` with a `for` loop argument
 """
 function testset_forloop(mod::Module, isfinal::Bool, pat::Pattern, id::Int64,
-                         desc::Union{String,Expr}, options, marks::Marks, stats, chan,
-                         loops, tests, source)
+                         desc::Union{String,Expr}, options, branches::Dict, marks::Marks,
+                         stats, chan, loops, tests, source)
 
     desc = esc(desc)
     blk = quote
         iter += 1
         local ts0 = make_retestset($mod, $desc, $id, $(options.transient_verbose),
                                    $marks, !first_iteration, iter)
-
-        if !$isfinal || matches($pat, ts0.subject, ts0)
+        itl = intheloop(ts0, $branches)
+        mat = matches($pat, ts0.subject, ts0)
+#        @show itl, $id, $isfinal, mat
+        if itl #&& (!$isfinal || mat)
             # Trick to handle `break` and `continue` in the test code before
             # they can be handled properly by `finally` lowering.
             if !first_iteration
