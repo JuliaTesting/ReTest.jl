@@ -3,7 +3,10 @@ Maybe{T} = Union{T,Nothing}
 issubmodule(m::Module, s) = s isa Module && parentmodule(s) == m && m != s
 
 function submodules(m::Module)
-    symbols = Core.eval.(Ref(m), filter!(y -> isdefined(m, y), names(m, all=true)))
+    nms = filter!(names(m, all=true)) do y
+        Base.isdefined(m, y) && !Base.isdeprecated(m, y)
+    end
+    symbols = Core.eval.(Ref(m), nms)
     filter!(x -> issubmodule(m, x), symbols)
 end
 
