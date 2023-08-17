@@ -1485,7 +1485,7 @@ function fetchtests((mod, pat), verbose, module_header, maxidw; static, strict, 
     descwidth = 0
     hasbroken = false
 
-    id = 1
+    id = Int64(1)
     warned = Ref(false)
 
     for ts in tests
