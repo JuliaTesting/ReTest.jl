@@ -46,6 +46,11 @@ function scrub_exc_stack(stack)
     return Any[ (x[1], scrub_backtrace(x[2])) for x in stack ]
 end
 
+# Compat for catch_stack(), which was deprecated in 1.7
+@static if VERSION < v"1.7"
+    current_exceptions() = Base.catch_stack()
+end
+
 mutable struct Format
     stats::Bool
     desc_align::Int
@@ -531,7 +536,7 @@ function testset_beginend(mod::Module, isfinal::Bool, pat::Pattern, id::Int64, d
                 # something in the test block threw an error. Count that as an
                 # error in this test set
                 record(ts, Error(:nontest_error, Expr(:tuple), err,
-                                 Base.catch_stack(), $(QuoteNode(source))))
+                                 current_exceptions(), $(QuoteNode(source))))
             finally
                 copy!(RNG, oldrng)
                 setresult!($marks, ts.subject, !anyfailed(ts))
@@ -594,7 +599,7 @@ function testset_forloop(mod::Module, isfinal::Bool, pat::Pattern, id::Int64,
                 err isa InterruptException && rethrow()
                 # Something in the test block threw an error. Count that as an
                 # error in this test set
-                record(ts, Error(:nontest_error, Expr(:tuple), err, Base.catch_stack(), $(QuoteNode(source))))
+                record(ts, Error(:nontest_error, Expr(:tuple), err, current_exceptions(), $(QuoteNode(source))))
                 setresult!($marks, ts.subject, false)
             end
         end
