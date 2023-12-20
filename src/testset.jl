@@ -672,9 +672,13 @@ macro stats(yes, ex)
     end
 end
 
-cumulative_compile_time_ns() =
-    isdefined(Base, :cumulative_compile_time_ns) ?
+@static if VERSION >= v"1.9"
+    # In 1.9 this function was changed to return a tuple of (compile_time, recompilation_time)
+    cumulative_compile_time_ns() = sum(Base.cumulative_compile_time_ns())
+else
+    cumulative_compile_time_ns() = isdefined(Base, :cumulative_compile_time_ns) ?
         Base.cumulative_compile_time_ns() :
         UInt(0)
+end
 
 end # module
