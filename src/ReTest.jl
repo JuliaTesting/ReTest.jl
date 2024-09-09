@@ -570,7 +570,7 @@ end
 
 revise_pkgid() = Base.PkgId(Base.UUID("295af30f-e4ad-537b-8983-00126c2a3abe"), "Revise")
 
-"accepted types as positional arguments of `retest`"
+# Accepted types as positional arguments of `retest`
 const ArgType = Union{Module,PatternX,AbstractString,AbstractArray,Tuple,Symbol,
                       Pair{Module,
                            <:Union{PatternX,AbstractString,AbstractArray,Tuple}}}
