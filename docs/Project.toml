@@ -4,4 +4,4 @@ InlineTest = "bd334432-b1e7-49c7-a2dc-dd9149e4ebd6"
 ReTest = "e0db7c4e-2690-44b9-bad6-7687da720f89"
 
 [compat]
-Documenter = "0.26"
+Documenter = "1"

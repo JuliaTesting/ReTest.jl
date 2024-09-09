@@ -518,14 +518,19 @@ depth(x::Integer) = Depth(Int(x))
 
 """
     pass
+
+Filtering pattern which matches any testset which already ran successfully.
+The pattern `[pass, fail]` matches any testset which already ran.
+"""
+pass
+
+"""
     fail
 
-Filtering patterns which match any testset which already ran,
-succesfully for `pass` or with at least one error for `fail`.
-The pattern `[pass, fail]` therefore matches any testset
-which already ran.
+Filtering pattern which matches any testset which already ran with at least one
+error. The pattern `[pass, fail]` matches any testset which already ran.
 """
-pass, fail
+fail
 
 """
     iter(i::Integer)

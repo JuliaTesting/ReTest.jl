@@ -496,9 +496,7 @@ macro testset(mod::Module, isfinal::Bool, pat::Pattern, id::Int64, desc::Union{S
                             options, marks, stats, chan, loops, body, __source__)
 end
 
-"""
-Generate the code for a `@testset` with a `begin`/`end` argument
-"""
+# Generate the code for a `@testset` with a `begin`/`end` argument
 function testset_beginend(mod::Module, isfinal::Bool, pat::Pattern, id::Int64, desc, options,
                           marks::Marks, stats::Bool, chan, tests, source)
     # Generate a block of code that initializes a new testset, adds
@@ -555,9 +553,7 @@ function testset_beginend(mod::Module, isfinal::Bool, pat::Pattern, id::Int64, d
     return ex
 end
 
-"""
-Generate the code for a `@testset` with a `for` loop argument
-"""
+# Generate the code for a `@testset` with a `for` loop argument
 function testset_forloop(mod::Module, isfinal::Bool, pat::Pattern, id::Int64,
                          desc::Union{String,Expr}, options, marks::Marks, stats, chan,
                          loops, tests, source)
