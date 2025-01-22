@@ -1413,6 +1413,11 @@ function process_args(@nospecialize(args);
     # tests is passed to retest in order to run tests in its submodules
     filter!(m -> isdefined(m, INLINE_TEST), modules)
 
+    # Remove the precompilation module if we're not precompiling
+    if ccall(:jl_generating_output, Cint, ()) == 0
+        filter!(m -> nameof(m) !== :_ReTestPrecompileTests, modules)
+    end
+
     shuffle && shuffle!(modules)
 
     ########## process verbose
@@ -1748,5 +1753,7 @@ function runtests(tests::String="")
         error("Pkg is not loaded") # Pkg seems to always be loaded...
     Pkg.test("ReTest", test_args=Vector{String}(split(tests)))
 end
+
+include("precompile.jl")
 
 end # module ReTest
