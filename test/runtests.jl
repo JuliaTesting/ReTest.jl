@@ -87,7 +87,7 @@ function check(rx, list; implicit=false)
         if implicit
             expected = "Main.M\n" * expected
         end
-        actual = readchomp(io)
+        actual = strip(readchomp(io))
         if isempty(expected)
             @test startswith(actual, "No matching tests for module")
         else
