@@ -575,6 +575,10 @@ const ArgType = Union{Module,PatternX,AbstractString,AbstractArray,Tuple,Symbol,
                       Pair{Module,
                            <:Union{PatternX,AbstractString,AbstractArray,Tuple}}}
 
+# Holds the seed to set before each testset. This is not thread-safe, but it's
+# not normal/intended to call retest() concurrently anyway.
+const test_seed = Ref{Any}(false)
+
 const retest_defaults = (
     dry       = false,
     stats     = false,
@@ -1089,22 +1093,12 @@ function retest(@nospecialize(args::ArgType...);
             end
 
             if seed !== false
-                let seedstr =
-                        if seed === true
-                            # seed!(nothing) doesn't work on old Julia, so we can't just set
-                            # `seed = nothing` and interpolate `seed` directly in includestr
-                            ""
-                        else
-                            string(seed)
-                        end,
-                    includestr = """
-                                 using Random
-                                 Random.seed!($seedstr)
-                                 nothing
-                                 """
-                    # can't use `@everywhere using Random`, as here is not toplevel
-                    @everywhere Base.include_string(Main, $includestr)
-                end
+                includestr = """
+                import ReTest
+                ReTest.test_seed[] = $seed
+                """
+
+                @everywhere Base.include_string(Main, $includestr)
             end
 
             @sync for wrkr in workers()
@@ -1412,6 +1406,11 @@ function process_args(@nospecialize(args);
     # remove modules which don't have tests, which can happen when a parent module without
     # tests is passed to retest in order to run tests in its submodules
     filter!(m -> isdefined(m, INLINE_TEST), modules)
+
+    # Remove the precompilation module if we're not precompiling
+    if ccall(:jl_generating_output, Cint, ()) == 0
+        filter!(m -> nameof(m) !== :_ReTestPrecompileTests, modules)
+    end
 
     shuffle && shuffle!(modules)
 
@@ -1748,5 +1747,7 @@ function runtests(tests::String="")
         error("Pkg is not loaded") # Pkg seems to always be loaded...
     Pkg.test("ReTest", test_args=Vector{String}(split(tests)))
 end
+
+include("precompile.jl")
 
 end # module ReTest

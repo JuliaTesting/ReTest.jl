@@ -13,15 +13,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: julia-actions/setup-julia@latest
-        with:
-          version: '1'
+      - uses: julia-actions/cache@v2
       - name: Install dependencies
         run: |
-          julia --project=docs/ -e '
-            using Pkg
-            Pkg.develop([PackageSpec(path=joinpath(pwd(), "InlineTest")),
-                         PackageSpec(path=pwd())])
-            Pkg.instantiate()'
+          julia --project=docs/ -e 'using Pkg; Pkg.instantiate()'
       - name: Build and deploy
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # For authentication with GitHub Actions token

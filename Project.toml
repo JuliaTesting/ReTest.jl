@@ -1,11 +1,12 @@
 name = "ReTest"
 uuid = "e0db7c4e-2690-44b9-bad6-7687da720f89"
 authors = ["Rafael Fourquet <fourquet.rafael@gmail.com>"]
-version = "0.3.3"
+version = "0.3.4"
 
 [deps]
 Distributed = "8ba89e20-285c-5b6f-9357-94700520ee1b"
 InlineTest = "bd334432-b1e7-49c7-a2dc-dd9149e4ebd6"
+PrecompileTools = "aea7be01-6a6a-4083-8856-8a6e6704d82a"
 Printf = "de0858da-6303-5e67-8744-51eddeeeb8d7"
 Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
 Sockets = "6462fe0b-24de-5631-8697-dd941f90decc"
@@ -14,7 +15,8 @@ Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 [compat]
 InlineTest = "=0.2.0"
 Revise = "3.1"
-julia = "1"
+PrecompileTools = "1.2.1"
+julia = "1.10"
 
 [extras]
 Pkg = "44cfe95a-1eb2-52ea-b672-e2afdf69b78f"
