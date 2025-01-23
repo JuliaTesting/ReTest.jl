@@ -14,6 +14,7 @@ using Distributed: myid, nworkers
 
 import InlineTest: @testset
 
+import ..ReTest
 using ..ReTest: Pattern, Marks, matches, setresult!
 
 # mostly copied from Test stdlib
@@ -514,17 +515,19 @@ function testset_beginend(mod::Module, isfinal::Bool, pat::Pattern, id::Int64, d
                 put!($(chan.preview), ($id, $desc))
             end
             push_testset(ts)
+
             # we reproduce the logic of guardseed, but this function
             # cannot be used as it changes slightly the semantic of @testset,
             # by wrapping the body in a function
-            local RNG = default_rng()
-            local oldrng = copy(RNG)
+            local default_rng_orig = copy(default_rng())
+            @static if VERSION >= v"1.11"
+                local tls_seed_orig = copy(Random.get_tls_seed())
+            end
+
             try
-                # RNG is re-seeded with its own seed to ease reproduce a failed test
-                if VERSION >= v"1.7.0-DEV.1225"
-                    Random.seed!(Random.GLOBAL_SEED)
-                else
-                    Random.seed!(RNG.seed)
+                # RNG is re-seeded with the desired seed for the test
+                if ReTest.test_seed[] !== false
+                    Random.seed!(ReTest.test_seed[])
                 end
                 let
                     ts.timed = @stats $stats $(esc(tests))
@@ -536,7 +539,11 @@ function testset_beginend(mod::Module, isfinal::Bool, pat::Pattern, id::Int64, d
                 record(ts, Error(:nontest_error, Expr(:tuple), err,
                                  current_exceptions(), $(QuoteNode(source))))
             finally
-                copy!(RNG, oldrng)
+                copy!(default_rng(), default_rng_orig)
+                @static if VERSION >= v"1.11"
+                    copy!(Random.get_tls_seed(), tls_seed_orig)
+                end
+
                 setresult!($marks, ts.subject, !anyfailed(ts))
                 pop_testset()
                 ret = finish(ts, $chan)
@@ -544,6 +551,7 @@ function testset_beginend(mod::Module, isfinal::Bool, pat::Pattern, id::Int64, d
             ret
         end
     end
+
     # preserve outer location if possible
     if tests isa Expr && tests.head === :block &&
         !isempty(tests.args) && tests.args[1] isa LineNumberNode
@@ -578,7 +586,7 @@ function testset_forloop(mod::Module, isfinal::Bool, pat::Pattern, id::Int64,
                     break
                 end
                 # it's 1000 times faster to copy from tmprng rather than calling Random.seed!
-                copy!(RNG, tmprng)
+                copy!(default_rng(), tmprng)
             end
             ts = ts0
             if nworkers() == 1 && get_testset_depth() == 0 && $(chan.preview) !== nothing
@@ -600,19 +608,22 @@ function testset_forloop(mod::Module, isfinal::Bool, pat::Pattern, id::Int64,
             end
         end
     end
+
     quote
         local arr = Vector{Any}()
         local first_iteration = true
         local iter = 0
         local ts
-        local RNG = default_rng()
-        local oldrng = copy(RNG)
-        if VERSION >= v"1.7.0-DEV.1225"
-            Random.seed!(Random.GLOBAL_SEED)
-        else
-            Random.seed!(RNG.seed)
+
+        local default_rng_orig = copy(default_rng())
+        @static if VERSION >= v"1.11"
+            local tls_seed_orig = copy(Random.get_tls_seed())
         end
-        local tmprng = copy(RNG)
+
+        local tmprng = copy(default_rng())
+        if ReTest.test_seed[] !== false
+            tmprng = copy(Random.seed!(ReTest.test_seed[]))
+        end
         try
             let
                 $(Expr(:for, Expr(:block, [esc(v) for v in loops]...), blk))
@@ -623,7 +634,11 @@ function testset_forloop(mod::Module, isfinal::Bool, pat::Pattern, id::Int64,
                 pop_testset()
                 push!(arr, finish(ts, $chan))
             end
-            copy!(RNG, oldrng)
+
+            copy!(default_rng(), default_rng_orig)
+            @static if VERSION >= v"1.11"
+                copy!(Random.get_tls_seed(), tls_seed_orig)
+            end
         end
         arr
     end
