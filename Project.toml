@@ -1,7 +1,7 @@
 name = "ReTest"
 uuid = "e0db7c4e-2690-44b9-bad6-7687da720f89"
 authors = ["Rafael Fourquet <fourquet.rafael@gmail.com>"]
-version = "0.3.3"
+version = "0.3.4"
 
 [deps]
 Distributed = "8ba89e20-285c-5b6f-9357-94700520ee1b"
@@ -16,7 +16,7 @@ Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 InlineTest = "=0.2.0"
 Revise = "3.1"
 PrecompileTools = "1.2.1"
-julia = "1"
+julia = "1.10"
 
 [extras]
 Pkg = "44cfe95a-1eb2-52ea-b672-e2afdf69b78f"

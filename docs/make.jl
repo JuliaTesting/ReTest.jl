@@ -1,7 +1,8 @@
 using Documenter, ReTest
 
-makedocs(sitename = "ReTest.jl",
-         modules = [ReTest, ReTest.InlineTest])
+makedocs(; sitename = "ReTest.jl",
+         modules = [ReTest, ReTest.InlineTest],
+         warnonly=[:missing_docs])
 
 
 deploydocs(

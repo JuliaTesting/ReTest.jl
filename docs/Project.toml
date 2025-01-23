@@ -5,3 +5,7 @@ ReTest = "e0db7c4e-2690-44b9-bad6-7687da720f89"
 
 [compat]
 Documenter = "1"
+
+[sources]
+ReTest = { path = ".." }
+InlineTest = { path = "../InlineTest" }
