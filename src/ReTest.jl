@@ -606,6 +606,174 @@ def(kw::Symbol) =
         retest_defaults[kw]
     end
 
+"""
+    get_previewer_channel(
+        spin, stdout, version, nthreads, nprocs
+    )::Maybe{RemoteChannel}
+
+Optionally returns a channel for previewing testsets yet to be completed.
+
+# Arguments:
+- `spin::Bool`: Whether to show an active 'spinner' along with the description
+                of the currently executing testset.
+- `stdout::DataType`: Output stream to print to.
+- `version::VersionNumber`: Current version of Julia being used.
+- `nthreads::Integer`: Number of threads available to ReTest.
+- `nprocs::Integer`: Number of processes available to ReTest.
+"""
+function get_previewer_channel(spin, stdout, version, nthreads, nprocs)
+    can_call_thread_pin = nthreads > 1 && version >= v"1.3"
+    if spin && stdout isa Base.TTY && (can_call_thread_pin || nprocs > 1)
+        RemoteChannel(() -> Channel{Maybe{Tuple{Int64,String}}}(Inf))
+        # Needs to be "remote" in the case nprocs() == 2, as then nworkers() ==
+        # 1, which means the one remote worker will put descriptions on
+        # previewchan (if nworkers() > 1, descriptions are not put because we
+        # can't predict the order in which they complete, and then the previewer
+        # will not show the descriptions, just the spinning wheel)
+
+        # On VERSION < v"1.3" : we can't call `thread_pin` (see below), and in
+        # this case previewing doesn't work well, as the worker and previewer
+        # tasks can end up in the same thread, and the previewer is not
+        # responsive.
+
+        # channel size: if nworkers() == 1, then 2 would suffice (one for the
+        # "compilation step", one for @testset execution step, and then the
+        # printer would empty the channel; but for two workers and more, this
+        # second step is not done, so the buffer needs a size of at least
+        # `nworkers()`
+    else
+        # Otherwise, the previewing doesn't work well, because the worker task
+        # keeps the thread busy and doesn't yield enough for previewing to be
+        # useful.
+        nothing
+    end
+end
+
+"""
+    take_latest!(previewchan)::Tuple{Int64, Union{String, Nothing}}
+
+Gets the ID and description of the latest testset to preview.
+
+# Arguments:
+- `previewchan::Maybe{RemoteChannel}`: Object to get ID/description pairs from.
+"""
+function take_latest!(previewchan)
+    local id_desc
+    while isready(previewchan)
+        # printer/previewer can't take! it, as we locked
+        id_desc = take!(previewchan)
+    end
+    if @isdefined(id_desc)
+        something(id_desc, (Int64(0), nothing))
+    else
+        (Int64(0), "")
+    end
+end
+
+# TODO: Clarify purpose of `align_overflow`.
+# TODO: Clarify purpose of `maxidw` - maximum indentation width?
+"""
+    get_previewer(
+        previewchan, interrupted, printlock, gotprinted, align_overflow,
+        verbose, format, module_header, many, maxidw
+    )::Maybe{Task}
+
+Optionally schedules and returns a task for previewing the completion of
+testsets for the current module, if previewing is enabled.
+
+# Arguments:
+- `previewchan::Maybe{RemoteChannel}`: Object for acquiring the latest testset
+                                       to preview.
+- `interrupted::Threads.Atomic{Bool}`: Whether or not the previewer was
+                                       interrupted during execution.
+- `printlock::ReentrantLock`: Lock for printing to the output stream.
+- `gotprinted::Bool`: Whether the latest testset was printed.
+- `align_overflow::Integer`: How many characters overflow.
+- `verbose::Bool`: Whether to preview nested testsets.
+- `format::.Testset.Format`: Container for formatting information.
+- `module_header::Bool`: Whether to print module header before testsets
+                         belonging to that module.
+- `many::Bool`: Whether there are multiple testsets, individually or in loops.
+- `maxidw::Ref{Int}`: Visual width for showing testset IDs.
+"""
+function get_previewer(
+    previewchan, interrupted, printlock, gotprinted, align_overflow, verbose,
+    format, module_header, many, maxidw
+)
+    previewchan !== nothing || return nothing
+    previewer = @async try
+        timer = ['|', '/', '-', '\\']
+        cursor = 0
+        desc = ""
+        id = Int64(0)
+        finito = false
+
+        while !finito && !interrupted[]
+            lock(printlock) do
+                newid, newdesc = take_latest!(previewchan)
+                if newdesc === nothing
+                    finito = true
+                    return # no need to sleep before looping
+                elseif newdesc != ""
+                    desc = newdesc
+                    id = newid
+                    cursor = 0
+                    gotprinted = false
+                elseif gotprinted
+                    desc = ""
+                    gotprinted = false
+                    align_overflow = 0
+                elseif desc != ""
+                    align = format.desc_align
+                    if nworkers() > 1
+                        description = align >= 3 ? "..." : ""
+                        style = NamedTuple()
+                    elseif startswith(desc, '\0')
+                        description = chop(desc, head=1, tail=0)
+                        style = (color = :light_black, bold=true)
+                    else
+                        description = desc
+                        style = NamedTuple()
+                    end
+                    if isindented(verbose, module_header, many)
+                        description = "  " * description
+                    end
+                    cursor += 1
+
+                    # when verbose == 0, we still can print the currently run
+                    # testset, but then its description might be larger than
+                    # `align`, because it was not taken into account for
+                    # computing `align`;
+                    # `align_overflow` computes how many characters do overflow,
+                    # so that the printer can "erase" them later on;
+                    # once we overflow, we don't go back (leftwards) until the
+                    # printer prints
+                    align_overflow =
+                        max(align_overflow, textwidth(description) - align)
+                    print('\r')
+                    print_id(id, maxidw[])
+                    printstyled(rpad("$description", align+align_overflow, " "),
+                                ' ',
+                                timer[mod1(cursor, end)];
+                                style...)
+                end
+            end
+            previewer_refresh_duration_seconds = 0.13
+            sleep(previewer_refresh_duration_seconds)
+        end
+    catch ex
+        # TODO: clarify what is the correct thing to do here
+        if ex isa InterruptException
+            interrupted[] = true
+            rethrow()
+        else
+            # then there is probably a bug in the previewer code, but it might
+            # be fine for the worker/printer to continue?
+            rethrow()
+        end
+    end # previewer task
+    previewer
+end
 
 """
     retest(mod..., pattern...;
@@ -887,118 +1055,17 @@ function retest(@nospecialize(args::ArgType...);
         many = hasmany(tests)
 
         printlock = ReentrantLock()
-        previewchan =
-            if spin && stdout isa Base.TTY && (nthreads() > 1 && VERSION >= v"1.3" ||
-                                               nprocs() > 1)
-                RemoteChannel(() -> Channel{Maybe{Tuple{Int64,String}}}(Inf))
-                # needs to be "remote" in the case nprocs() == 2, as then nworkers() == 1,
-                # which means the one remote worker will put descriptions on previewchan
-                # (if nworkers() > 1, descriptions are not put because we can't predict
-                # the order in which they complete, and then the previewer will
-                # not show the descriptions, just the spinning wheel)
-
-                # on VERSION < v"1.3" : we can't call `thread_pin` (see below), and in this
-                # case previewing doesn't work well, as the worker and previewer tasks
-                # can end up in the same thread, and the previewer is not responsive
-
-                # channel size: if nworkers() == 1, then 2 would suffice (one for
-                # the "compilation step", one for @testset execution step, and then
-                # the printer would empty the channel; but for two workers and more,
-                # this second step is not done, so the buffer needs a size of at least
-                # `nworkers()`
-            else
-                # otherwise, the previewing doesn't work well, because the worker task
-                # keeps the thread busy and doesn't yield enough for previewing to be useful
-                nothing
-            end
+        previewchan = get_previewer_channel(
+            spin, stdout, VERSION, nthreads(), nprocs()
+        )
 
         gotprinted = false
         align_overflow = 0
 
-        function take_latest!(previewchan)
-            local id_desc
-            while isready(previewchan)
-                # printer/previewer can't take! it, as we locked
-                id_desc = take!(previewchan)
-            end
-            if @isdefined(id_desc)
-                something(id_desc, (Int64(0), nothing))
-            else
-                (Int64(0), "")
-            end
-        end
-
-        previewer = previewchan === nothing ? nothing :
-            @async try
-                timer = ['|', '/', '-', '\\']
-                cursor = 0
-                desc = ""
-                id = Int64(0)
-                finito = false
-
-                while !finito && !interrupted[]
-                    lock(printlock) do
-                        newid, newdesc = take_latest!(previewchan)
-                        if newdesc === nothing
-                            finito = true
-                            return # no need to sleep before looping
-                        elseif newdesc != ""
-                            desc = newdesc
-                            id = newid
-                            cursor = 0
-                            gotprinted = false
-                        elseif gotprinted
-                            desc = ""
-                            gotprinted = false
-                            align_overflow = 0
-                        elseif desc != ""
-                            align = format.desc_align
-                            if nworkers() > 1
-                                description = align >= 3 ? "..." : ""
-                                style = NamedTuple()
-                            elseif startswith(desc, '\0')
-                                description = chop(desc, head=1, tail=0)
-                                style = (color = :light_black, bold=true)
-                            else
-                                description = desc
-                                style = NamedTuple()
-                            end
-                            if isindented(verbose, module_header, many)
-                                description = "  " * description
-                            end
-                            cursor += 1
-
-                            # when verbose == 0, we still can print the currently run
-                            # testset, but then its description might be larger than
-                            # `align`, because it was not taken into account for computing
-                            # `align`;
-                            # `align_overflow` computes how many characters do overflow,
-                            # so that the printer can "erase" them later on;
-                            # once we overflow, we don't go back (leftwards) until the
-                            # printer prints
-                            align_overflow =
-                                max(align_overflow, textwidth(description) - align)
-                            print('\r')
-                            print_id(id, maxidw[])
-                            printstyled(rpad("$description", align+align_overflow, " "),
-                                        ' ',
-                                        timer[mod1(cursor, end)];
-                                        style...)
-                        end
-                    end
-                    sleep(0.13)
-                end
-            catch ex
-                # TODO: clarify what is the correct thing to do here
-                if ex isa InterruptException
-                    interrupted[] = true
-                    rethrow()
-                else
-                    # then there is probably a bug in the previewer code, but it might be fine
-                    # for the worker/printer to continue?
-                    rethrow()
-                end
-            end # previewer task
+        previewer = get_previewer(
+            previewchan, interrupted, printlock, gotprinted, align_overflow,
+            verbose, format, module_header, many, maxidw
+        )
 
         # TODO: move printer task out of worker?
         worker = @task begin
