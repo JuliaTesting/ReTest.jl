@@ -181,11 +181,17 @@ function replace_ts(source, mod, x::Expr, parent; static_include::Bool,
             x, false
         end
     else @label default
-        body_br = map(z -> replace_ts(source, mod, z, parent; static_include=static_include,
-                                      include_functions=include_functions),
-                      x.args)
-        filter!(x -> first(x) !== invalid, body_br)
-        Expr(x.head, first.(body_br)...), any(last.(body_br))
+        new_args = Any[]
+        hasbroken = false
+        for z in x.args
+            nz, br = replace_ts(source, mod, z, parent;
+                                static_include=static_include,
+                                include_functions=include_functions)
+            nz === invalid && continue
+            push!(new_args, nz)
+            hasbroken |= br
+        end
+        Expr(x.head, new_args...), hasbroken
     end
 end
 
@@ -778,8 +784,9 @@ function retest(@nospecialize(args::ArgType...);
     root = Testset.ReTestSet(Main, "Overall", overall=true)
 
     maxidw = Ref{Int}(0) # visual width for showing IDs (Ref for mutability in hack below)
-    tests_descs_hasbrokens = fetchtests.(modules, verbose, module_header, Ref(maxidw);
+    tests_descs_hasbrokens = [fetchtests(m, verbose, module_header, maxidw;
                                          strict=strict, dup=dup, static=static)
+                              for m in modules]
     isempty(tests_descs_hasbrokens) &&
         throw(ArgumentError("no modules using ReTest could be found"))
 
