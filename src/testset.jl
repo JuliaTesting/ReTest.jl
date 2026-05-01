@@ -48,11 +48,6 @@ function scrub_exc_stack(stack)
     return Any[ (x[1], scrub_backtrace(x[2])) for x in stack ]
 end
 
-# Compat for catch_stack(), which was deprecated in 1.7
-@static if VERSION < v"1.7"
-    current_exceptions() = Base.catch_stack()
-end
-
 mutable struct Format
     stats::Bool
     desc_align::Int
@@ -231,8 +226,7 @@ function print_test_results(ts::ReTestSet, fmt::Format;
         end
         if fmt.stats
             # copied from Julia/test/runtests.jl
-            compile_header = VERSION >= v"1.6-" ? " Compile /" : ""
-            printstyled("|  Time /$compile_header GC |   Alloc   ΔRSS |", color=:white)
+            printstyled("|  Time / Compile / GC |   Alloc   ΔRSS |", color=:white)
         end
         println()
     end
@@ -421,15 +415,13 @@ function print_counts(ts::ReTestSet, fmt::Format, depth, align,
 
         time_str = hide_zero(@sprintf("%6.2f", timed.time), "s")
         printstyled("| ", time_str, " ", color=:white)
-        if VERSION >= v"1.6-"
-            compile_str = all(==(' '), time_str) ?
-                ' '^6 : # print percentages only if time itself is shown!
-                        # (also, this can result in weird things, like "30663.3%",
-                        # if e.g. there was no @test in the @testset)
-                hide_zero(@sprintf("%5.1f", timed.compile_time / 10^7 / timed.time), "%")
-            # can be >= 100% !?
-            printstyled(compile_str, " ", color=:white)
-        end
+        compile_str = all(==(' '), time_str) ?
+            ' '^6 : # print percentages only if time itself is shown!
+                    # (also, this can result in weird things, like "30663.3%",
+                    # if e.g. there was no @test in the @testset)
+            hide_zero(@sprintf("%5.1f", timed.compile_time / 10^7 / timed.time), "%")
+        # can be >= 100% !?
+        printstyled(compile_str, " ", color=:white)
         gc_str = all(==(' '), time_str) ?
             ' '^5 :
             hide_zero(@sprintf("%4.1f", 100 * timed.gctime / timed.time), "%")
@@ -677,13 +669,6 @@ macro stats(yes, ex)
     end
 end
 
-@static if VERSION >= v"1.9"
-    # In 1.9 this function was changed to return a tuple of (compile_time, recompilation_time)
-    cumulative_compile_time_ns() = sum(Base.cumulative_compile_time_ns())
-else
-    cumulative_compile_time_ns() = isdefined(Base, :cumulative_compile_time_ns) ?
-        Base.cumulative_compile_time_ns() :
-        UInt(0)
-end
+cumulative_compile_time_ns() = sum(Base.cumulative_compile_time_ns())
 
 end # module

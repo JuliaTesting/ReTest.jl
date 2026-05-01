@@ -5,8 +5,7 @@
 Include file `testpath` into `parentmodule`. If `revise` is `true`, `Revise`,
 which must be loaded beforehand in your Julia session, is used to track all
 recursively included files (in particular testsets). The `revise` keyword
-defaults to `true` when `Revise` is loaded and `VERSION >= v"1.5"`, and to
-`false` otherwise.
+defaults to `true` when `Revise` is loaded, and to `false` otherwise.
 
 The point of using this function is when `revise` is `true` and in particular
 when files are included recursively.
@@ -15,15 +14,10 @@ and if there are no recursively included files, this should be equivalent
 to `Revise.includet(testpath)`, provided `parentmodule == Main` and
 all `@testset`s defined in `testpath` are in a module defining
  `__revise_mode__ = :eval`.
-
-!!! compat "Julia 1.5"
-    This function requires at least Julia 1.5 when `revise` is `true`.
 """
 function load(testpath::AbstractString;
               parentmodule::Module=Main, revise::Maybe{Bool}=nothing)
 
-    revise === true && VERSION < v"1.5" &&
-        error("the `revise` keyword requires at least Julia 1.5")
     Revise = get_revise(revise)
 
     if Revise === nothing
@@ -53,10 +47,7 @@ If `revise` is `true`, `Revise`, which must be loaded beforehand in your Julia
 session, is used to track the test files (in particular testsets). Note that
 this might be brittle, and it's recommended instead to load your test module
 via `using ModTests`. The `revise` keyword defaults to `true` when `Revise` is
-loaded and `VERSION >= v"1.5"`, and to `false` otherwise.
-
-!!! compat "Julia 1.5"
-    This function requires at least Julia 1.5 when `revise` is `true`.
+loaded, and to `false` otherwise.
 """
 function load(packagemod::Module, testfile::Maybe{AbstractString}=nothing;
               parentmodule::Module=Main, revise::Maybe{Bool}=nothing,
@@ -200,8 +191,6 @@ be loaded beforehand in your Julia session. Note that this might be brittle
 and not work in all cases. `revise` defaults to `true` when `Revise` is loaded,
 and to `false` otherwise.
 
-!!! compat "Julia 1.5"
-    This function requires at least Julia 1.5.
 """
 function hijack end
 
@@ -270,8 +259,6 @@ function populate_mod!(mod::Module, path; lazy, Revise, include::Maybe{Symbol}=n
 end
 
 function revise_track(Revise, files)
-    # uniquemod serves in v1.5 to make hijack w/ revise still work in many cases,
-    # when there aren't nested submodules/includes
     for (filepath, mod) in files
         if isfile(filepath) # some files might not exist when they are conditionally
                             # included
@@ -333,11 +320,7 @@ function substitute_retest!(ex, lazy, include_::Maybe{Symbol}, files=nothing;
                           include($substitute!, $newfile)
                           $files[newfile] = $(root_module[])
                       end)
-                if VERSION >= v"1.6"
-                    # v1.5 doesn't play well with @__MODULE__, the let expression
-                    # simply... vanishes; so we have to use root_module instead
-                    push!(ex2.args[2].args, :(@assert $(root_module[]) == @__MODULE__))
-                end
+                push!(ex2.args[2].args, :(@assert $(root_module[]) == @__MODULE__))
                 # TODO: add `copy!(::Expr, ::Expr)` to Base
                 ex.head = ex2.head
                 copy!(ex.args, ex2.args)
@@ -457,9 +440,6 @@ and not enclosed within `BaseTests` or `StdLibTests`.
 The `lazy` and `revise` keywords have the same meaning as in [`ReTest.hijack`](@ref).
 Depending on the value of `lazy`, some test files are skipped when they
 are known to fail.
-
-!!! compat "Julia 1.5"
-    This function requires at least Julia 1.5.
 """
 function hijack_base(tests, modname=nothing; parentmodule::Module=Main, lazy=false,
                      base=:BaseTests, stdlib=:StdLibTests, revise::Maybe{Bool}=nothing)
@@ -529,7 +509,7 @@ function hijack_base(tests, modname=nothing; parentmodule::Module=Main, lazy=fal
 end
 
 get_revise(revise) =
-    if revise === true || revise === nothing && VERSION >= v"1.5"
+    if revise === true || revise === nothing
         Revise = get(Base.loaded_modules, revise_pkgid(), nothing)
         Revise === nothing && revise === true &&
             error("Revise is not loaded")
@@ -572,34 +552,6 @@ function test_path(test)
     else
         return joinpath(BASETESTPATH, "$test.jl")
     end
-end
-
-if VERSION < v"1.8.0-DEV.34"
-    const TESTNAMES = [
-        "subarray", "core", "compiler", "worlds",
-        "keywordargs", "numbers", "subtype",
-        "char", "strings", "triplequote", "unicode", "intrinsics",
-        "dict", "hashing", "iobuffer", "staged", "offsetarray",
-        "arrayops", "tuple", "reduce", "reducedim", "abstractarray",
-        "intfuncs", "simdloop", "vecelement", "rational",
-        "bitarray", "copy", "math", "fastmath", "functional", "iterators",
-        "operators", "ordering", "path", "ccall", "parse", "loading", "gmp",
-        "sorting", "spawn", "backtrace", "exceptions",
-        "file", "read", "version", "namedtuple",
-        "mpfr", "broadcast", "complex",
-        "floatapprox", "stdlib", "reflection", "regex", "float16",
-        "combinatorics", "sysinfo", "env", "rounding", "ranges", "mod2pi",
-        "euler", "show", "client",
-        "errorshow", "sets", "goto", "llvmcall", "llvmcall2", "ryu",
-        "some", "meta", "stacktraces", "docs",
-        "misc", "threads", "stress", "binaryplatforms", "atexit",
-        "enums", "cmdlineargs", "int", "interpreter",
-        "checked", "bitset", "floatfuncs", "precompile",
-        "boundscheck", "error", "ambiguous", "cartesian", "osutils",
-        "channels", "iostream", "secretbuffer", "specificity",
-        "reinterpretarray", "syntax", "corelogging", "missing", "asyncmap",
-        "smallarrayshrink", "opaque_closure"
-    ]
 end
 
 const BLACKLIST = [

@@ -182,10 +182,8 @@ function make_pattern(str::AbstractString)
     rx =
         if isempty(str)
             r"" # in order to know to match unconditionally
-        elseif VERSION >= v"1.3"
-            r""i * str
         else
-            Regex(str, "i")
+            r""i * str
         end
     neg ? not(rx) : rx
 end
@@ -462,14 +460,8 @@ julia> retest(Fail, reachable("a"), verbose=9, dry=true, static=true)
 1| a
 ```
 
-!!! compat "Julia 1.3"
-    This function requires at least Julia 1.3.
 """
-function reachable end
-
-if VERSION >= v"1.3"
-    reachable(x) = Reachable(make_pattern(x))
-end
+reachable(x) = Reachable(make_pattern(x))
 
 """
     depth(d::Integer)

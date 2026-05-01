@@ -16,8 +16,7 @@ end
 ReTest.tsdepth(::MockTestset) = 1
 
 const basic_patterns = [and(), or(), not(0), interpolated, 0, r"", :label,
-                        depth(2), pass, fail, iter(1)]
-VERSION >= v"1.3" && push!(basic_patterns, reachable(1))
+                        depth(2), pass, fail, iter(1), reachable(1)]
 
 @testset "patterns: ==" begin
     for a = basic_patterns, b = basic_patterns
@@ -46,12 +45,10 @@ VERSION >= v"1.3" && push!(basic_patterns, reachable(1))
             @test not(a) == not(deepcopy(a))
             @test not(a) != not(b)
             @test not(not(a)) == not(deepcopy(not(a)))
-            if VERSION >= v"1.3"
-                @test reachable(a) == reachable(a)
-                @test reachable(a) == reachable(deepcopy(a))
-                @test reachable(a) != reachable(b)
-                @test reachable(reachable(a)) == reachable(deepcopy(reachable(a)))
-            end
+            @test reachable(a) == reachable(a)
+            @test reachable(a) == reachable(deepcopy(a))
+            @test reachable(a) != reachable(b)
+            @test reachable(reachable(a)) == reachable(deepcopy(reachable(a)))
         end
     end
 end
@@ -67,8 +64,7 @@ end
 end
 
 @testset "patterns: not" begin
-    pats = [or(1, 3), and(1, r"a"), not(1), interpolated, depth(3)]
-    VERSION >= v"1.3" && push!(pats, reachable("c"))
+    pats = [or(1, 3), and(1, r"a"), not(1), interpolated, depth(3), reachable("c")]
     for p ∈ pats
         @test -p == not(p)
     end
