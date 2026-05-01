@@ -215,6 +215,7 @@ function hijack(path::AbstractString, modname=nothing; parentmodule::Module=Main
 
     # do first, to error early if necessary
     Revise = get_revise(revise)
+    include = setinclude(include, testset)
 
     if modname === nothing
         modname = replace(splitext(basename(path))[1], ['-', '.'] => '_')
@@ -222,7 +223,7 @@ function hijack(path::AbstractString, modname=nothing; parentmodule::Module=Main
     modname = Symbol(modname)
 
     newmod = @eval parentmodule module $modname end
-    populate_mod!(newmod, path; lazy=lazy, include=setinclude(include, testset),
+    populate_mod!(newmod, path; lazy=lazy, include=include,
                   include_functions=include_functions,
                   Revise=Revise)
     newmod
@@ -511,9 +512,9 @@ function hijack_base(tests, modname=nothing; parentmodule::Module=Main, lazy=fal
                 # e.g. `tuple`, collision betwen the tuple function and test/tuple.jl
                 comp = Symbol(comp, :_)
             end
-            if isdefined(mod, comp) && ith != length(components) ||
+            if invokelatest(isdefined, mod, comp) && ith != length(components) ||
                     modname !== nothing && ith == 1 # module already freshly created
-                mod = getfield(mod, comp)
+                mod = invokelatest(getglobal, mod, comp)
             else
                 # we always re-eval leaf-modules
                 mod = @eval mod module $comp end

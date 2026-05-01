@@ -1680,11 +1680,16 @@ end
 
         using Hijack
         @test !haskey(ReTest.loaded_testmodules, Hijack)
-        @test first.(process_args((Hijack,), load=true).modules) ==
-            [
-                HijackLoadTrueTests,
-                HijackLoadTrueTests2
-            ]
+        # call load=true first so the next stmt sees the freshly-loaded
+        # modules at its own (later) compilation world (Julia 1.13+)
+        process_args((Hijack,), load=true)
+        invokelatest() do
+            @test first.(process_args((Hijack,), load=true).modules) ==
+                [
+                    HijackLoadTrueTests,
+                    HijackLoadTrueTests2
+                ]
+        end
         Hijack_testmodules = ReTest.loaded_testmodules[Hijack]
         @test Hijack_testmodules == [HijackLoadTrueTests, HijackLoadTrueTests2]
         @test first.(process_args((Hijack,), load=true).modules) ==
@@ -1695,7 +1700,9 @@ end
 
         ReTest.hijack(Hijack, testset=false) # testset: just check that this method
                                              # also accepts this kw (TODO: test it!)
-        retest(HijackTests)
+        invokelatest() do
+            retest(HijackTests)
+        end
         @test Hijack.RUN == [1, 5, 4]
         empty!(Hijack.RUN)
 
@@ -1711,15 +1718,19 @@ end
         Test.@testset "load(revise=true)" begin
             # big hack, this should belong to the FakePackage chapter, but we can't load
             # Revise then, because we @test_throws above for Revise not loaded
-            @test ReTest.load(Hijack, "../../FakePackage/test/FakePackageTests2.jl",
-                              parentmodule=Load, revise=true) ==
-                                  Load.AlternateFakePackageTests
-            @test first.(process_args((Load.AlternateFakePackageTests,)).modules) ==
-                [Load.AlternateFakePackageTests]
+            m = ReTest.load(Hijack, "../../FakePackage/test/FakePackageTests2.jl",
+                            parentmodule=Load, revise=true)
+            invokelatest() do
+                @test m == Load.AlternateFakePackageTests
+                @test first.(process_args((Load.AlternateFakePackageTests,)).modules) ==
+                    [Load.AlternateFakePackageTests]
+            end
 
             # here, Load.HijackTests gets defined
-            @test ReTest.load(Hijack, "load_revise.jl", parentmodule=Load) == # revise=true
-                Load.HijackTests
+            m = ReTest.load(Hijack, "load_revise.jl", parentmodule=Load) # revise=true
+            invokelatest() do
+                @test m == Load.HijackTests
+            end
             @test Load.load_revise_function() == 1
             @test Load.HijackTests.load_revise_function() == 1
             @test first.(process_args((Load.HijackTests,)).modules) == [Load.HijackTests]
@@ -1737,16 +1748,20 @@ end
         end
 
         ReTest.hijack(Hijack, :HijackTests2) # revise=true by default
-        retest(HijackTests2)
+        invokelatest() do
+            retest(HijackTests2)
+        end
         @test Hijack.RUN == [1, 5, 4]
         empty!(Hijack.RUN)
 
         # Submodules
         ReTest.hijack("Hijack/test/submodules_tests.jl", :SubMod1, revise=true)
-        retest(SubMod1)
-        @test SubMod1.RUN == [1]; empty!(SubMod1.RUN)
-        @test SubMod1.SubModule.RUN == [1]; empty!(SubMod1.SubModule.RUN)
-        @test SubMod1.SubModule.Sub.RUN == [1]; empty!(SubMod1.SubModule.Sub.RUN)
+        Base.invokelatest() do
+            retest(SubMod1)
+            @test SubMod1.RUN == [1]; empty!(SubMod1.RUN)
+            @test SubMod1.SubModule.RUN == [1]; empty!(SubMod1.SubModule.RUN)
+            @test SubMod1.SubModule.Sub.RUN == [1]; empty!(SubMod1.SubModule.Sub.RUN)
+        end
 
         ## UPDATING ######
 
@@ -1860,7 +1875,9 @@ end
         # test include=:outline
         empty!(Hijack.RUN)
         ReTest.hijack("./Hijack/test/testset.jl", :HijackTestset, include=:outline)
-        retest(HijackTestset)
+        invokelatest() do
+            retest(HijackTestset)
+        end
         @test Hijack.RUN == [1, 2, 3]
 
         # test include=:static
@@ -1869,7 +1886,8 @@ end
         @test_throws ErrorException ReTest.hijack("./Hijack/test/include_static.jl", :HijackInclude, include=:notvalid)
         ReTest.hijack("./Hijack/test/include_static.jl", :HijackInclude, include=:static,
                       include_functions=[:include, :custom_include_function])
-        check(HijackInclude, dry=true, verbose=9, [], output="""
+        invokelatest() do
+            check(HijackInclude, dry=true, verbose=9, [], output="""
 1| include_static
 2|   include_static_included1 1
 3|     nested include_static_included1
@@ -1878,7 +1896,8 @@ end
 3|     nested include_static_included1
 4|       include_static_included2
 """)
-        retest(HijackInclude)
+            retest(HijackInclude)
+        end
         @test Hijack.RUN == [1, 2, 3, 2, 3]
     end
 end

@@ -16,6 +16,8 @@ export Test,
     detect_ambiguities, detect_unbound_args,
     GenericString, GenericSet, GenericDict, GenericArray, GenericOrder
 
+using Base.ScopedValues: @with
+
 using Test: Test,
     @test, @test_throws, @test_broken, @test_skip,
     @test_warn, @test_nowarn,
@@ -1151,7 +1153,13 @@ function retest(@nospecialize(args::ArgType...);
                         resp = remotecall_fetch(wrkr, mod, ts, pat, chan
                                              ) do mod, ts, pat, chan
                                 mts = make_ts(ts, pat, format.stats, chan)
-                                Core.eval(mod, mts)
+                                # Run in a fresh dynamic scope so a surrounding
+                                # Test.@testset (whose CURRENT_TESTSET is now a
+                                # ScopedValue on Julia 1.13+) doesn't make our
+                                # top-level testset look nested.
+                                @with(Test.CURRENT_TESTSET => Test.FallbackTestSet(),
+                                      Test.TESTSET_DEPTH => 0,
+                                      Core.eval(mod, mts))
                             end
                         if resp isa Vector
                             ntests += length(resp)
@@ -1276,8 +1284,8 @@ function process_args(@nospecialize(args);
         stestmod = Symbol(mod, :Tests)
 
         testmods = get(loaded_testmodules, mod, nothing)
-        if testmods === nothing && isdefined(Main, stestmod)
-            testmod = getfield(Main, stestmod)
+        if testmods === nothing && invokelatest(isdefined, Main, stestmod)
+            testmod = invokelatest(getglobal, Main, stestmod)
             # TODO: test this branch
             if testmod isa Module
                 testmods = [testmod]
@@ -1405,7 +1413,7 @@ function process_args(@nospecialize(args);
 
     # remove modules which don't have tests, which can happen when a parent module without
     # tests is passed to retest in order to run tests in its submodules
-    filter!(m -> isdefined(m, INLINE_TEST), modules)
+    filter!(m -> invokelatest(isdefined, m, INLINE_TEST), modules)
 
     # Remove the precompilation module if we're not precompiling
     if ccall(:jl_generating_output, Cint, ()) == 0
@@ -1460,7 +1468,7 @@ function update_TESTED_MODULES!(double_check::Bool=false)
                 for sub in recsubmodules(mod)
                     # new version: just check the assumption
                     nameof(sub) == INLINE_TEST && continue
-                    if isdefined(sub, INLINE_TEST)
+                    if invokelatest(isdefined, sub, INLINE_TEST)
                         @assert sub in TESTED_MODULES
                     end
                     # old effective version:

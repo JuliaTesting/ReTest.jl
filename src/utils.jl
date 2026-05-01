@@ -3,10 +3,12 @@ Maybe{T} = Union{T,Nothing}
 issubmodule(m::Module, s) = s isa Module && parentmodule(s) == m && m != s
 
 function submodules(m::Module)
+    # use invokelatest so freshly-loaded submodules are visible regardless
+    # of the caller's world age (Julia 1.13+ binding semantics)
     nms = filter!(names(m, all=true)) do y
-        Base.isdefined(m, y) && !Base.isdeprecated(m, y)
+        invokelatest(isdefined, m, y) && !Base.isdeprecated(m, y)
     end
-    symbols = Core.eval.(Ref(m), nms)
+    symbols = [invokelatest(getglobal, m, y) for y in nms]
     filter!(x -> issubmodule(m, x), symbols)
 end
 
@@ -38,7 +40,7 @@ end
 function is_replaced(mod::Module)
     par = parentmodule(mod)
     while par != mod
-        getfield(par, nameof(mod)) != mod && return true
+        invokelatest(getglobal, par, nameof(mod)) != mod && return true
         mod = par
         par = parentmodule(par)
     end
