@@ -3,11 +3,18 @@ Maybe{T} = Union{T,Nothing}
 issubmodule(m::Module, s) = s isa Module && parentmodule(s) == m && m != s
 
 function submodules(m::Module)
-    nms = filter!(names(m, all=true)) do y
-        Base.isdefined(m, y) && !Base.isdeprecated(m, y)
+    # use invokelatest so freshly-loaded submodules are visible regardless
+    # of the caller's world age (Julia 1.13+ binding semantics)
+    result = Module[]
+    for y in names(m, all=true)
+        if invokelatest(isdefined, m, y) && !Base.isdeprecated(m, y)
+            v = invokelatest(getglobal, m, y)
+            if issubmodule(m, v)
+                push!(result, v)
+            end
+        end
     end
-    symbols = Core.eval.(Ref(m), nms)
-    filter!(x -> issubmodule(m, x), symbols)
+    result
 end
 
 # list of recursive submodules of m, including m itself
@@ -38,7 +45,7 @@ end
 function is_replaced(mod::Module)
     par = parentmodule(mod)
     while par != mod
-        getfield(par, nameof(mod)) != mod && return true
+        invokelatest(getglobal, par, nameof(mod)) != mod && return true
         mod = par
         par = parentmodule(par)
     end

@@ -4,6 +4,9 @@
 [![](https://img.shields.io/badge/docs-stable-blue.svg)](https://JuliaTesting.github.io/ReTest.jl/stable)
 [![](https://img.shields.io/badge/docs-dev-blue.svg)](https://JuliaTesting.github.io/ReTest.jl/dev)
 
+> [!NOTE]
+> For compatibility reasons, ReTest v0.4 requires at least Julia 1.13.
+
 `ReTest` is a testing framework for Julia allowing:
 
 1. Defining tests in source files, whose execution is deferred and triggered

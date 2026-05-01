@@ -13,6 +13,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: julia-actions/setup-julia@latest
+        with:
+          version: '1.13.0-rc1'
       - uses: julia-actions/cache@v2
       - name: Install dependencies
         run: |

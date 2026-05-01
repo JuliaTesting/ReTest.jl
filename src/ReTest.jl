@@ -16,6 +16,8 @@ export Test,
     detect_ambiguities, detect_unbound_args,
     GenericString, GenericSet, GenericDict, GenericArray, GenericOrder
 
+using Base.ScopedValues: @with
+
 using Test: Test,
     @test, @test_throws, @test_broken, @test_skip,
     @test_warn, @test_nowarn,
@@ -179,11 +181,17 @@ function replace_ts(source, mod, x::Expr, parent; static_include::Bool,
             x, false
         end
     else @label default
-        body_br = map(z -> replace_ts(source, mod, z, parent; static_include=static_include,
-                                      include_functions=include_functions),
-                      x.args)
-        filter!(x -> first(x) !== invalid, body_br)
-        Expr(x.head, first.(body_br)...), any(last.(body_br))
+        new_args = Any[]
+        hasbroken = false
+        for z in x.args
+            nz, br = replace_ts(source, mod, z, parent;
+                                static_include=static_include,
+                                include_functions=include_functions)
+            nz === invalid && continue
+            push!(new_args, nz)
+            hasbroken |= br
+        end
+        Expr(x.head, new_args...), hasbroken
     end
 end
 
@@ -776,8 +784,9 @@ function retest(@nospecialize(args::ArgType...);
     root = Testset.ReTestSet(Main, "Overall", overall=true)
 
     maxidw = Ref{Int}(0) # visual width for showing IDs (Ref for mutability in hack below)
-    tests_descs_hasbrokens = fetchtests.(modules, verbose, module_header, Ref(maxidw);
+    tests_descs_hasbrokens = [fetchtests(m, verbose, module_header, maxidw;
                                          strict=strict, dup=dup, static=static)
+                              for m in modules]
     isempty(tests_descs_hasbrokens) &&
         throw(ArgumentError("no modules using ReTest could be found"))
 
@@ -888,18 +897,13 @@ function retest(@nospecialize(args::ArgType...);
 
         printlock = ReentrantLock()
         previewchan =
-            if spin && stdout isa Base.TTY && (nthreads() > 1 && VERSION >= v"1.3" ||
-                                               nprocs() > 1)
+            if spin && stdout isa Base.TTY && (nthreads() > 1 || nprocs() > 1)
                 RemoteChannel(() -> Channel{Maybe{Tuple{Int64,String}}}(Inf))
                 # needs to be "remote" in the case nprocs() == 2, as then nworkers() == 1,
                 # which means the one remote worker will put descriptions on previewchan
                 # (if nworkers() > 1, descriptions are not put because we can't predict
                 # the order in which they complete, and then the previewer will
                 # not show the descriptions, just the spinning wheel)
-
-                # on VERSION < v"1.3" : we can't call `thread_pin` (see below), and in this
-                # case previewing doesn't work well, as the worker and previewer tasks
-                # can end up in the same thread, and the previewer is not responsive
 
                 # channel size: if nworkers() == 1, then 2 would suffice (one for
                 # the "compilation step", one for @testset execution step, and then
@@ -1151,7 +1155,13 @@ function retest(@nospecialize(args::ArgType...);
                         resp = remotecall_fetch(wrkr, mod, ts, pat, chan
                                              ) do mod, ts, pat, chan
                                 mts = make_ts(ts, pat, format.stats, chan)
-                                Core.eval(mod, mts)
+                                # Run in a fresh dynamic scope so a surrounding
+                                # Test.@testset (whose CURRENT_TESTSET is now a
+                                # ScopedValue on Julia 1.13+) doesn't make our
+                                # top-level testset look nested.
+                                @with(Test.CURRENT_TESTSET => Test.FallbackTestSet(),
+                                      Test.TESTSET_DEPTH => 0,
+                                      Core.eval(mod, mts))
                             end
                         if resp isa Vector
                             ntests += length(resp)
@@ -1174,7 +1184,7 @@ function retest(@nospecialize(args::ArgType...);
         end # worker = @task begin ...
 
         try
-            if previewchan !== nothing && nthreads() > 1 && VERSION >= v"1.3"
+            if previewchan !== nothing && nthreads() > 1
                 # we try to keep thread #1 free of heavy work, so that the previewer stays
                 # responsive
                 tid = rand(2:nthreads())
@@ -1276,8 +1286,8 @@ function process_args(@nospecialize(args);
         stestmod = Symbol(mod, :Tests)
 
         testmods = get(loaded_testmodules, mod, nothing)
-        if testmods === nothing && isdefined(Main, stestmod)
-            testmod = getfield(Main, stestmod)
+        if testmods === nothing && invokelatest(isdefined, Main, stestmod)
+            testmod = invokelatest(getglobal, Main, stestmod)
             # TODO: test this branch
             if testmod isa Module
                 testmods = [testmod]
@@ -1405,7 +1415,7 @@ function process_args(@nospecialize(args);
 
     # remove modules which don't have tests, which can happen when a parent module without
     # tests is passed to retest in order to run tests in its submodules
-    filter!(m -> isdefined(m, INLINE_TEST), modules)
+    filter!(m -> invokelatest(isdefined, m, INLINE_TEST), modules)
 
     # Remove the precompilation module if we're not precompiling
     if ccall(:jl_generating_output, Cint, ()) == 0
@@ -1460,7 +1470,7 @@ function update_TESTED_MODULES!(double_check::Bool=false)
                 for sub in recsubmodules(mod)
                     # new version: just check the assumption
                     nameof(sub) == INLINE_TEST && continue
-                    if isdefined(sub, INLINE_TEST)
+                    if invokelatest(isdefined, sub, INLINE_TEST)
                         @assert sub in TESTED_MODULES
                     end
                     # old effective version:

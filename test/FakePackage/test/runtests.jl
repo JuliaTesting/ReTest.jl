@@ -57,15 +57,13 @@ RUN = []
 @testset "include parent" begin
     include("included.jl")
     include(joinpath(@__DIR__, "included.jl"))
-    if VERSION >= v"1.5"
-        include(identity, "included.jl")
-        include(identity, joinpath(@__DIR__, "included.jl"))
-    end
+    include(identity, "included.jl")
+    include(identity, joinpath(@__DIR__, "included.jl"))
 end
 end # Included ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 retest(Included)
-@test Included.RUN == (VERSION >= v"1.5" ? [0, 0, 0, 0] : [0, 0])
+@test Included.RUN == [0, 0, 0, 0]
 
 ReTest.Test.@testset "retest: load" begin
     @test process_args(()).modules == [

@@ -32,7 +32,11 @@ const INLINE_TEST = Symbol("##InlineTest-01b48f5c342f65df7fcd07f28f0d2cacbb09f0a
 const TESTED_MODULES = Union{Module,Nothing}[]
 const TESTSET_MACROS = Symbol[]
 
-get_tests(m::Module) = getfield(m, INLINE_TEST).tests
+function get_tests(m::Module)
+    invokelatest() do
+        getfield(m, INLINE_TEST).tests
+    end
+end
 
 function register(m::Module, macros::Vector{Symbol})
     push!(TESTED_MODULES, m)
@@ -111,7 +115,9 @@ function get_inline_mod!(mod)::Module
         @eval mod module $INLINE_TEST
             const tests = (tests=[], news=[], map=Dict{Union{String,Expr},Int}())
             const TESTSET_MACROS = Symbol[]
-            __init__() = $register($mod, TESTSET_MACROS)
+            # use invokelatest so TESTSET_MACROS (defined in the same world)
+            # is visible to __init__ under Julia 1.13+ binding semantics
+            __init__() = $register($mod, invokelatest(getglobal, @__MODULE__, :TESTSET_MACROS))
         end
     end
 end

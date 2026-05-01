@@ -2,7 +2,8 @@ module Testset
 
 using Test: AbstractTestSet, Broken, DefaultTestSet, Error, Fail, Pass, Test,
             TestSetException, get_testset, get_testset_depth,
-            parse_testset_args, pop_testset, push_testset
+            parse_testset_args
+using Base.ScopedValues: @with
 
 import Test: finish, record
 
@@ -45,11 +46,6 @@ end
 
 function scrub_exc_stack(stack)
     return Any[ (x[1], scrub_backtrace(x[2])) for x in stack ]
-end
-
-# Compat for catch_stack(), which was deprecated in 1.7
-@static if VERSION < v"1.7"
-    current_exceptions() = Base.catch_stack()
 end
 
 mutable struct Format
@@ -230,8 +226,7 @@ function print_test_results(ts::ReTestSet, fmt::Format;
         end
         if fmt.stats
             # copied from Julia/test/runtests.jl
-            compile_header = VERSION >= v"1.6-" ? " Compile /" : ""
-            printstyled("|  Time /$compile_header GC |   Alloc   ΔRSS |", color=:white)
+            printstyled("|  Time / Compile / GC |   Alloc   ΔRSS |", color=:white)
         end
         println()
     end
@@ -420,15 +415,13 @@ function print_counts(ts::ReTestSet, fmt::Format, depth, align,
 
         time_str = hide_zero(@sprintf("%6.2f", timed.time), "s")
         printstyled("| ", time_str, " ", color=:white)
-        if VERSION >= v"1.6-"
-            compile_str = all(==(' '), time_str) ?
-                ' '^6 : # print percentages only if time itself is shown!
-                        # (also, this can result in weird things, like "30663.3%",
-                        # if e.g. there was no @test in the @testset)
-                hide_zero(@sprintf("%5.1f", timed.compile_time / 10^7 / timed.time), "%")
-            # can be >= 100% !?
-            printstyled(compile_str, " ", color=:white)
-        end
+        compile_str = all(==(' '), time_str) ?
+            ' '^6 : # print percentages only if time itself is shown!
+                    # (also, this can result in weird things, like "30663.3%",
+                    # if e.g. there was no @test in the @testset)
+            hide_zero(@sprintf("%5.1f", timed.compile_time / 10^7 / timed.time), "%")
+        # can be >= 100% !?
+        printstyled(compile_str, " ", color=:white)
         gc_str = all(==(' '), time_str) ?
             ' '^5 :
             hide_zero(@sprintf("%4.1f", 100 * timed.gctime / timed.time), "%")
@@ -461,12 +454,11 @@ default_rng() = isdefined(Random, :default_rng) ?
     Random.default_rng() :
     Random.GLOBAL_RNG
 
-function make_retestset(mod, desc, id, verbose, marks, remove_last=false, iter=1)
-    _testsets = get(task_local_storage(), :__BASETESTNEXT__, Test.AbstractTestSet[])
-    @assert !(remove_last && isempty(_testsets))
-    testsets = @view _testsets[1:end-remove_last]
+function make_retestset(mod, desc, id, verbose, marks, iter=1)
+    parent_ts = get_testset()
+    parent = parent_ts isa ReTestSet ? parent_ts : nothing
     ReTestSet(mod, desc, id; verbose=verbose, marks=marks, iter=iter,
-              parent = isempty(testsets) ? nothing : testsets[end])
+              parent=parent)
 end
 
 # HACK: we re-use the same macro name `@testset` for actual execution (like in `Test`)
@@ -514,38 +506,36 @@ function testset_beginend(mod::Module, isfinal::Bool, pat::Pattern, id::Int64, d
             if nworkers() == 1 && get_testset_depth() == 0 && $(chan.preview) !== nothing
                 put!($(chan.preview), ($id, $desc))
             end
-            push_testset(ts)
 
             # we reproduce the logic of guardseed, but this function
             # cannot be used as it changes slightly the semantic of @testset,
             # by wrapping the body in a function
             local default_rng_orig = copy(default_rng())
-            @static if VERSION >= v"1.11"
-                local tls_seed_orig = copy(Random.get_tls_seed())
-            end
+            local tls_seed_orig = copy(Random.get_tls_seed())
 
             try
-                # RNG is re-seeded with the desired seed for the test
-                if ReTest.test_seed[] !== false
-                    Random.seed!(ReTest.test_seed[])
-                end
-                let
-                    ts.timed = @stats $stats $(esc(tests))
-                end
-            catch err
-                err isa InterruptException && rethrow()
-                # something in the test block threw an error. Count that as an
-                # error in this test set
-                record(ts, Error(:nontest_error, Expr(:tuple), err,
-                                 current_exceptions(), $(QuoteNode(source))))
+                @with(Test.CURRENT_TESTSET => ts,
+                      Test.TESTSET_DEPTH => get_testset_depth() + 1,
+                      try
+                          # RNG is re-seeded with the desired seed for the test
+                          if ReTest.test_seed[] !== false
+                              Random.seed!(ReTest.test_seed[])
+                          end
+                          let
+                              ts.timed = @stats $stats $(esc(tests))
+                          end
+                      catch err
+                          err isa InterruptException && rethrow()
+                          # something in the test block threw an error. Count that as an
+                          # error in this test set
+                          record(ts, Error(:nontest_error, Expr(:tuple), err,
+                                           current_exceptions(), $(QuoteNode(source))))
+                      end)
             finally
                 copy!(default_rng(), default_rng_orig)
-                @static if VERSION >= v"1.11"
-                    copy!(Random.get_tls_seed(), tls_seed_orig)
-                end
+                copy!(Random.get_tls_seed(), tls_seed_orig)
 
                 setresult!($marks, ts.subject, !anyfailed(ts))
-                pop_testset()
                 ret = finish(ts, $chan)
             end
             ret
@@ -569,15 +559,36 @@ function testset_forloop(mod::Module, isfinal::Bool, pat::Pattern, id::Int64,
     desc = esc(desc)
     blk = quote
         iter += 1
-        local ts0 = make_retestset($mod, $desc, $id, $(options.transient_verbose),
-                                   $marks, !first_iteration, iter)
+        local ts = make_retestset($mod, $desc, $id, $(options.transient_verbose),
+                                  $marks, iter)
 
-        if !$isfinal || matches($pat, ts0.subject, ts0)
-            # Trick to handle `break` and `continue` in the test code before
-            # they can be handled properly by `finally` lowering.
+        if !$isfinal || matches($pat, ts.subject, ts)
             if !first_iteration
-                pop_testset()
+                # it's 1000 times faster to copy from tmprng rather than calling Random.seed!
+                copy!(default_rng(), tmprng)
+            end
+            if nworkers() == 1 && get_testset_depth() == 0 && $(chan.preview) !== nothing
+                put!($(chan.preview), ($id, ts.description))
+            end
+            first_iteration = false
+            pending_ts = ts
+            try
+                @with(Test.CURRENT_TESTSET => ts,
+                      Test.TESTSET_DEPTH => get_testset_depth() + 1,
+                      try
+                          let
+                              ts.timed = @stats $stats $(esc(tests))
+                          end
+                          setresult!($marks, ts.subject, !anyfailed(ts))
+                      catch err
+                          err isa InterruptException && rethrow()
+                          # Something in the test block threw an error. Count that as an
+                          # error in this test set
+                          record(ts, Error(:nontest_error, Expr(:tuple), err, current_exceptions(), $(QuoteNode(source))))
+                          setresult!($marks, ts.subject, false)
+                      end)
                 push!(arr, finish(ts, $chan))
+                pending_ts = nothing
                 if ts.exception !== nothing
                     # ts.exception might be set in finish(...) above
                     # In this case, we currently don't want to continue with subsequent
@@ -585,26 +596,11 @@ function testset_forloop(mod::Module, isfinal::Bool, pat::Pattern, id::Int64,
                     # See also https://github.com/JuliaLang/julia/pull/41715
                     break
                 end
-                # it's 1000 times faster to copy from tmprng rather than calling Random.seed!
-                copy!(default_rng(), tmprng)
-            end
-            ts = ts0
-            if nworkers() == 1 && get_testset_depth() == 0 && $(chan.preview) !== nothing
-                put!($(chan.preview), ($id, ts.description))
-            end
-            push_testset(ts)
-            first_iteration = false
-            try
-                let
-                    ts.timed = @stats $stats $(esc(tests))
+            finally
+                if pending_ts !== nothing
+                    # body exited via return/break/continue; finalize before unwinding
+                    push!(arr, finish(pending_ts, $chan))
                 end
-                setresult!($marks, ts.subject, !anyfailed(ts))
-            catch err
-                err isa InterruptException && rethrow()
-                # Something in the test block threw an error. Count that as an
-                # error in this test set
-                record(ts, Error(:nontest_error, Expr(:tuple), err, current_exceptions(), $(QuoteNode(source))))
-                setresult!($marks, ts.subject, false)
             end
         end
     end
@@ -613,12 +609,10 @@ function testset_forloop(mod::Module, isfinal::Bool, pat::Pattern, id::Int64,
         local arr = Vector{Any}()
         local first_iteration = true
         local iter = 0
-        local ts
+        local pending_ts = nothing
 
         local default_rng_orig = copy(default_rng())
-        @static if VERSION >= v"1.11"
-            local tls_seed_orig = copy(Random.get_tls_seed())
-        end
+        local tls_seed_orig = copy(Random.get_tls_seed())
 
         local tmprng = copy(default_rng())
         if ReTest.test_seed[] !== false
@@ -629,16 +623,8 @@ function testset_forloop(mod::Module, isfinal::Bool, pat::Pattern, id::Int64,
                 $(Expr(:for, Expr(:block, [esc(v) for v in loops]...), blk))
             end
         finally
-            # Handle `return` in test body
-            if !first_iteration && ts.exception === nothing
-                pop_testset()
-                push!(arr, finish(ts, $chan))
-            end
-
             copy!(default_rng(), default_rng_orig)
-            @static if VERSION >= v"1.11"
-                copy!(Random.get_tls_seed(), tls_seed_orig)
-            end
+            copy!(Random.get_tls_seed(), tls_seed_orig)
         end
         arr
     end
@@ -683,13 +669,6 @@ macro stats(yes, ex)
     end
 end
 
-@static if VERSION >= v"1.9"
-    # In 1.9 this function was changed to return a tuple of (compile_time, recompilation_time)
-    cumulative_compile_time_ns() = sum(Base.cumulative_compile_time_ns())
-else
-    cumulative_compile_time_ns() = isdefined(Base, :cumulative_compile_time_ns) ?
-        Base.cumulative_compile_time_ns() :
-        UInt(0)
-end
+cumulative_compile_time_ns() = sum(Base.cumulative_compile_time_ns())
 
 end # module
