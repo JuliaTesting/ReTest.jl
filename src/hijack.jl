@@ -19,6 +19,7 @@ function load(testpath::AbstractString;
               parentmodule::Module=Main, revise::Maybe{Bool}=nothing)
 
     Revise = get_revise(revise)
+    testpath = normpath(abspath(testpath))
 
     if Revise === nothing
         Base.include(parentmodule, testpath)
@@ -240,6 +241,7 @@ function populate_mod!(mod::Module, path; lazy, Revise, include::Maybe{Symbol}=n
     lazy ∈ (true, false, :brutal) ||
         throw(ArgumentError("the `lazy` keyword must be `true`, `false` or `:brutal`"))
 
+    path = normpath(abspath(path))
     files = Revise === nothing ? nothing : Dict(path => mod)
     substitute!(x) = substitute_retest!(x, lazy, include, files;
                                         include_functions=include_functions)
