@@ -93,6 +93,9 @@ ReTestSet(desc::String; verbose::Bool=false) =
 
 # For a non-passed result, simply store the result
 record(ts::ReTestSet, t::Union{Broken,Fail,Error}) = (push!(ts.results, t); t)
+# Convert a `LogTestFailure` to `Fail` like `Test.DefaultTestSet`
+record(ts::ReTestSet, t::Test.LogTestFailure) =
+    (push!(ts.results, Fail(:test, t.orig_expr, t.logs, nothing, nothing, t.source, false)); t)
 # For a passed result, do not store the result since it uses a lot of memory
 record(ts::ReTestSet, t::Pass) = (ts.n_passed += 1; t)
 

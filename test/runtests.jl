@@ -1280,6 +1280,20 @@ end # Failing
 """)
 end
 
+module FailingTestLogs
+using ReTest
+using Test: @test_logs
+
+@testset "logs fail" begin
+    # pattern expects "x", actual log is "y" → LogTestFailure
+    @test_logs (:info, "x") @info "y"
+end
+end # FailingTestLogs
+
+@chapter FailingTestLogs begin
+    @test_throws Test.TestSetException retest(FailingTestLogs)
+end
+
 module FailingLoops
 # we test that toplevel testset-for don't make retest unresponsive
 
@@ -1882,4 +1896,29 @@ end
         retest(HijackInclude)
     end
     @test Hijack.RUN == [1, 2, 3, 2, 3]
+end
+
+Test.@testset "record(::ReTestSet, ::LogTestFailure)" begin
+    ReTestSet = ReTest.Testset.ReTestSet
+    record = ReTest.Testset.record
+    anyfailed = ReTest.Testset.anyfailed
+    get_test_counts = ReTest.Testset.get_test_counts
+
+    logfail = Test.LogTestFailure(:(@info "x"), LineNumberNode(1, :file),
+                                  Any[(:info, "x")], Any[])
+
+    # A failing `@test_logs` is recordable, and counts as a failure.
+    ts = ReTestSet(Main, "lt")
+    @test record(ts, logfail) === logfail
+    @test anyfailed(ts)
+    _, fails, errors, _ = get_test_counts(ts)
+    @test fails == 1
+    @test errors == 0
+
+    # A testset with no failing result reports none.
+    ts2 = ReTestSet(Main, "lt_empty")
+    @test !anyfailed(ts2)
+    _, fails2, errors2, _ = get_test_counts(ts2)
+    @test fails2 == 0
+    @test errors2 == 0
 end
