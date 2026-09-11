@@ -1820,8 +1820,18 @@ end
         replace(content, "load_path_function() = 1" => "load_path_function() = 2")
     end
 
-    Revise.revise()
     try
+        # Queue the tracked files explicitly, as Revise.revise() only processes changes
+        # that its file watcher task has already picked up, which is racy.
+        # Revise.revise(mod) can't be used since it looks up PkgId(mod), i.e. "Main".
+        @lock Revise.revise_lock for (id, pkgdata) in Revise.pkgdatas
+            if id.uuid === nothing && startswith(id.name, "Main.")
+                for file in pkgdata.info.files
+                    push!(Revise.revision_queue, (pkgdata, file))
+                end
+            end
+        end
+        Revise.revise()
         Test.@testset "revise works" begin
             retest(HijackTests2)
             @test Hijack.RUN == [2, 5, 4]
