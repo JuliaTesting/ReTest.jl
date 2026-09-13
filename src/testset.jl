@@ -525,7 +525,7 @@ function testset_beginend(mod::Module, isfinal::Bool, pat::Pattern, id::Int64, d
                               Random.seed!(ReTest.test_seed[])
                           end
                           let
-                              ts.timed = @stats $stats $(esc(tests))
+                              @stats $stats ts $(esc(tests))
                           end
                       catch err
                           err isa InterruptException && rethrow()
@@ -580,7 +580,7 @@ function testset_forloop(mod::Module, isfinal::Bool, pat::Pattern, id::Int64,
                       Test.TESTSET_DEPTH => get_testset_depth() + 1,
                       try
                           let
-                              ts.timed = @stats $stats $(esc(tests))
+                              @stats $stats ts $(esc(tests))
                           end
                           setresult!($marks, ts.subject, !anyfailed(ts))
                       catch err
@@ -648,7 +648,7 @@ get_timed!(ts) = isempty(ts.timed) ? set_timed!(ts) : ts
 
 # adapted from @timed in Julia/base/timing.jl
 # also, @timed inserts a `while false; end` compiler heuristic, which destroys perfs here
-macro stats(yes, ex)
+macro stats(yes, ts, ex)
     quote
         if $yes
             local stats = Base.gc_num()
@@ -656,18 +656,23 @@ macro stats(yes, ex)
             local rss = Sys.maxrss()
             local compile_time = cumulative_compile_time_ns()
         end
-        local val = $(esc(ex))
-        if $yes
-            elapsedtime = time_ns() - elapsedtime
-            local diff = Base.GC_Diff(Base.gc_num(), stats)
-            rss = Sys.maxrss() - rss
-            compile_time = cumulative_compile_time_ns() - compile_time
-            # COMPAT: on Julia 1.1, the form `(time=..., bytes=..., ...)` doesn't work
-            # (macro name mangling with `#`, e.g. (#115#time = ..., ))
-            NamedTuple{(:time, :bytes, :gctime, :rss, :compile_time)}(
-                (elapsedtime/1e9, diff.allocd, diff.total_time/1e9, rss, compile_time))
-        else
-            NamedTuple()
+
+        try
+            $(esc(ex))
+        finally
+            if $yes
+                elapsedtime = time_ns() - elapsedtime
+                Base.cumulative_compile_timing(false)
+                compile_time = cumulative_compile_time_ns() - compile_time
+                local diff = Base.GC_Diff(Base.gc_num(), stats)
+                rss = Sys.maxrss() - rss
+                # COMPAT: on Julia 1.1, the form `(time=..., bytes=..., ...)` doesn't work
+                # (macro name mangling with `#`, e.g. (#115#time = ..., ))
+                $(esc(ts)).timed =
+                    NamedTuple{(:time, :bytes, :gctime, :rss, :compile_time)}(
+                        (elapsedtime/1e9, diff.allocd, diff.total_time/1e9, rss,
+                         compile_time))
+            end
         end
     end
 end
