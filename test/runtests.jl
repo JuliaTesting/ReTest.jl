@@ -1940,16 +1940,16 @@ Test.@testset "record(::ReTestSet, ::LogTestFailure)" begin
     ts = ReTestSet(Main, "lt")
     @test record(ts, logfail) === logfail
     @test anyfailed(ts)
-    _, fails, errors, _ = get_test_counts(ts)
-    @test fails == 1
-    @test errors == 0
+    tc = get_test_counts(ts)
+    @test tc.fails == 1
+    @test tc.errors == 0
 
     # A testset with no failing result reports none.
     ts2 = ReTestSet(Main, "lt_empty")
     @test !anyfailed(ts2)
-    _, fails2, errors2, _ = get_test_counts(ts2)
-    @test fails2 == 0
-    @test errors2 == 0
+    tc2 = get_test_counts(ts2)
+    @test tc2.fails == 0
+    @test tc2.errors == 0
 end
 
 Test.@testset "REPL mode parsing" begin

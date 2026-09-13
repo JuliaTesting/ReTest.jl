@@ -29,18 +29,6 @@ function recsubmodules(m::Module)
     recs
 end
 
-function allequal(xs)
-    local val
-    for x in xs
-        if !@isdefined(val)
-            val = x
-        else
-            isequal(val, x) || return false
-        end
-    end
-    true
-end
-
 # test if a module or one of its parents was replaced
 function is_replaced(mod::Module)
     par = parentmodule(mod)

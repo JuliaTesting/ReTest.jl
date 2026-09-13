@@ -1,11 +1,9 @@
 module Testset
 
-using Test: AbstractTestSet, Broken, DefaultTestSet, Error, Fail, Pass, Test,
-            TestSetException, get_testset, get_testset_depth,
-            parse_testset_args
-using Base.ScopedValues: @with
+using Test: AbstractTestSet, Broken, Error, Fail, Pass, Test, TestCounts,
+            TestSetException, get_testset, get_testset_depth
 
-import Test: finish, record
+import Test: finish, record, get_test_counts, print_verbose, results
 
 import Random
 
@@ -19,34 +17,7 @@ import ..ReTest
 using ..ReTest: Pattern, Marks, matches, setresult!
 
 # mostly copied from Test stdlib
-# changed from Test: pass nothing as file in ip_has_file_and_func
 #-----------------------------------------------------------------------
-
-# (this has to be copied from Test, because `@__FILE__` is hardcoded)
-
-# Backtrace utility functions
-function ip_has_file_and_func(ip, file, funcs)
-    return any(fr -> ((file === nothing || string(fr.file) == file) &&
-                      fr.func in funcs),
-               StackTraces.lookup(ip))
-end
-
-function scrub_backtrace(bt)
-    do_test_ind = findfirst(ip -> ip_has_file_and_func(ip, nothing,
-                                                       (:do_test, :do_test_throws)), bt)
-    if do_test_ind !== nothing && length(bt) > do_test_ind
-        bt = bt[do_test_ind + 1:end]
-    end
-    name_ind = findfirst(ip -> ip_has_file_and_func(ip, @__FILE__, (Symbol("macro expansion"),)), bt)
-    if name_ind !== nothing && length(bt) != 0
-        bt = bt[1:name_ind]
-    end
-    return bt
-end
-
-function scrub_exc_stack(stack)
-    return Any[ (x[1], scrub_backtrace(x[2])) for x in stack ]
-end
 
 mutable struct Format
     stats::Bool
@@ -113,9 +84,6 @@ function print_test_errors(ts::ReTestSet)
             if t isa Fail || t.test_type !== :test_interrupted
                 show(t)
             end
-            if t isa Fail # if not gets printed in the show method
-                # Base.show_backtrace(stdout, scrub_backtrace(backtrace()))
-            end
             println()
         elseif isa(t, ReTestSet)
             print_test_errors(t)
@@ -130,11 +98,11 @@ function print_test_results(ts::ReTestSet, fmt::Format;
     # the test result types are aligned
     upd = false
 
-    passes, fails, errors, broken, c_passes, c_fails, c_errors, c_broken = get_test_counts(ts)
-    total_pass   = passes + c_passes
-    total_fail   = fails  + c_fails
-    total_error  = errors + c_errors
-    total_broken = broken + c_broken
+    tc = get_test_counts(ts)
+    total_pass   = tc.passes + tc.cumulative_passes
+    total_fail   = tc.fails  + tc.cumulative_fails
+    total_error  = tc.errors + tc.cumulative_errors
+    total_broken = tc.broken + tc.cumulative_broken
     total = total_pass + total_fail + total_error + total_broken
 
     # if no tests, count that as a pass:
@@ -253,11 +221,11 @@ function finish(ts::ReTestSet, chan=nothing)
         record(parent_ts, ts)
         return ts
     end
-    passes, fails, errors, broken, c_passes, c_fails, c_errors, c_broken = get_test_counts(ts)
-    total_pass   = passes + c_passes
-    total_fail   = fails  + c_fails
-    total_error  = errors + c_errors
-    total_broken = broken + c_broken
+    tc = get_test_counts(ts)
+    total_pass   = tc.passes + tc.cumulative_passes
+    total_fail   = tc.fails  + tc.cumulative_fails
+    total_error  = tc.errors + tc.cumulative_errors
+    total_broken = tc.broken + tc.cumulative_broken
     total = total_pass + total_fail + total_error + total_broken
 
     # Finally throw an error as we are the outermost test set
@@ -309,25 +277,39 @@ function filter_errors(ts::ReTestSet)
     efs
 end
 
+print_verbose(ts::ReTestSet) = ts.verbose
+results(ts::ReTestSet) = ts.results
+
+function Test.format_duration(ts::ReTestSet)
+    if isempty(ts.timed)
+        return "?s"
+    end
+    @sprintf("%.1fs", ts.timed.time)
+end
+
 # Recursive function that counts the number of test results of each
 # type directly in the testset, and totals across the child testsets
 function get_test_counts(ts::ReTestSet)
     passes, fails, errors, broken = ts.n_passed, 0, 0, 0
     c_passes, c_fails, c_errors, c_broken = 0, 0, 0, 0
     for t in ts.results
-        isa(t, Fail)   && (fails  += 1)
-        isa(t, Error)  && (errors += 1)
-        isa(t, Broken) && (broken += 1)
-        if isa(t, ReTestSet)
-            np, nf, ne, nb, ncp, ncf, nce , ncb = get_test_counts(t)
-            c_passes += np + ncp
-            c_fails  += nf + ncf
-            c_errors += ne + nce
-            c_broken += nb + ncb
+        if isa(t, Fail)
+            fails += 1
+        elseif isa(t, Error)
+            errors += 1
+        elseif isa(t, Broken)
+            broken += 1
+        elseif isa(t, AbstractTestSet)
+            tc = get_test_counts(t)::TestCounts
+            c_passes += tc.passes + tc.cumulative_passes
+            c_fails  += tc.fails  + tc.cumulative_fails
+            c_errors += tc.errors + tc.cumulative_errors
+            c_broken += tc.broken + tc.cumulative_broken
         end
     end
     ts.anynonpass = (fails + errors + c_fails + c_errors > 0)
-    return passes, fails, errors, broken, c_passes, c_fails, c_errors, c_broken
+    TestCounts(true, passes, fails, errors, broken,
+               c_passes, c_fails, c_errors, c_broken, Test.format_duration(ts))
 end
 
 anyfailed(ts::ReTestSet) = any(t -> t isa Union{Fail,Error}, ts.results)
@@ -348,19 +330,18 @@ function print_counts(ts::ReTestSet, fmt::Format, depth, align,
                       bold, maxidw)
     # Count results by each type at this level, and recursively
     # through any child test sets
-    passes, fails, errors, broken, c_passes, c_fails, c_errors, c_broken = get_test_counts(ts)
-    subtotal = passes + fails + errors + broken + c_passes + c_fails + c_errors + c_broken
+    tc = get_test_counts(ts)
+    np = tc.passes + tc.cumulative_passes
+    nf = tc.fails  + tc.cumulative_fails
+    ne = tc.errors + tc.cumulative_errors
+    nb = tc.broken + tc.cumulative_broken
+    subtotal = np + nf + ne + nb
     # Print test set header, with an alignment that ensures all
     # the test results appear above each other
 
     print_id(ts.id, maxidw)
     printstyled(rpad(string("  "^depth, ts.description), align, " ");
                 bold=bold, color = ts.mod === Testset ? :cyan : :white)
-
-    np = passes + c_passes
-    nf = fails + c_fails
-    ne = errors + c_errors
-    nb = broken + c_broken
 
     print_total = true
 
@@ -513,23 +494,23 @@ function testset_beginend(mod::Module, isfinal::Bool, pat::Pattern, id::Int64, d
             local tls_seed_orig = copy(Random.get_tls_seed())
 
             try
-                @with(Test.CURRENT_TESTSET => ts,
-                      Test.TESTSET_DEPTH => get_testset_depth() + 1,
-                      try
-                          # RNG is re-seeded with the desired seed for the test
-                          if ReTest.test_seed[] !== false
-                              Random.seed!(ReTest.test_seed[])
-                          end
-                          let
-                              @stats $stats ts $(esc(tests))
-                          end
-                      catch err
-                          err isa InterruptException && rethrow()
-                          # something in the test block threw an error. Count that as an
-                          # error in this test set
-                          record(ts, Error(:nontest_error, Expr(:tuple), err,
-                                           current_exceptions(), $(QuoteNode(source))))
-                      end)
+                Test.@with_testset ts try
+                    # RNG is re-seeded with the desired seed for the test
+                    if ReTest.test_seed[] !== false
+                        Random.seed!(ReTest.test_seed[])
+                    end
+                    let
+                        @stats $stats ts $(esc(tests))
+                    end
+                catch err
+                    if err isa InterruptException
+                        rethrow()
+                    end
+                    # something in the test block threw an error. Count that as an
+                    # error in this test set
+                    record(ts, Error(:nontest_error, Expr(:tuple), err,
+                                     current_exceptions(), $(QuoteNode(source))))
+                end
             finally
                 copy!(Random.default_rng(), default_rng_orig)
                 copy!(Random.get_tls_seed(), tls_seed_orig)
@@ -572,20 +553,20 @@ function testset_forloop(mod::Module, isfinal::Bool, pat::Pattern, id::Int64,
             first_iteration = false
             pending_ts = ts
             try
-                @with(Test.CURRENT_TESTSET => ts,
-                      Test.TESTSET_DEPTH => get_testset_depth() + 1,
-                      try
-                          let
-                              @stats $stats ts $(esc(tests))
-                          end
-                          setresult!($marks, ts.subject, !anyfailed(ts))
-                      catch err
-                          err isa InterruptException && rethrow()
-                          # Something in the test block threw an error. Count that as an
-                          # error in this test set
-                          record(ts, Error(:nontest_error, Expr(:tuple), err, current_exceptions(), $(QuoteNode(source))))
-                          setresult!($marks, ts.subject, false)
-                      end)
+                Test.@with_testset ts try
+                    let
+                        @stats $stats ts $(esc(tests))
+                    end
+                    setresult!($marks, ts.subject, !anyfailed(ts))
+                catch err
+                    if err isa InterruptException
+                        rethrow()
+                    end
+                    # Something in the test block threw an error. Count that as an
+                    # error in this test set
+                    record(ts, Error(:nontest_error, Expr(:tuple), err, current_exceptions(), $(QuoteNode(source))))
+                    setresult!($marks, ts.subject, false)
+                end
                 push!(arr, finish(ts, $chan))
                 pending_ts = nothing
                 if ts.exception !== nothing
@@ -641,8 +622,9 @@ end
 
 get_timed!(ts) = isempty(ts.timed) ? set_timed!(ts) : ts
 
-# adapted from @timed in Julia/base/timing.jl
-# also, @timed inserts a `while false; end` compiler heuristic, which destroys perfs here
+# adapted from @timed in Julia/base/timing.jl; @timed itself can't be used because we
+# also need Sys.maxrss(), and because the measurement must be switchable at run-time
+# (@timed would force-compile the body and allocate even when `yes` is false)
 macro stats(yes, ts, ex)
     quote
         if $yes
