@@ -125,39 +125,51 @@ end
 end # module
 ```
 
-We can now load tests either via `using MyPackageTests`, if `LOAD_PATH` is configured
-appropriately, or via `include`, and run whichever tests we want:
+We can now load tests either via `using MyPackageTests;
+MyPackageTests.runtests()` as above, or with the ReTest REPL mode. When `ReTest`
+is loaded in an interactive REPL, pressing `}` at the start of an empty `julia>`
+line enters the `retest>` mode. Here are some example commands:
+
+| Input                  | Equivalent call                    |
+|:-----------------------|:-----------------------------------|
+| `run` (`r`)            | `retest()`                         |
+| `run foo bar`          | `retest("foo", "bar")`             |
+| `run foo -slow`        | `retest("foo", "-slow")`           |
+| `run "two words"`      | `retest("two words")`              |
+| `run 3 -4`             | `retest(3, -4)`                    |
+| `run :label`           | `retest(:label)`                   |
+| `run foo _dv2`         | `retest("foo", :_dv2)`             |
+| `run foo verbose=2`    | `retest("foo"; verbose=2)`         |
+| `run tag=[:a,:b]`      | `retest(; tag=[:a, :b])`           |
+| `dry-run foo` (`dr`)   | `retest("foo"; dry=true)`          |
+| `run-failed` (`rf`)    | `retest(fail)`                     |
+| `load`                 | (see below)                        |
+| `set verbose 2`        | (see [Preferences](@ref))          |
+| `unset verbose`        | (see [Preferences](@ref))          |
+| `help` (`?`)           | (prints a summary of the commands) |
+
+For `run`, every argument which isn't a number, a `:label`, a `_`-prefixed
+shorthand or a `key=value` keyword is passed as a pattern to
+[`retest`](@ref). The value of a keyword is evaluated as Julia code, unless it
+is quoted, in which case it is passed as a string.
+
+The `load` command activates the test environment of the active project with
+[TestEnv.jl](https://github.com/JuliaTesting/TestEnv.jl) and loads its tests
+from `test/<Package>Tests.jl` with `load()`. The package itself doesn't
+have to be loaded beforehand, as the test file can load it once the test
+environment is active. For example, in the project of a
+package `Foo`:
 ```julia
-julia> include("test/MyPackageTests.jl");
+julia> using ReTest     # assumes ReTest.jl is installed in your base environment
 
-julia> using ReTest # to use the `retest` function
+retest> load            # activates Foo's test environment and loads `FooTests`
 
-julia> retest(dry=true, verbose=2) # just list tests, showing nested ones
-MyPackage
-1| greet
+retest> dr              # display all testsets (dry-run)
 
-Main.MyPackageTests
-1| more greet
-2|   concatenation
-3| stuff
+retest> r stats=true    # run all tests with stats
 
-julia> retest("greet", verbose=2) # run only tests related to `greet()`
-                         Pass
-MyPackage:
-  greet              |      1
-
-Main.MyPackageTests:
-  more greet         |      1
-    concatenation    |      1
-
-Overall              |      2
-
-julia> MyPackageTests.runtests(3) # run only testset with ID 3 in MyPackageTests
-                          Pass
-3| stuff              |      1
+retest> rf              # run last failing tests (run-failed)
 ```
-
-Here it is for basic usage!
 
 
 ## API
@@ -362,6 +374,45 @@ Note that if you want to run `@testset "b"`, there is no way to not run
 `@test true` in `@testset "a"`; so if it was an expensive test to run,
 instead of `@test true`, it could be useful to wrap it in its own testset, so that
 it can be filtered out.
+
+
+## Preferences
+The default value of the `stats`, `verbose`, `id`, `marks`, and `spin` keywords
+of [`retest`](@ref) can be set persistently for a project with
+[`Preferences.jl`](https://github.com/JuliaPackaging/Preferences.jl), either by
+manually editing a preferences file or by using the `set` and `unset` commands
+of the REPL mode. `set` prints the current preferences when called
+without arguments:
+```julia
+retest> set verbose inf
+
+retest> set spin false
+
+retest> unset spin    # remove the `spin` preference
+
+retest> set
+stats = false
+verbose = Inf
+id = nothing
+marks = true
+spin = true
+```
+
+This writes the values in the `LocalPreferences.toml` file of the active project,
+where they can also be edited by hand:
+```toml
+[ReTest]
+verbose = inf
+spin = false
+```
+
+These preferences are read each time `retest` is called so changing one takes
+effect immediately. These particular preferences also will not trigger
+recompilation of `ReTest`. They are overridden by the keywords explicitly passed
+to `retest`.
+
+The preferences file the REPL mode uses will be in the `test/` directory when
+that contains a project file, or the package root directory otherwise.
 
 
 ## Running tests in parallel with `Distributed`

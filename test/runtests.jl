@@ -1932,3 +1932,246 @@ Test.@testset "record(::ReTestSet, ::LogTestFailure)" begin
     @test fails2 == 0
     @test errors2 == 0
 end
+
+Test.@testset "REPL mode parsing" begin
+    parse = ReTest.repl_parse
+    # `run` and friends are parsed into a call to `repl_retest`, which checks that
+    # tests have been loaded before delegating to `retest`
+    call(args...) = Expr(:call, ReTest.repl_retest, args...)
+    callkw(kws, args...) = Expr(:call, ReTest.repl_retest,
+                                Expr(:parameters, (Expr(:kw, k, v) for (k, v) in kws)...),
+                                args...)
+
+    @test parse("") === nothing
+    @test parse("   ") === nothing
+    @test_throws ArgumentError parse("foo")        # unknown command
+    @test_throws ArgumentError parse("\"run\"")    # a command is never quoted
+    @test_throws ArgumentError parse("verbose=2")  # nor a keyword
+    @test_throws ArgumentError parse("\"unterminated")
+
+    @test parse("help") == Expr(:call, ReTest.repl_help)
+    @test parse("load") == Expr(:call, ReTest.repl_load_tests)
+    @test_throws ArgumentError parse("load MyPkg")
+    # every advertised command is handled (`unset` needs an argument), and every
+    # alias parses like the command it stands for
+    @test all(c -> parse(c) !== nothing, filter(!=("unset"), ReTest.REPL_COMMANDS))
+    @test all(a -> parse(a) == parse(ReTest.REPL_ALIASES[a]), keys(ReTest.REPL_ALIASES))
+
+    @test parse("run") == call()
+    @test parse("run foo -slow a/b c|d") == call("foo", "-slow", "a/b", "c|d")
+    @test parse("run \"two words\"") == call("two words")
+    @test parse("run 3 -4") == call(3, -4)
+    @test parse("run :label _dv2") == call(QuoteNode(:label), QuoteNode(:_dv2))
+    @test parse("run dry-run") == call("dry-run") # a command name is just a pattern here
+    @test parse("dry-run foo") == callkw((:dry => true,), "foo")
+    @test parse("run-failed foo") == call(fail, "foo")
+
+    # the value of a keyword is Julia code, unless it's quoted
+    @test parse("run foo verbose=2 tag=[:a,:b]") ==
+        callkw((:verbose => 2, :tag => :([:a, :b])), "foo")
+    @test parse("run desc=\"two words\"") == callkw((:desc => "two words",))
+    # only a leading identifier introduces a keyword
+    @test parse("run -verbose=2 \"verbose=2\"") == call("-verbose=2", "verbose=2")
+
+    setpref(kw, val) = Expr(:call, ReTest.repl_set_preferences!,
+                            Expr(:parameters, Expr(:kw, kw, val)))
+    @test parse("set") == Expr(:call, ReTest.repl_show_preferences)
+    @test parse("set verbose 2") == setpref(:verbose, 2)
+    @test parse("set verbose inf") == setpref(:verbose, Inf)
+    @test parse("set spin false") == setpref(:spin, false)
+    @test parse("unset spin") == setpref(:spin, missing)
+    @test parse("unset spin verbose") ==
+        Expr(:call, ReTest.repl_set_preferences!,
+             Expr(:parameters, Expr(:kw, :spin, missing),
+                  Expr(:kw, :verbose, missing)))
+    @test_throws ArgumentError parse("set verbose")     # a name and a value are needed
+    @test_throws ArgumentError parse("set verbose 2 3")
+    @test_throws ArgumentError parse("unset")
+    # `repl_prefname` rejects whatever isn't a bare, known preference name
+    @test_throws ArgumentError parse("set \"verbose\" 2")
+    @test_throws ArgumentError parse("set verbose=2 3")
+    @test_throws ArgumentError parse("unset dry")
+
+    @test ReTest.repl_completions("") == (ReTest.REPL_COMMANDS, "")
+    @test ReTest.repl_completions("run") == (["run", "run-failed"], "run")
+    @test ReTest.repl_completions("foo") == (String[], "foo")
+    @test ReTest.repl_completions("dry-run r") == (String[], "") # only the first word
+
+    # `load` refuses to run twice, which `preferences_project` records
+    hook = ReTest.repl_load_tests_hook
+    modules = copy(ReTest.TESTED_MODULES)
+    try
+        ReTest.repl_load_tests_hook = () -> :loaded
+        @test ReTest.repl_load_tests() === :loaded
+        # tests registered by other means don't prevent `load`
+        @test ReTest.repl_tests_loaded()
+        @test ReTest.repl_load_tests() === :loaded
+        # but a previous successful `load` does, as the active project is then a
+        # test environment
+        ReTest.preferences_project = "/nonexistent/Project.toml"
+        @test_throws ErrorException ReTest.repl_load_tests()
+        ReTest.preferences_project = nothing
+        ReTest.repl_load_tests_hook = nothing
+        @test_throws ErrorException ReTest.repl_load_tests()
+
+        # `set` and `unset` require a project to have been loaded, as only then is
+        # there a sensible project to store the preferences in
+        @test_throws ErrorException ReTest.repl_set_preferences!(spin=false)
+        @test_throws ErrorException Core.eval(Main, parse("unset spin"))
+        @test_throws ErrorException Core.eval(Main, parse("set"))
+
+        # `run` and friends require tests to have been loaded, by `load` or otherwise
+        empty!(ReTest.TESTED_MODULES)
+        @test !ReTest.repl_tests_loaded()
+        @test_throws ErrorException ReTest.repl_retest()
+        # the parsed expressions are evaluable as-is (here `repl_retest` still
+        # refuses to run, as no tests are loaded)
+        @test_throws ErrorException Core.eval(Main, parse("run b1 spin=false"))
+        append!(ReTest.TESTED_MODULES, modules)
+        empty!(M.RUN)
+        @test ReTest.repl_retest(M, "b1", spin=false) === nothing
+        @test M.RUN == ["b1"]
+    finally
+        ReTest.repl_load_tests_hook = hook
+        ReTest.preferences_project = nothing
+        append!(empty!(ReTest.TESTED_MODULES), modules)
+    end
+end
+
+Test.@testset "preferences" begin
+    uuid = Base.PkgId(ReTest).uuid
+
+    # sets the given preferences in a temporary environment added to LOAD_PATH
+    function with_preferences(f, prefs::String)
+        mktempdir() do dir
+            write(joinpath(dir, "Project.toml"), """
+                  [deps]
+                  ReTest = "$uuid"
+                  """)
+            write(joinpath(dir, "LocalPreferences.toml"), "[ReTest]\n" * prefs)
+            push!(LOAD_PATH, dir)
+            try
+                f()
+            finally
+                pop!(LOAD_PATH)
+            end
+        end
+    end
+
+    # without a preference set, `def` returns the plain default (`id`'s is `nothing`,
+    # meaning that its value depends on other options)
+    alldefaults() = all(kw -> ReTest.def(kw) === ReTest.retest_defaults[kw],
+                        ReTest.PREFERENCES)
+    @test alldefaults()
+
+    with_preferences("""
+                     spin = false
+                     verbose = 3
+                     stats = true
+                     id = true
+                     marks = false
+                     """) do
+        @test ReTest.def(:spin) == false
+        @test ReTest.def(:verbose) == 3
+        @test ReTest.def(:stats) == true
+        @test ReTest.def(:id) == true
+        @test ReTest.def(:marks) == false
+        # keywords which are not preferences keep their default
+        @test ReTest.def(:dry) == ReTest.retest_defaults[:dry]
+    end
+    # the preferences go away with their environment
+    @test alldefaults()
+
+    with_preferences("verbose = inf\nid = false\n") do
+        @test ReTest.def(:verbose) == Inf # TOML's `inf`
+        @test ReTest.def(:id) == false
+    end
+
+    # a value of the wrong type is rejected when read
+    with_preferences("""
+                     stats = 1
+                     id = 1
+                     marks = "no"
+                     spin = "yes"
+                     verbose = "2"
+                     """) do
+        for kw in ReTest.PREFERENCES
+            @test_throws ArgumentError ReTest.def(kw)
+        end
+    end
+
+    @test_throws ArgumentError ReTest.check_preference(:dry, true)
+    @test ReTest.check_preference(:verbose, true) == true
+    @test_throws ArgumentError ReTest.set_preferences!(dry=true)
+    @test_throws ArgumentError ReTest.set_preferences!(spin=1)
+    # `Preferences` gives `nothing` a meaning of its own, which we don't expose
+    @test_throws ArgumentError ReTest.set_preferences!(spin=nothing)
+    @test_throws ArgumentError ReTest.set_preferences!(id=nothing) # `id`'s default
+
+    # `preferences_project` makes `set_preferences!` write elsewhere than the active
+    # project, which in `retest>` mode is a temporary test environment (see
+    # ext/ReTestREPLExt.jl); the environment is also added to LOAD_PATH, as the REPL
+    # extension does, so that the preferences are read back
+    function with_preferences_project(f, project::String)
+        mktempdir() do dir
+            projectfile = joinpath(dir, "Project.toml")
+            write(projectfile, project)
+            push!(LOAD_PATH, dir)
+            ReTest.preferences_project = projectfile
+            try
+                f(dir, projectfile)
+            finally
+                ReTest.preferences_project = nothing
+                pop!(LOAD_PATH)
+            end
+        end
+    end
+
+    # the preferences file of the active project must stay untouched
+    active = joinpath(dirname(Base.active_project()), "LocalPreferences.toml")
+    active_before = isfile(active) ? read(active, String) : nothing
+
+    deps = """
+           [deps]
+           ReTest = "$uuid"
+           """
+
+    with_preferences_project(deps) do dir, projectfile
+        ReTest.set_preferences!(spin=false, verbose=2)
+        @test ReTest.def(:spin) == false
+        @test ReTest.def(:verbose) == 2
+        @test isfile(joinpath(dir, "LocalPreferences.toml"))
+        # ReTest is already a dependency, so the project file needs no change
+        @test read(projectfile, String) == deps
+
+        ReTest.set_preferences!(spin=missing)
+        @test ReTest.def(:spin) == ReTest.retest_defaults[:spin]
+
+        # once a project is loaded, `set`/`unset` are allowed and write to it
+        Core.eval(Main, ReTest.repl_parse("set verbose 3"))
+        @test ReTest.def(:verbose) == 3
+        Core.eval(Main, ReTest.repl_parse("unset verbose"))
+        @test ReTest.def(:verbose) == ReTest.retest_defaults[:verbose]
+        @test Core.eval(Main, ReTest.repl_parse("set")) === nothing
+        @test_throws ArgumentError Core.eval(Main, ReTest.repl_parse("set spin nothing"))
+    end
+    @test ReTest.def(:verbose) == ReTest.retest_defaults[:verbose]
+
+    # an existing JuliaLocalPreferences.toml is written instead of LocalPreferences.toml
+    with_preferences_project(deps) do dir, _
+        touch(joinpath(dir, "JuliaLocalPreferences.toml"))
+        ReTest.set_preferences!(verbose=4)
+        @test !isfile(joinpath(dir, "LocalPreferences.toml"))
+        @test ReTest.def(:verbose) == 4
+    end
+
+    # a project which doesn't depend on ReTest: it gets added to `[extras]`, without
+    # which `Base` refuses to read preferences of a non-dependency
+    with_preferences_project("") do dir, projectfile
+        ReTest.set_preferences!(verbose=5)
+        @test occursin("ReTest", read(projectfile, String))
+        @test ReTest.def(:verbose) == 5
+    end
+
+    @test (isfile(active) ? read(active, String) : nothing) == active_before
+end

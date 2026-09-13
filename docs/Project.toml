@@ -3,9 +3,9 @@ Documenter = "e30172f5-a6a5-5a46-863b-614d45cd2de4"
 InlineTest = "bd334432-b1e7-49c7-a2dc-dd9149e4ebd6"
 ReTest = "e0db7c4e-2690-44b9-bad6-7687da720f89"
 
+[sources]
+InlineTest = {path = "../InlineTest"}
+ReTest = {path = ".."}
+
 [compat]
 Documenter = "1"
-
-[sources]
-ReTest = { path = ".." }
-InlineTest = { path = "../InlineTest" }
