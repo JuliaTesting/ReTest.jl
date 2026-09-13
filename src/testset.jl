@@ -654,6 +654,7 @@ macro stats(yes, ts, ex)
             local stats = Base.gc_num()
             local elapsedtime = time_ns()
             local rss = Sys.maxrss()
+            Base.cumulative_compile_timing(true)
             local compile_time = cumulative_compile_time_ns()
         end
 
@@ -677,6 +678,8 @@ macro stats(yes, ts, ex)
     end
 end
 
-cumulative_compile_time_ns() = sum(Base.cumulative_compile_time_ns())
+# `Base.cumulative_compile_time_ns()` returns (compilation, recompilation), where the
+# second is the part of the first spent recompiling.
+cumulative_compile_time_ns() = Base.cumulative_compile_time_ns()[1]
 
 end # module
