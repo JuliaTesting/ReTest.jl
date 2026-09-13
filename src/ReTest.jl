@@ -6,6 +6,7 @@ using Distributed
 using Base.Threads: nthreads
 import Base: ==
 using Random: shuffle!, randstring
+using Preferences: Preferences, load_preference
 
 # from Test:
 export Test,
@@ -50,6 +51,7 @@ include("testset.jl")
 include("hijack.jl")
 include("watch.jl")
 include("patterns.jl")
+include("repl.jl")
 
 using .Testset: Testset, Format, print_id
 
@@ -609,11 +611,79 @@ const retest_defaults = (
 def(kw::Symbol) =
     if isdefined(Main, :__retest_defaults__)
         # TODO: test __retest_defaults__
-        get(Main.__retest_defaults__, kw, retest_defaults[kw])
+        get(() -> preference(kw), Main.__retest_defaults__, kw)
     else
-        retest_defaults[kw]
+        preference(kw)
     end
 
+# keywords whose default value can be set persistently with Preferences.jl
+const PREFERENCES = (:stats, :verbose, :id, :marks, :spin)
+
+# Project file `set_preferences!` writes to; `nothing` means the active project.
+# The REPL extension sets it after `load`, when the active project is a temporary
+# test environment which would take the preferences down with it.
+global preferences_project::Union{Nothing,String} = nothing
+
+# `force_compiletime_default` keeps the preference out of ReTest's compile-time
+# dependencies, so that setting one doesn't trigger a recompilation
+function preference(kw::Symbol)
+    default = retest_defaults[kw]
+    if !(kw in PREFERENCES)
+        return default
+    end
+    val = load_preference(@__MODULE__, String(kw), default;
+                          force_compiletime_default=true)
+    check_preference(kw, val)
+end
+
+function check_preference_name(kw::Symbol)
+    if !(kw in PREFERENCES)
+        throw(ArgumentError("unsupported preference `$kw`, must be one of: " *
+                            join(PREFERENCES, ", ")))
+    end
+    kw
+end
+
+function check_preference(kw::Symbol, val)
+    check_preference_name(kw)
+    valid = if kw === :verbose
+        val isa Real
+    elseif kw === :id
+        val isa Bool || isnothing(val) # `nothing` is the default
+    else # :spin, :stats, :marks
+        val isa Bool
+    end
+    if !valid
+        throw(ArgumentError("invalid value for the `$kw` preference: $(repr(val))"))
+    end
+    val
+end
+
+# `missing` unsets a preference
+function set_preferences!(; force::Bool=true, kwargs...)
+    prefs = Pair{String,Any}[]
+    for (kw, val) in kwargs
+        if ismissing(val)
+            check_preference_name(kw)
+        elseif isnothing(val)
+            # `Preferences` stores it as a directive blocking the preferences set in
+            # other environments of the load path, which we don't want to expose
+            check_preference_name(kw)
+            throw(ArgumentError("the `$kw` preference can't be set to `nothing`, " *
+                                "pass `missing` to unset it"))
+        else
+            check_preference(kw, val)
+        end
+        push!(prefs, String(kw) => val)
+    end
+    project = preferences_project
+    if isnothing(project)
+        Preferences.set_preferences!(@__MODULE__, prefs...; force=force)
+    else
+        Preferences.set_preferences!(@__MODULE__, prefs...;
+                                     project_toml=project, force=force)
+    end
+end
 
 """
     retest(mod..., pattern...;
@@ -680,6 +750,9 @@ Filtering `pattern`s can be specified to run only a subset of the tests.
 The default values of these keywords can be overriden by defining a dictionary
 or named tuple within `Main` called `__retest_defaults__`, whose keys are
 symbols. E.g. `__retest_defaults__ = (verbose=Inf, spin=false)`.
+The default values of `stats`, `verbose`, `id`, `marks` and `spin` can also be set
+persistently with the `set` command of the `retest>` REPL mode, which
+`__retest_defaults__` takes precedence over.
 
 
 ### Filtering

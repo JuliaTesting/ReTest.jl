@@ -1,24 +1,39 @@
 name = "ReTest"
 uuid = "e0db7c4e-2690-44b9-bad6-7687da720f89"
-version = "0.4.1"
+version = "0.4.2"
 authors = ["Rafael Fourquet <fourquet.rafael@gmail.com>"]
 
 [deps]
 Distributed = "8ba89e20-285c-5b6f-9357-94700520ee1b"
 InlineTest = "bd334432-b1e7-49c7-a2dc-dd9149e4ebd6"
 PrecompileTools = "aea7be01-6a6a-4083-8856-8a6e6704d82a"
+Preferences = "21216c6a-2e73-6563-6e65-726566657250"
 Printf = "de0858da-6303-5e67-8744-51eddeeeb8d7"
 Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
+ReplMaker = "b873ce64-0db9-51f5-a568-4457d8e49576"
 Sockets = "6462fe0b-24de-5631-8697-dd941f90decc"
+TOML = "fa267f1f-6049-4f14-aa54-33bafae1ed76"
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+TestEnv = "1e6cf692-eddd-4d53-88a5-2d735e33781b"
+
+[weakdeps]
+REPL = "3fa0cd96-eef1-5676-8a61-b3b8758bbffb"
 
 [sources]
 InlineTest = {path = "InlineTest"}
 
+[extensions]
+ReTestREPLExt = "REPL"
+
 [compat]
 InlineTest = "=0.2.0"
 PrecompileTools = "1.2.1"
+Preferences = "1.6"
+REPL = "1"
+ReplMaker = "0.2.8"
 Revise = "3.1"
+TOML = "1"
+TestEnv = "1.102"
 julia = "1.13"
 
 [extras]
