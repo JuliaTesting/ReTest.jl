@@ -453,10 +453,6 @@ end
 
 #-----------------------------------------------------------------------
 
-default_rng() = isdefined(Random, :default_rng) ?
-    Random.default_rng() :
-    Random.GLOBAL_RNG
-
 function make_retestset(mod, desc, id, verbose, marks, iter=1)
     parent_ts = get_testset()
     parent = parent_ts isa ReTestSet ? parent_ts : nothing
@@ -513,7 +509,7 @@ function testset_beginend(mod::Module, isfinal::Bool, pat::Pattern, id::Int64, d
             # we reproduce the logic of guardseed, but this function
             # cannot be used as it changes slightly the semantic of @testset,
             # by wrapping the body in a function
-            local default_rng_orig = copy(default_rng())
+            local default_rng_orig = copy(Random.default_rng())
             local tls_seed_orig = copy(Random.get_tls_seed())
 
             try
@@ -535,7 +531,7 @@ function testset_beginend(mod::Module, isfinal::Bool, pat::Pattern, id::Int64, d
                                            current_exceptions(), $(QuoteNode(source))))
                       end)
             finally
-                copy!(default_rng(), default_rng_orig)
+                copy!(Random.default_rng(), default_rng_orig)
                 copy!(Random.get_tls_seed(), tls_seed_orig)
 
                 setresult!($marks, ts.subject, !anyfailed(ts))
@@ -568,7 +564,7 @@ function testset_forloop(mod::Module, isfinal::Bool, pat::Pattern, id::Int64,
         if !$isfinal || matches($pat, ts.subject, ts)
             if !first_iteration
                 # it's 1000 times faster to copy from tmprng rather than calling Random.seed!
-                copy!(default_rng(), tmprng)
+                copy!(Random.default_rng(), tmprng)
             end
             if nworkers() == 1 && get_testset_depth() == 0 && $(chan.preview) !== nothing
                 put!($(chan.preview), ($id, ts.description))
@@ -614,10 +610,10 @@ function testset_forloop(mod::Module, isfinal::Bool, pat::Pattern, id::Int64,
         local iter = 0
         local pending_ts = nothing
 
-        local default_rng_orig = copy(default_rng())
+        local default_rng_orig = copy(Random.default_rng())
         local tls_seed_orig = copy(Random.get_tls_seed())
 
-        local tmprng = copy(default_rng())
+        local tmprng = copy(Random.default_rng())
         if ReTest.test_seed[] !== false
             tmprng = copy(Random.seed!(ReTest.test_seed[]))
         end
@@ -626,7 +622,7 @@ function testset_forloop(mod::Module, isfinal::Bool, pat::Pattern, id::Int64,
                 $(Expr(:for, Expr(:block, [esc(v) for v in loops]...), blk))
             end
         finally
-            copy!(default_rng(), default_rng_orig)
+            copy!(Random.default_rng(), default_rng_orig)
             copy!(Random.get_tls_seed(), tls_seed_orig)
         end
         arr
@@ -639,8 +635,7 @@ function set_timed!(ts)
     end
     ts.timed = NamedTuple{(:time, :bytes, :gctime, :rss, :compile_time)}(
         ntuple(Val(5)) do i
-            # init=0.0 kwarg not available on old Julia
-            Float64(sum(tsc.timed[i] for tsc in ts.results))
+            sum((tsc.timed[i] for tsc in ts.results); init=0.0)
         end)
 end
 
@@ -667,12 +662,11 @@ macro stats(yes, ts, ex)
                 compile_time = cumulative_compile_time_ns() - compile_time
                 local diff = Base.GC_Diff(Base.gc_num(), stats)
                 rss = Sys.maxrss() - rss
-                # COMPAT: on Julia 1.1, the form `(time=..., bytes=..., ...)` doesn't work
-                # (macro name mangling with `#`, e.g. (#115#time = ..., ))
-                $(esc(ts)).timed =
-                    NamedTuple{(:time, :bytes, :gctime, :rss, :compile_time)}(
-                        (elapsedtime/1e9, diff.allocd, diff.total_time/1e9, rss,
-                         compile_time))
+                $(esc(ts)).timed = (time = elapsedtime/1e9,
+                                    bytes = diff.allocd,
+                                    gctime = diff.total_time/1e9,
+                                    rss = rss,
+                                    compile_time = compile_time)
             end
         end
     end

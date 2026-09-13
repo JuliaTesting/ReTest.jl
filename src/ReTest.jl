@@ -25,11 +25,7 @@ using Test: Test,
     @test_logs, @test_deprecated,
     @inferred,
     detect_ambiguities, detect_unbound_args,
-    GenericString, GenericSet, GenericDict, GenericArray
-
-if isdefined(Test, :GenericOrder)
-    using Test: GenericOrder
-end
+    GenericString, GenericSet, GenericDict, GenericArray, GenericOrder
 
 using InlineTest: @testset, InlineTest, TESTED_MODULES, TESTSET_MACROS, INLINE_TEST
 import InlineTest: retest, @testset_macro
@@ -216,7 +212,7 @@ function parse_ts(source::LineNumberNode, mod::Module, args::Tuple, parent=nothi
     options = Options(include_functions=include_functions)
     marks = Marks()
     if parent !== nothing
-        append!(marks.hard, parent.marks.hard) # copy! not available in Julia 1.0
+        append!(marks.hard, parent.marks.hard)
         options.static_include = parent.options.static_include
         # if static_include was set in parent, it should have been forwarded also
         # through the parse_ts/replace_ts call chains:
@@ -804,8 +800,7 @@ its nested testsets might be filtered out if they don't also match
 If a passed `pattern` is a string, then it is wrapped in a `Regex` with the
 "case-insensitive" flag, and must match literally the subjects.
 This means for example that `"a|b"` will match a subject like `"a|b"` or `"A|B"`,
-but not like `"a"` (only in Julia versions >= 1.3; in older versions,
-the regex is simply created as `Regex(pattern, "i")`).
+but not like `"a"`.
 
 As a special case, if a string pattern starts with the `'-'` character,
 it's interpreted as the negation of the pattern corresponding to the

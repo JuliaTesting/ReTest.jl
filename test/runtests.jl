@@ -1465,8 +1465,7 @@ end # NoTests
             continue
     end
     modstr = length(mod) == 1 ? string(mod[1]) : string(mod)
-    # have to show 'X' below, because `nothing` can't be printed on old Julia
-    println("\n####################### Display: mod=$modstr stats=$stats dry=$dry verbose=$verbose pattern=$pattern, id=$(something(id, 'X'))\n")
+    println("\n####################### Display: mod=$modstr stats=$stats dry=$dry verbose=$verbose pattern=$pattern, id=$id\n")
     retest(mod..., pattern; shuffle=true, verbose=verbose, stats=stats, dry=dry, id=id)
 end
 
