@@ -1714,8 +1714,7 @@ end
             HijackLoadTrueTests2
         ] == Hijack_testmodules # to be sure no module was overwritten
 
-    ReTest.hijack(Hijack, testset=false) # testset: just check that this method
-                                         # also accepts this kw (TODO: test it!)
+    ReTest.hijack(Hijack)
     invokelatest() do
         retest(HijackTests)
     end
@@ -1908,7 +1907,6 @@ end
 
     # test include=:static
     empty!(Hijack.RUN)
-    @test_throws ErrorException ReTest.hijack("./Hijack/test/include_static.jl", :HijackInclude, include=:static, testset=true)
     @test_throws ErrorException ReTest.hijack("./Hijack/test/include_static.jl", :HijackInclude, include=:notvalid)
     ReTest.hijack("./Hijack/test/include_static.jl", :HijackInclude, include=:static,
                   include_functions=[:include, :custom_include_function])

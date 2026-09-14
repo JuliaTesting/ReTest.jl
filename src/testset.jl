@@ -75,21 +75,11 @@ record(ts::ReTestSet, t::Pass) = (ts.n_passed += 1; t)
 # the results at the end of the tests
 record(ts::ReTestSet, t::AbstractTestSet) = push!(ts.results, t)
 
-function print_test_errors(ts::ReTestSet)
-    for t in ts.results
-        if isa(t, Error) || isa(t, Fail)
-            printstyled(ts.description, ": ", color=:white)
-
-            # don't print for interrupted tests
-            if t isa Fail || t.test_type !== :test_interrupted
-                show(t)
-            end
-            println()
-        elseif isa(t, ReTestSet)
-            print_test_errors(t)
-        end
-    end
-end
+# counts of a testset including those of its nested testsets
+totals(tc::TestCounts) = (passes = tc.passes + tc.cumulative_passes,
+                          fails  = tc.fails  + tc.cumulative_fails,
+                          errors = tc.errors + tc.cumulative_errors,
+                          broken = tc.broken + tc.cumulative_broken)
 
 function print_test_results(ts::ReTestSet, fmt::Format;
                             depth::Int=0, bold::Bool=false, hasbroken::Bool=false,
@@ -98,23 +88,18 @@ function print_test_results(ts::ReTestSet, fmt::Format;
     # the test result types are aligned
     upd = false
 
-    tc = get_test_counts(ts)
-    total_pass   = tc.passes + tc.cumulative_passes
-    total_fail   = tc.fails  + tc.cumulative_fails
-    total_error  = tc.errors + tc.cumulative_errors
-    total_broken = tc.broken + tc.cumulative_broken
-    total = total_pass + total_fail + total_error + total_broken
+    (; passes, fails, errors, broken) = totals(get_test_counts(ts))
+    total = passes + fails + errors + broken
 
     # if no tests, count that as a pass:
-    dig_pass   = total_pass   > 0 || total == 0 ? ndigits(total_pass)   : 0
-    dig_fail   = total_fail   > 0               ? ndigits(total_fail)   : 0
-    dig_error  = total_error  > 0               ? ndigits(total_error)  : 0
-    dig_broken = total_broken > 0 || hasbroken  ? ndigits(total_broken) : 0
+    dig_pass   = passes > 0 || total == 0 ? ndigits(passes) : 0
+    dig_fail   = fails  > 0               ? ndigits(fails)  : 0
+    dig_error  = errors > 0               ? ndigits(errors) : 0
+    dig_broken = broken > 0 || hasbroken  ? ndigits(broken) : 0
 
     # max(1, ...) : we always print something at least in "Pass", even when no tests
-    nprinted = max(1, (total_pass > 0) + (total_fail > 0) +
-                      (total_error > 0) + (total_broken > 0))
-    if nprinted == 1 && total_pass > 0 && !hasbroken
+    nprinted = max(1, (passes > 0) + (fails > 0) + (errors > 0) + (broken > 0))
+    if nprinted == 1 && passes > 0 && !hasbroken
         # do not print "Total" when only "Pass" column is printed
         total = 0
     end
@@ -221,19 +206,14 @@ function finish(ts::ReTestSet, chan=nothing)
         record(parent_ts, ts)
         return ts
     end
-    tc = get_test_counts(ts)
-    total_pass   = tc.passes + tc.cumulative_passes
-    total_fail   = tc.fails  + tc.cumulative_fails
-    total_error  = tc.errors + tc.cumulative_errors
-    total_broken = tc.broken + tc.cumulative_broken
-    total = total_pass + total_fail + total_error + total_broken
+    (; passes, fails, errors, broken) = totals(get_test_counts(ts))
+    total = passes + fails + errors + broken
 
     # Finally throw an error as we are the outermost test set
-    if total != total_pass + total_broken
+    if total != passes + broken
         # Get all the error/failures and bring them along for the ride
         efs = filter_errors(ts)
-        ts.exception = TestSetException(total_pass, total_fail, total_error,
-                                        total_broken, efs)
+        ts.exception = TestSetException(passes, fails, errors, broken, efs)
     end
 
     put!(chan.out, ts)
@@ -300,11 +280,11 @@ function get_test_counts(ts::ReTestSet)
         elseif isa(t, Broken)
             broken += 1
         elseif isa(t, AbstractTestSet)
-            tc = get_test_counts(t)::TestCounts
-            c_passes += tc.passes + tc.cumulative_passes
-            c_fails  += tc.fails  + tc.cumulative_fails
-            c_errors += tc.errors + tc.cumulative_errors
-            c_broken += tc.broken + tc.cumulative_broken
+            tot = totals(get_test_counts(t)::TestCounts)
+            c_passes += tot.passes
+            c_fails  += tot.fails
+            c_errors += tot.errors
+            c_broken += tot.broken
         end
     end
     ts.anynonpass = (fails + errors + c_fails + c_errors > 0)
@@ -330,12 +310,8 @@ function print_counts(ts::ReTestSet, fmt::Format, depth, align,
                       bold, maxidw)
     # Count results by each type at this level, and recursively
     # through any child test sets
-    tc = get_test_counts(ts)
-    np = tc.passes + tc.cumulative_passes
-    nf = tc.fails  + tc.cumulative_fails
-    ne = tc.errors + tc.cumulative_errors
-    nb = tc.broken + tc.cumulative_broken
-    subtotal = np + nf + ne + nb
+    (; passes, fails, errors, broken) = totals(get_test_counts(ts))
+    subtotal = passes + fails + errors + broken
     # Print test set header, with an alignment that ensures all
     # the test results appear above each other
 
@@ -347,36 +323,36 @@ function print_counts(ts::ReTestSet, fmt::Format, depth, align,
 
     if ts.overall && endswith(ts.description, ':')
         # header, we don't print the '|' nor anything afterwards
-        @assert np == 0 && nf == 0 && ne == 0 && nb == 0
+        @assert subtotal == 0
         print_total = false
-    elseif np > 0 || np == 0 && nf == 0 && ne == 0 && nb == 0
+    elseif passes > 0 || subtotal == 0
         # print `0` in warn color instead of "No tests" like in Test module,
         # which messes up alignments (and am too lazy to fix)
         printstyled(" | ", bold=false)
-        printstyled(lpad(string(np), pass_width, " "), "  ",
-                    color = np > 0 ? :green : Base.warn_color(), bold=bold)
+        printstyled(lpad(string(passes), pass_width, " "), "  ",
+                    color = passes > 0 ? :green : Base.warn_color(), bold=bold)
     elseif pass_width > 0 # TODO: isn't this condition always true here?
         # No passes at this level, but some at another level
         printstyled(" | ", bold=false)
         print(lpad(" ", pass_width), "  ")
     end
 
-    if nf > 0
-        printstyled(lpad(string(nf), fail_width, " "), "  ", color=Base.error_color(), bold=bold)
+    if fails > 0
+        printstyled(lpad(string(fails), fail_width, " "), "  ", color=Base.error_color(), bold=bold)
     elseif fail_width > 0
         # No fails at this level, but some at another level
         print(lpad(" ", fail_width), "  ")
     end
 
-    if ne > 0
-        printstyled(lpad(string(ne), error_width, " "), "  ", color=Base.error_color(), bold=bold)
+    if errors > 0
+        printstyled(lpad(string(errors), error_width, " "), "  ", color=Base.error_color(), bold=bold)
     elseif error_width > 0
         # No errors at this level, but some at another level
         print(lpad(" ", error_width), "  ")
     end
 
-    if nb > 0
-        printstyled(lpad(string(nb), broken_width, " "), "  ", color=Base.warn_color(), bold=bold)
+    if broken > 0
+        printstyled(lpad(string(broken), broken_width, " "), "  ", color=Base.warn_color(), bold=bold)
     elseif broken_width > 0
         # None broken at this level, but some at another level
         print(lpad(" ", broken_width), "  ")
@@ -421,7 +397,7 @@ function print_counts(ts::ReTestSet, fmt::Format, depth, align,
 
     # Only print results at lower levels if we had failures or if the user
     # wants.
-    if !ts.overall && ((np + nb != subtotal) || (ts.verbose))
+    if !ts.overall && ((passes + broken != subtotal) || (ts.verbose))
         for t in ts.results
             if isa(t, ReTestSet)
                 print_counts(t, fmt, depth + 1, align,
