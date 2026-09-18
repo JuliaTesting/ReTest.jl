@@ -26,6 +26,7 @@ InlineTest = {path = "InlineTest"}
 ReTestREPLExt = "REPL"
 
 [compat]
+Distributed = "1.11"
 InlineTest = "=0.2.0"
 PrecompileTools = "1.2.1"
 Preferences = "1.6"
