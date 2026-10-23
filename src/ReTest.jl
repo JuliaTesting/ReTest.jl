@@ -606,6 +606,7 @@ const retest_defaults = (
     tag       = Symbol[],
     spin      = true,
     clear     = false,
+    failfast  = true,
 )
 
 def(kw::Symbol) =
@@ -691,7 +692,7 @@ end
            [id::Bool], shuffle::Bool=false, recursive::Bool=true,
            static::Union{Bool,Nothing}=nothing, dup::Bool=false,
            load::Bool=false, seed::Union{Integer,Bool}=false,
-           marks::Bool=true, tag=[], spin::Bool=true)
+           marks::Bool=true, tag=[], spin::Bool=true, failfast::Bool=true)
 
 Run tests declared with [`@testset`](@ref) blocks, within modules `mod` if specified,
 or within all currently loaded modules otherwise.
@@ -746,6 +747,9 @@ Filtering `pattern`s can be specified to run only a subset of the tests.
   all the available threads/workers are used to run tests (i.e. typically
   `Threads.nthreads()` should be greater than `1` for `spin` to take effect).
   Note also that this feature slows down a bit the execution of tests.
+* When `failfast` is `true`, no further testset starts after the first one which
+  doesn't pass, and only results up to it are printed. When `false`, every selected
+  testset runs and prints; `retest` still throws at the end if one didn't pass.
 
 The default values of these keywords can be overriden by defining a dictionary
 or named tuple within `Main` called `__retest_defaults__`, whose keys are
@@ -847,6 +851,7 @@ function retest(@nospecialize(args::ArgType...);
                 spin::Bool          = def(:spin),
                 # clear: clear marks for matching tests, only active if dry=true
                 clear::Bool         = def(:clear),
+                failfast::Bool      = def(:failfast),
                 )
 
     dry, stats, shuffle, group, verbose, recursive, id, strict, dup, static, marks, spin =
@@ -1124,7 +1129,7 @@ function retest(@nospecialize(args::ArgType...);
                             finito = true
                             return
                         end
-                        errored && return
+                        errored && failfast && return
 
                         if verbose > 0 || rts.anynonpass
                             clear_line()
@@ -1145,7 +1150,9 @@ function retest(@nospecialize(args::ArgType...);
                             Testset.print_test_errors(rts)
                             errored = true
                             allpass = false
-                            ndone = length(tests)
+                            if failfast
+                                ndone = length(tests)
+                            end
                         end
                         nprinted += 1
                         if rts.exception !== nothing
