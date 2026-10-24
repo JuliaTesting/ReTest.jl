@@ -747,9 +747,7 @@ Filtering `pattern`s can be specified to run only a subset of the tests.
   all the available threads/workers are used to run tests (i.e. typically
   `Threads.nthreads()` should be greater than `1` for `spin` to take effect).
   Note also that this feature slows down a bit the execution of tests.
-* When `failfast` is `true`, no further testset starts after the first one which
-  doesn't pass, and only results up to it are printed. When `false`, every selected
-  testset runs and prints; `retest` still throws at the end if one didn't pass.
+* When `failfast` is `true`, the first failure will cancel remaining tests. Otherwise all will be run regardless.
 
 The default values of these keywords can be overriden by defining a dictionary
 or named tuple within `Main` called `__retest_defaults__`, whose keys are
