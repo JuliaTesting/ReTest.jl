@@ -1,4 +1,5 @@
 using Pkg
+using Aqua: Aqua
 import Test
 
 Pkg.activate("ReTest")
@@ -2191,4 +2192,8 @@ Test.@testset "preferences" begin
     end
 
     @test (isfile(active) ? read(active, String) : nothing) == active_before
+end
+
+Test.@testset "Aqua" begin
+    Aqua.test_all(ReTest; stale_deps=(; ignore=[:TestEnv, :ReplMaker]), piracies=(; treat_as_own=[ReTest.retest]))
 end
