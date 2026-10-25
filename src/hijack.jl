@@ -313,7 +313,7 @@ function substitute_retest!(ex, lazy, include_::Maybe{Symbol}, files=nothing;
             end
         end
     elseif Meta.isexpr(ex, :module)
-        body = ex.args[3]
+        body = ex.args[end]
         @assert Meta.isexpr(body, :block)
         substitute!.(body.args)
         push!(body.args, :(if !@isdefined __revise_mode__
