@@ -195,17 +195,18 @@ and to `false` otherwise.
 """
 function hijack end
 
-# TODO 0.4: remove `testset` kwarg
 # TODO: maybe deprecate `include=:outline`?
 
 function hijack(path::AbstractString, modname=nothing; parentmodule::Module=Main,
                 lazy=false, revise::Maybe{Bool}=nothing,
-                include::Maybe{Symbol}=nothing, testset::Bool=false,
+                include::Maybe{Symbol}=nothing,
                 include_functions=[:include])
 
     # do first, to error early if necessary
     Revise = get_revise(revise)
-    include = setinclude(include, testset)
+    if !(include === nothing || include === :static || include === :outline)
+        error("`include` keyword only accepts `:static` or `:outline` as value")
+    end
 
     if modname === nothing
         modname = replace(splitext(basename(path))[1], ['-', '.'] => '_')
@@ -219,23 +220,6 @@ function hijack(path::AbstractString, modname=nothing; parentmodule::Module=Main
     newmod
 end
 
-function setinclude(include, testset)
-    if testset
-        include === nothing || error("cannot specify both `testset` and `include` arguments")
-        :outline
-    else
-        include === nothing || include === :static || include === :outline ||
-            error("`include` keyword only accepts `:static` or `:outline` as value")
-        include
-    end
-end
-
-# this is just a work-around for v"1.5", where @__MODULE__ can't be used in
-# expressions; root_module[] is set equal to @__MODULE__ within modules
-const root_module = Ref{Symbol}()
-
-__init__() = root_module[] = gensym("MODULE")
-
 function populate_mod!(mod::Module, path; lazy, Revise, include::Maybe{Symbol}=nothing,
                        include_functions)
     lazy ∈ (true, false, :brutal) ||
@@ -248,7 +232,6 @@ function populate_mod!(mod::Module, path; lazy, Revise, include::Maybe{Symbol}=n
 
     @eval mod begin
         using ReTest # for files which don't have `using Test`
-        const $(root_module[]) = $mod
         include($substitute!, $path)
         if !@isdefined __revise_mode__
             __revise_mode__ = :eval
@@ -271,7 +254,7 @@ end
 
 function hijack(packagemod::Module, modname=nothing; parentmodule::Module=Main,
                 lazy=false, revise::Maybe{Bool}=nothing,
-                include::Maybe{Symbol}=nothing, testset::Bool=false,
+                include::Maybe{Symbol}=nothing,
                 include_functions=[:include])
     packagepath = pathof(packagemod)
     packagepath === nothing && packagemod !== Base &&
@@ -290,7 +273,7 @@ function hijack(packagemod::Module, modname=nothing; parentmodule::Module=Main,
     else
         path = joinpath(dirname(dirname(packagepath)), "test", "runtests.jl")
         hijack(path, modname, parentmodule=parentmodule,
-               lazy=lazy, testset=testset, include=include, revise=revise,
+               lazy=lazy, include=include, revise=revise,
                include_functions=include_functions)
     end
 end
@@ -320,9 +303,8 @@ function substitute_retest!(ex, lazy, include_::Maybe{Symbol}, files=nothing;
                           haskey($files, newfile) &&
                               error("file belong to multiple modules, currently not supported")
                           include($substitute!, $newfile)
-                          $files[newfile] = $(root_module[])
+                          $files[newfile] = @__MODULE__
                       end)
-                push!(ex2.args[2].args, :(@assert $(root_module[]) == @__MODULE__))
                 # TODO: add `copy!(::Expr, ::Expr)` to Base
                 ex.head = ex2.head
                 copy!(ex.args, ex2.args)
@@ -331,12 +313,9 @@ function substitute_retest!(ex, lazy, include_::Maybe{Symbol}, files=nothing;
             end
         end
     elseif Meta.isexpr(ex, :module)
-        body = ex.args[3]
+        body = ex.args[end]
         @assert Meta.isexpr(body, :block)
         substitute!.(body.args)
-        insert!(body.args, 2, :(const $(root_module[]) = $(ex.args[2])))
-        # ^^^ we insert between two LineNumberNode, not sure if this is the way: 1st one
-        # seems to relate to the `module` line, while the 2nd relates to next expression
         push!(body.args, :(if !@isdefined __revise_mode__
                                __revise_mode__ = :eval
                            end))

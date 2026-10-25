@@ -25,11 +25,7 @@ using Test: Test,
     @test_logs, @test_deprecated,
     @inferred,
     detect_ambiguities, detect_unbound_args,
-    GenericString, GenericSet, GenericDict, GenericArray
-
-if isdefined(Test, :GenericOrder)
-    using Test: GenericOrder
-end
+    GenericString, GenericSet, GenericDict, GenericArray, GenericOrder
 
 using InlineTest: @testset, InlineTest, TESTED_MODULES, TESTSET_MACROS, INLINE_TEST
 import InlineTest: retest, @testset_macro
@@ -216,7 +212,7 @@ function parse_ts(source::LineNumberNode, mod::Module, args::Tuple, parent=nothi
     options = Options(include_functions=include_functions)
     marks = Marks()
     if parent !== nothing
-        append!(marks.hard, parent.marks.hard) # copy! not available in Julia 1.0
+        append!(marks.hard, parent.marks.hard)
         options.static_include = parent.options.static_include
         # if static_include was set in parent, it should have been forwarded also
         # through the parse_ts/replace_ts call chains:
@@ -423,23 +419,7 @@ function resolve!(mod::Module, ts::TestsetExpr, pat::Pattern;
         xs = ()
 
         try
-            # we need to evaluate roughly the following:
-            # xsgen = Expr(:comprehension, Expr(:generator, loopiters, loops...))
-            # but a comprehension expression returns an array, i.e. loop variables
-            # can't depend on previous ones; the correct way is therefore to
-            # construct nested generators flattened with a :flatten Expr, or to
-            # simply construct directly a for-loop as below
-            xssym = gensym() # to not risk to shadow a global variable on which
-                             # the iteration expression depends
-            xsgen = quote
-                let $xssym = []
-                    $(Expr(:for, Expr(:block, loops...),
-                           Expr(:call, Expr(:., :Base, QuoteNode(:push!)),
-                                xssym, loopiters)))
-                    $xssym
-                end
-            end
-            xs = Core.eval(mod, xsgen)
+            xs = Core.eval(mod, loopvalues_expr(ts))
             @assert xs isa Vector
             ts.loopvalues = xs
         catch
@@ -489,6 +469,27 @@ function resolve!(mod::Module, ts::TestsetExpr, pat::Pattern;
     end
     ts.run = run
     run, id
+end
+
+# expression which evaluates to the vector of `ts.loopiters` values of a testset-for;
+# roughly `[loopiters for loops...]`, but as a for-loop so that loop variables can
+# depend on previous ones
+function loopvalues_expr(ts::TestsetExpr)
+    xssym = gensym() # to not risk to shadow a global variable on which
+                     # the iteration expression depends
+    quote
+        let $xssym = []
+            $(Expr(:for, Expr(:block, ts.loops...),
+                   Expr(:call, Expr(:., :Base, QuoteNode(:push!)), xssym, ts.loopiters)))
+            $xssym
+        end
+    end
+end
+
+# replace the non-literal parts of an interpolated description by "?"
+function approx_desc(desc::Expr)
+    @assert desc.head == :string
+    Expr(:string, (part isa Union{String,Symbol} ? part : "?" for part in desc.args)...)
 end
 
 eval_desc(mod, ts, x; stack=false) = # stack => x == iterstack in dryrun
@@ -804,8 +805,7 @@ its nested testsets might be filtered out if they don't also match
 If a passed `pattern` is a string, then it is wrapped in a `Regex` with the
 "case-insensitive" flag, and must match literally the subjects.
 This means for example that `"a|b"` will match a subject like `"a|b"` or `"A|B"`,
-but not like `"a"` (only in Julia versions >= 1.3; in older versions,
-the regex is simply created as `Regex(pattern, "i")`).
+but not like `"a"`.
 
 As a special case, if a string pattern starts with the `'-'` character,
 it's interpreted as the negation of the pattern corresponding to the
@@ -1145,7 +1145,7 @@ function retest(@nospecialize(args::ArgType...);
                             # without having the wrong numbers?
                             # print_overall()
                             println()
-                            Testset.print_test_errors(rts)
+                            Test.print_test_errors(rts)
                             errored = true
                             allpass = false
                             if failfast
@@ -1215,14 +1215,7 @@ function retest(@nospecialize(args::ArgType...);
                         end
 
                         if previewchan !== nothing
-                            desc = ts.desc
-                            desc = desc isa String ?
-                                desc :
-                                join(replace(desc.args) do part
-                                         part isa String ?
-                                             part :
-                                             "?"
-                                     end)
+                            desc = ts.desc isa String ? ts.desc : string(approx_desc(ts.desc))
                             desc = "\0" * desc
                             # even when nworkers() >= 2, we inform the previewer that
                             # computation is gonna happen, so the wheel can start spinning
@@ -1421,7 +1414,7 @@ function process_args(@nospecialize(args);
 
     implicitmodules = isempty(modpats)
     if implicitmodules || recursive
-        update_TESTED_MODULES!(true)
+        update_TESTED_MODULES!()
     end
     if implicitmodules
         for mod in @view(TESTED_MODULES[1:end])
@@ -1429,7 +1422,7 @@ function process_args(@nospecialize(args);
             # @view), because we don't need to call load_testmod on newly loaded test modules
             load_testmod(mod) # might update TESTED_MODULES with submodules
         end
-        update_TESTED_MODULES!(false)
+        update_TESTED_MODULES!()
         # TODO: update_TESTED_MODULES!() might need to be called, if a module is
         # replaced by itself within a newly loaded test module? We should add a test
         @assert isempty(modules)
@@ -1515,52 +1508,13 @@ function process_args(@nospecialize(args);
      verbose=verbose)
 end
 
-function update_TESTED_MODULES!(double_check::Bool=false)
+function update_TESTED_MODULES!()
     # TESTED_MODULES might have "duplicate" entries, i.e. modules which were
     # "replaced", when one overwrites itself by being redefined; in this case,
     # let's just delete older entries. We must also take into account the possibility
     # that a module was overwritten, but the new version doesn't have a @testset,
     # in which case there won't be a duplicate, but we must still delete the entry.
-    seen = Set{String}()
-    for idx in eachindex(TESTED_MODULES)
-        if is_replaced(TESTED_MODULES[idx])
-            TESTED_MODULES[idx] = nothing
-        else
-            push!(seen, string(TESTED_MODULES[idx]))
-        end
-    end
-    filter!(x -> x !== nothing, TESTED_MODULES)
-
-    if double_check
-        # What is below is obsolete as we now reliably register modules in TESTED_MODULES.
-        # We still keep it for a while just to check this assumption.
-        # TODO: delete
-        #
-        # TESTED_MODULES is not up-to-date w.r.t. package modules which have
-        # precompilation, so we have to also look in Base.loaded_modules
-        for mod in values(Base.loaded_modules)
-            # exclude modules from Main, which presumably already had a chance to get
-            # registered in TESTED_MODULES at runtime
-            mod ∈ (Main, Base) && continue # TODO: should exclude stdlibs too
-            str = string(mod)
-            if str ∉ seen
-                push!(seen, str) # probably unnecessary, if str are all unique in this loop
-                for sub in recsubmodules(mod)
-                    # new version: just check the assumption
-                    nameof(sub) == INLINE_TEST && continue
-                    if invokelatest(isdefined, sub, INLINE_TEST)
-                        @assert sub in TESTED_MODULES
-                    end
-                    # old effective version:
-                    # if isdefined(sub, INLINE_TEST) && sub ∉ TESTED_MODULES
-                    #     # sub might be a submodule of a Main-like module mod (e.g. via a
-                    #     # REPL "contextual module"), in which case it already got registered
-                    #     push!(TESTED_MODULES, sub)
-                    # end
-                end
-            end
-        end
-    end
+    filter!(m -> !is_replaced(m), TESTED_MODULES)
 
     @assert all(m -> m isa Module, TESTED_MODULES)
     @assert allunique(TESTED_MODULES)
@@ -1729,18 +1683,7 @@ function dryrun(mod::Module, ts::TestsetExpr, pat::Pattern, align::Int=0,
         function dryrun_beginend(descx; iter, repeated=nothing)
             # avoid repeating ourselves, transform this iteration into a "begin/end" testset
             if descx isa Expr
-                @assert descx.head == :string
-                descx = Expr(:string, copy(descx.args)...)
-                replace!(descx.args) do arg
-                    if arg isa String || arg isa Symbol
-                        # TODO: unify with same function in previewer, which sets "?"
-                        # even for symbols
-                        arg
-                    else
-                        @assert arg isa Expr # just to have a chance to discover other possibilities
-                        "?"
-                    end
-                end
+                descx = approx_desc(descx)
             end
             beginend = TestsetExpr(ts.source, ts.mod, descx, ts.options, ts.marks, nothing,
                                    ts.parent, ts.children)
@@ -1757,17 +1700,7 @@ function dryrun(mod::Module, ts::TestsetExpr, pat::Pattern, align::Int=0,
         if loopvalues === nothing
             # we check whether we can now evaluate loopvalues via iterstack
             try
-                # cf. resolve!
-                xssym = gensym()
-                xsgen = quote
-                    let $xssym = []
-                        $(Expr(:for, Expr(:block, ts.loops...),
-                               Expr(:call, Expr(:., :Base, QuoteNode(:push!)),
-                                    xssym, ts.loopiters)))
-                        $xssym
-                    end
-                end
-                loopvalues = Core.eval(mod, Expr(:let, iterstack, xsgen))
+                loopvalues = Core.eval(mod, Expr(:let, iterstack, loopvalues_expr(ts)))
                 @assert loopvalues isa Vector
             catch
                 @assert loopvalues == nothing

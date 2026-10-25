@@ -1,4 +1,5 @@
 using Pkg
+using Aqua: Aqua
 import Test
 
 Pkg.activate("ReTest")
@@ -1465,8 +1466,7 @@ end # NoTests
             continue
     end
     modstr = length(mod) == 1 ? string(mod[1]) : string(mod)
-    # have to show 'X' below, because `nothing` can't be printed on old Julia
-    println("\n####################### Display: mod=$modstr stats=$stats dry=$dry verbose=$verbose pattern=$pattern, id=$(something(id, 'X'))\n")
+    println("\n####################### Display: mod=$modstr stats=$stats dry=$dry verbose=$verbose pattern=$pattern, id=$id\n")
     retest(mod..., pattern; shuffle=true, verbose=verbose, stats=stats, dry=dry, id=id)
 end
 
@@ -1715,8 +1715,7 @@ end
             HijackLoadTrueTests2
         ] == Hijack_testmodules # to be sure no module was overwritten
 
-    ReTest.hijack(Hijack, testset=false) # testset: just check that this method
-                                         # also accepts this kw (TODO: test it!)
+    ReTest.hijack(Hijack)
     invokelatest() do
         retest(HijackTests)
     end
@@ -1909,7 +1908,6 @@ end
 
     # test include=:static
     empty!(Hijack.RUN)
-    @test_throws ErrorException ReTest.hijack("./Hijack/test/include_static.jl", :HijackInclude, include=:static, testset=true)
     @test_throws ErrorException ReTest.hijack("./Hijack/test/include_static.jl", :HijackInclude, include=:notvalid)
     ReTest.hijack("./Hijack/test/include_static.jl", :HijackInclude, include=:static,
                   include_functions=[:include, :custom_include_function])
@@ -1941,16 +1939,16 @@ Test.@testset "record(::ReTestSet, ::LogTestFailure)" begin
     ts = ReTestSet(Main, "lt")
     @test record(ts, logfail) === logfail
     @test anyfailed(ts)
-    _, fails, errors, _ = get_test_counts(ts)
-    @test fails == 1
-    @test errors == 0
+    tc = get_test_counts(ts)
+    @test tc.fails == 1
+    @test tc.errors == 0
 
     # A testset with no failing result reports none.
     ts2 = ReTestSet(Main, "lt_empty")
     @test !anyfailed(ts2)
-    _, fails2, errors2, _ = get_test_counts(ts2)
-    @test fails2 == 0
-    @test errors2 == 0
+    tc2 = get_test_counts(ts2)
+    @test tc2.fails == 0
+    @test tc2.errors == 0
 end
 
 Test.@testset "REPL mode parsing" begin
@@ -2194,4 +2192,8 @@ Test.@testset "preferences" begin
     end
 
     @test (isfile(active) ? read(active, String) : nothing) == active_before
+end
+
+Test.@testset "Aqua" begin
+    Aqua.test_all(ReTest; stale_deps=(; ignore=[:TestEnv, :ReplMaker]), piracies=(; treat_as_own=[ReTest.retest]))
 end

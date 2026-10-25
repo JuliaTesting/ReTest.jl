@@ -1,9 +1,6 @@
 module InlineTest
 
-@static if isdefined(Base, :Experimental) &&
-             isdefined(Base.Experimental, Symbol("@optlevel"))
-    Base.Experimental.@optlevel 0
-end
+Base.Experimental.@optlevel 0
 
 export @testset, @testset_macro
 
