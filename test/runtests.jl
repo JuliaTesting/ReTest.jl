@@ -1280,6 +1280,26 @@ end # Failing
 """)
 end
 
+module FailingKeepsGoing
+using ReTest
+
+@testset "has fails" begin
+    @test false
+end
+@testset "runs after the failure" begin
+    @test true
+end
+
+end # FailingKeepsGoing
+
+@chapter FailingKeepsGoing begin
+    @test_throws Test.TestSetException retest(FailingKeepsGoing, failfast=false)
+    check(FailingKeepsGoing, dry=true, marks=true, [], output="""
+1| has fails ✘
+2| runs after the failure ✔
+""")
+end
+
 module FailingTestLogs
 using ReTest
 using Test: @test_logs
